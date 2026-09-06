@@ -583,8 +583,6 @@
   function extractErrorMessage(e){
     if(e && e.message==='timeout') return 'This is taking unusually long — the backend may be stuck, or Claude is taking longer than usual. Try again in a moment.';
     if(e && e.message==='not_configured') return backendErrorMsg(e);
-    if(e && /anthropic api error/i.test(e.message||'')) return e.message;
-    if(e && /clean json/i.test(e.message||'')) return 'Got a reply that wasn’t clean JSON — try again, or start a blank quote and enter items by hand.';
     return (e && e.message) ? e.message : 'Something went wrong reading the drawing. Try again in a moment.';
   }
 
