@@ -1,0 +1,787 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Batten — Costing</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Poppins:wght@300;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    color-scheme: light dark;
+    --paper:#f5f5f2; --paper-raised:#ffffff; --ink:#1a1b1d; --ink-soft:#5b5d61;
+    --line:#d2cfc6; --line-strong:#1a1b1d;
+    --accent:#2f5d6b; --accent-soft:#dbe8ea;
+    --wood:#a8703e; --wood-soft:#f0e2d1;
+    --warn:#b23b3b; --warn-soft:#f6dede;
+    --good:#3f7d53; --good-soft:#dfeee3;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --paper:#15171a; --paper-raised:#1c1f23; --ink:#ececea; --ink-soft:#a2a5aa;
+      --line:#34373c; --line-strong:#ececea;
+      --accent:#7fb2bd; --accent-soft:#20343a;
+      --wood:#d79a5c; --wood-soft:#382a1c;
+      --warn:#e07a7a; --warn-soft:#3a2323;
+      --good:#7fce97; --good-soft:#1f3527;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#15171a; --paper-raised:#1c1f23; --ink:#ececea; --ink-soft:#a2a5aa;
+    --line:#34373c; --line-strong:#ececea;
+    --accent:#7fb2bd; --accent-soft:#20343a;
+    --wood:#d79a5c; --wood-soft:#382a1c;
+    --warn:#e07a7a; --warn-soft:#3a2323;
+    --good:#7fce97; --good-soft:#1f3527;
+  }
+
+  *{box-sizing:border-box;}
+  html,body{ height:100%; }
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:"IBM Plex Sans", -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size:14px; line-height:1.5; min-height:100vh; display:flex;
+  }
+  .num{ font-family:"IBM Plex Mono", ui-monospace, SFMono-Regular, monospace; font-variant-numeric:tabular-nums; }
+  h1,h2,h3,.label,.navbtn,.tab-title{ font-family:"Barlow Condensed", "Arial Narrow", sans-serif; }
+  .label{ text-transform:uppercase; letter-spacing:.08em; font-size:11px; color:var(--ink-soft); font-weight:600; }
+
+  .sidebar{
+    width:216px; flex:none; border-right:1px solid var(--line);
+    display:flex; flex-direction:column; padding:20px 16px; gap:22px;
+    position:sticky; top:0; height:100vh;
+  }
+  .wordmark{
+    border:1px solid var(--line-strong); padding:16px 14px 16px 18px;
+    font-family:"Poppins", "IBM Plex Sans", sans-serif; font-weight:300; font-size:19px;
+    letter-spacing:.32em; text-transform:uppercase; margin-right:-.32em;
+  }
+  .wordmark small{ display:block; font-family:"IBM Plex Sans",sans-serif; letter-spacing:0; text-transform:none;
+    font-size:10px; color:var(--ink-soft); font-weight:400; margin-top:10px; margin-right:.32em; }
+  nav{ display:flex; flex-direction:column; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .navbtn{
+    text-align:left; background:none; border:none; border-bottom:1px solid var(--line);
+    padding:11px 8px; font-size:14px; letter-spacing:.06em; text-transform:uppercase;
+    color:var(--ink-soft); cursor:pointer; font-weight:600; position:relative;
+  }
+  .navbtn:last-child{ border-bottom:none; }
+  .navbtn:hover{ color:var(--ink); }
+  .navbtn.active{ color:var(--ink); background:var(--accent-soft); }
+  .navbtn.active::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); }
+  .navbtn:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible{
+    outline:2px solid var(--accent); outline-offset:1px;
+  }
+  .sidebar footer{ margin-top:auto; font-size:11px; color:var(--ink-soft); }
+
+  main{ flex:1; padding:28px 36px 60px; max-width:980px; }
+  .view[hidden]{ display:none; }
+  .sheet-head{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:18px; border-bottom:1px solid var(--line-strong); padding-bottom:10px; }
+  .sheet-head h1{ font-size:26px; font-weight:600; letter-spacing:.02em; margin:0; text-transform:uppercase; }
+  .sheet-head .sub{ color:var(--ink-soft); font-size:13px; }
+
+  .panel{ border:1px solid var(--line); background:var(--paper-raised); padding:20px; margin-bottom:20px; }
+  .panel > h2{ font-size:16px; text-transform:uppercase; letter-spacing:.06em; margin:0 0 14px; font-weight:600; }
+
+  .dropzone{
+    border:2px dashed var(--line); padding:34px 20px; text-align:center; color:var(--ink-soft);
+    cursor:pointer; transition:border-color .15s ease;
+  }
+  .dropzone.drag{ border-color:var(--accent); color:var(--accent); }
+  .dropzone strong{ color:var(--ink); display:block; margin-bottom:4px; font-size:15px; }
+  .thumbs{ display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
+  .thumbs canvas{ border:1px solid var(--line); max-height:120px; width:auto; }
+
+  button{ font-family:inherit; cursor:pointer; }
+  .btn{
+    border:1px solid var(--line-strong); background:var(--paper-raised); color:var(--ink);
+    padding:9px 16px; font-size:13px; font-weight:600; letter-spacing:.03em; text-transform:uppercase;
+  }
+  .btn:hover{ background:var(--accent-soft); }
+  .btn:disabled{ opacity:.45; cursor:default; }
+  .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .btn.primary:hover{ opacity:.9; background:var(--accent); }
+  .btn.ghost{ border-color:transparent; background:none; padding:6px 8px; font-size:12px; }
+  .btn.small{ padding:5px 9px; font-size:11px; }
+  .btn.danger{ color:var(--warn); border-color:var(--warn); background:none; }
+
+  table{ width:100%; border-collapse:collapse; }
+  .table-wrap{ overflow-x:auto; }
+  th{ text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--ink-soft);
+      font-weight:600; padding:6px 8px; border-bottom:1px solid var(--line-strong); white-space:nowrap; }
+  td{ padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+  td.num, th.num{ text-align:right; }
+  tr.section-row td{ background:var(--paper); font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:.06em; color:var(--ink-soft); border-bottom:1px solid var(--line-strong); }
+  input[type="text"], input[type="number"], select{
+    font-family:inherit; font-size:13px; border:1px solid var(--line); background:var(--paper);
+    color:var(--ink); padding:5px 7px; width:100%;
+  }
+  input.num, td input[type="number"]{ font-family:"IBM Plex Mono",monospace; text-align:right; }
+  .cell-desc{ min-width:190px; }
+  .cell-qty, .cell-unit, .cell-rate{ width:84px; }
+
+  .chip{ display:inline-flex; align-items:center; gap:6px; font-size:11px; padding:3px 8px; border-radius:2px; font-weight:600; letter-spacing:.02em; white-space:nowrap;}
+  .chip.good{ background:var(--good-soft); color:var(--good); }
+  .chip.warn{ background:var(--warn-soft); color:var(--warn); }
+  .chip.example{ background:var(--wood-soft); color:var(--wood); }
+  .chip button{ background:none; border:none; padding:0; color:inherit; font-weight:700; text-decoration:underline; font-size:11px; }
+
+  .flag{ border-left:3px solid var(--warn); background:var(--warn-soft); padding:9px 12px; font-size:13px; margin-bottom:8px; }
+  .flag:last-child{ margin-bottom:0; }
+
+  .stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:1px; background:var(--line); border:1px solid var(--line); margin-top:16px; }
+  .stat{ background:var(--paper-raised); padding:12px 14px; }
+  .stat .label{ margin-bottom:6px; display:block; }
+  .stat .value{ font-size:19px; font-weight:600; }
+  .stat.total{ background:var(--accent-soft); }
+  .stat.total .value{ color:var(--accent); font-size:22px; }
+
+  .field-row{ display:flex; gap:18px; flex-wrap:wrap; margin-top:14px; }
+  .field{ display:flex; flex-direction:column; gap:5px; min-width:150px; }
+
+  .job-card{ border:1px solid var(--line); background:var(--paper-raised); padding:14px 16px; margin-bottom:10px; cursor:pointer; }
+  .job-card .row1{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
+  .job-card .row1 strong{ font-size:15px; }
+  .job-card .meta{ color:var(--ink-soft); font-size:12px; margin-top:2px; }
+  .job-detail{ margin-top:12px; border-top:1px solid var(--line); padding-top:12px; }
+
+  .empty{ color:var(--ink-soft); font-style:italic; padding:10px 2px; }
+  .status-msg{ padding:12px 14px; border:1px solid var(--line); background:var(--paper); font-size:13px; margin-bottom:14px; }
+  .status-msg.thinking{ border-color:var(--accent); color:var(--accent); }
+  .status-msg.error{ border-color:var(--warn); color:var(--warn); background:var(--warn-soft); }
+
+  .add-rate-form{ display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
+  .add-rate-form .field{ min-width:120px; }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
+  <nav id="nav">
+    <button class="navbtn" data-view="new">New Quote</button>
+    <button class="navbtn" data-view="quotes">Quotes</button>
+    <button class="navbtn" data-view="rates">Rate Card</button>
+    <button class="navbtn" data-view="settings">Settings</button>
+  </nav>
+  <footer>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.</footer>
+</div>
+
+<main>
+
+  <section class="view" id="view-new">
+    <div class="sheet-head">
+      <h1>New Quote</h1>
+      <div class="sub">Drawing in, costed quote out</div>
+    </div>
+
+    <div class="panel" id="upload-panel">
+      <h2>1 · Drawing</h2>
+      <div id="upload-area"></div>
+      <div id="thumbs" class="thumbs"></div>
+      <div class="field-row" id="extract-row" hidden>
+        <button class="btn primary" id="btn-extract">Extract bill of materials</button>
+        <button class="btn ghost" id="btn-manual">or start a blank quote instead</button>
+      </div>
+      <div id="extract-status"></div>
+    </div>
+
+    <div id="review-panel" hidden></div>
+  </section>
+
+  <section class="view" id="view-quotes" hidden>
+    <div class="sheet-head">
+      <h1>Quotes</h1>
+      <div class="sub" id="quotes-count"></div>
+    </div>
+    <div id="quotes-list"></div>
+  </section>
+
+  <section class="view" id="view-rates" hidden>
+    <div class="sheet-head">
+      <h1>Rate Card</h1>
+      <div class="sub">Add prices as new materials and hardware come up</div>
+    </div>
+    <div class="panel">
+      <div id="rates-tables"></div>
+      <div class="add-rate-form">
+        <div class="field"><span class="label">Description</span><input type="text" id="rf-name" placeholder="e.g. 16mm Melamine"></div>
+        <div class="field" style="min-width:110px;"><span class="label">Category</span>
+          <select id="rf-category"><option value="material">Material</option><option value="hardware">Hardware</option><option value="labour">Labour</option></select>
+        </div>
+        <div class="field" style="min-width:90px;"><span class="label">Unit</span><input type="text" id="rf-unit" placeholder="m², each, hour" list="unit-list"></div>
+        <datalist id="unit-list"><option value="m²"><option value="m"><option value="each"><option value="sheet"><option value="hour"><option value="kg"></datalist>
+        <div class="field" style="min-width:100px;"><span class="label">Price (R)</span><input type="number" id="rf-price" step="0.01" min="0"></div>
+        <div class="field" style="min-width:90px;"><span class="label">SKU (optional)</span><input type="text" id="rf-sku"></div>
+        <button class="btn primary" id="btn-add-rate">Add to rate card</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="view-settings" hidden>
+    <div class="sheet-head">
+      <h1>Settings</h1>
+      <div class="sub">Defaults applied to every new quote</div>
+    </div>
+    <div class="panel" style="max-width:440px;">
+      <div class="field-row">
+        <div class="field"><span class="label">Default markup %</span><input type="number" id="set-markup" step="1" min="0"></div>
+        <div class="field"><span class="label">Default labour rate (R / hour)</span><input type="number" id="set-labour" step="1" min="0"></div>
+      </div>
+      <div class="field-row"><button class="btn primary" id="btn-save-settings">Save defaults</button></div>
+      <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
+    </div>
+  </section>
+
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  // ============================================================
+  // Point this at your deployed Apps Script Web App URL.
+  // See SETUP.md — Deploy the Web App — for how to get this.
+  // ============================================================
+  var API_URL = "PASTE_YOUR_APPS_SCRIPT_WEB_APP_URL_HERE";
+
+  var rates = [];
+  var jobsCache = [];
+  var pdfImages = [];
+  var job = null;
+  var view = 'new';
+  var settings = { markupPct: 35, labourRate: 220 };
+  var currentFileName = null;
+
+  function uid(){ return 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+  function money(n){ return 'R ' + (Number(n)||0).toLocaleString('en-ZA', {minimumFractionDigits:2, maximumFractionDigits:2}); }
+  function normalize(s){ return (s||'').toString().toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+  function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+  function el(html){ var t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
+
+  function apiConfigured(){ return API_URL && API_URL.indexOf('PASTE_') !== 0; }
+
+  function apiGet(action){
+    if(!apiConfigured()) return Promise.reject(new Error('not_configured'));
+    return fetch(API_URL + '?action=' + encodeURIComponent(action)).then(function(r){ return r.json(); });
+  }
+  function apiPost(action, payload){
+    if(!apiConfigured()) return Promise.reject(new Error('not_configured'));
+    var body = Object.assign({ action: action }, payload || {});
+    // Sent without a JSON content-type header on purpose, so the browser treats this as a
+    // "simple request" and skips the CORS preflight Apps Script doesn't answer.
+    return fetch(API_URL, { method:'POST', body: JSON.stringify(body) }).then(function(r){ return r.json(); });
+  }
+  function backendErrorMsg(e){
+    if(e && e.message==='not_configured') return 'This copy isn\'t connected to a backend yet. Set API_URL near the top of index.html to your Apps Script Web App URL — see SETUP.md.';
+    return 'Couldn\'t reach the backend. Check your internet connection and that API_URL points at a deployed, published Web App.';
+  }
+
+  document.getElementById('nav').addEventListener('click', function(e){
+    var b = e.target.closest('.navbtn'); if(!b) return;
+    showView(b.dataset.view);
+  });
+  function showView(v){
+    view = v;
+    ['new','quotes','rates','settings'].forEach(function(name){
+      document.getElementById('view-'+name).hidden = (name!==v);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
+      b.classList.toggle('active', b.dataset.view===v);
+    });
+    if(v==='quotes') loadQuotes();
+    if(v==='rates') renderRatesTables();
+    if(v==='settings') fillSettingsForm();
+  }
+
+  // ================= RATE CARD =================
+  function matchRate(type, description, sku){
+    var pool = rates.filter(function(r){ return r.category===type; });
+    if(sku){
+      var bySku = pool.find(function(r){ return r.sku && String(r.sku).trim().toLowerCase()===String(sku).trim().toLowerCase(); });
+      if(bySku) return bySku;
+    }
+    var n = normalize(description);
+    if(!n) return null;
+    var best=null, bestScore=0;
+    pool.forEach(function(r){
+      var rn = normalize(r.name);
+      if(!rn) return;
+      var score=0;
+      if(n===rn) score=100;
+      else if(n.indexOf(rn)!==-1 || rn.indexOf(n)!==-1) score=60;
+      else{
+        var aw=n.split(' '), bw=rn.split(' ');
+        var overlap = bw.filter(function(w){ return w.length>2 && aw.indexOf(w)!==-1; }).length;
+        score = overlap*15;
+      }
+      if(score>bestScore){ bestScore=score; best=r; }
+    });
+    return bestScore>=20 ? best : null;
+  }
+
+  function loadRates(){
+    return apiGet('getRates').then(function(res){
+      rates = res.rates || [];
+      if(view==='rates') renderRatesTables();
+    }).catch(function(e){
+      if(view==='rates') document.getElementById('rates-tables').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
+
+  function renderRatesTables(){
+    var wrap = document.getElementById('rates-tables');
+    var cats = [['material','Materials'],['hardware','Hardware'],['labour','Labour']];
+    var html = '';
+    cats.forEach(function(c){
+      var rows = rates.filter(function(r){ return r.category===c[0]; }).sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+      html += '<div class="table-wrap"><table><thead><tr class="section-row"><td colspan="6">'+c[1]+'</td></tr>' +
+        '<tr><th>Description</th><th>Unit</th><th class="num">Price</th><th>SKU</th><th></th><th></th></tr></thead><tbody>';
+      if(!rows.length){
+        html += '<tr><td colspan="6" class="empty">No '+c[1].toLowerCase()+' on the rate card yet.</td></tr>';
+      }
+      rows.forEach(function(r){
+        html += '<tr data-id="'+r.id+'">' +
+          '<td>'+esc(r.name)+(r.example?' <span class="chip example">example</span>':'')+'</td>' +
+          '<td>'+esc(r.unit||'')+'</td>' +
+          '<td class="num"><input type="number" class="num rate-price" step="0.01" min="0" value="'+(r.price!=null?r.price:0)+'"></td>' +
+          '<td>'+esc(r.sku||'')+'</td>' +
+          '<td><button class="btn small rate-save">Save</button></td>' +
+          '<td><button class="btn small danger rate-del">Delete</button></td>' +
+          '</tr>';
+      });
+      html += '</tbody></table></div>';
+    });
+    wrap.innerHTML = html;
+
+    wrap.querySelectorAll('.rate-save').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var tr = btn.closest('tr'); var id = tr.dataset.id;
+        var price = Number(tr.querySelector('.rate-price').value)||0;
+        apiPost('updateRate', { id:id, price:price }).then(loadRates).catch(function(e){ alert(backendErrorMsg(e)); });
+      });
+    });
+    wrap.querySelectorAll('.rate-del').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var tr = btn.closest('tr'); var id = tr.dataset.id;
+        if(!confirm('Remove this rate card item?')) return;
+        apiPost('deleteRate', { id:id }).then(loadRates).catch(function(e){ alert(backendErrorMsg(e)); });
+      });
+    });
+  }
+
+  document.getElementById('btn-add-rate').addEventListener('click', function(){
+    var name = document.getElementById('rf-name').value.trim();
+    var category = document.getElementById('rf-category').value;
+    var unit = document.getElementById('rf-unit').value.trim();
+    var price = Number(document.getElementById('rf-price').value)||0;
+    var sku = document.getElementById('rf-sku').value.trim();
+    if(!name){ document.getElementById('rf-name').focus(); return; }
+    apiPost('addRate', { name:name, category:category, unit:unit, price:price, sku:sku||null }).then(function(){
+      document.getElementById('rf-name').value='';
+      document.getElementById('rf-unit').value='';
+      document.getElementById('rf-price').value='';
+      document.getElementById('rf-sku').value='';
+      return loadRates();
+    }).catch(function(e){ alert(backendErrorMsg(e)); });
+  });
+
+  function quickAddRate(item){
+    return apiPost('addRate', {
+      name: item.description, category: item.type, unit: item.unit,
+      price: Number(item.unitPrice)||0, sku: item.sku||null
+    }).then(function(res){ item.rateId = res.id; return loadRates(); });
+  }
+
+  // ================= SETTINGS =================
+  function fillSettingsForm(){
+    document.getElementById('set-markup').value = settings.markupPct;
+    document.getElementById('set-labour').value = settings.labourRate;
+  }
+  document.getElementById('btn-save-settings').addEventListener('click', function(){
+    settings.markupPct = Number(document.getElementById('set-markup').value)||0;
+    settings.labourRate = Number(document.getElementById('set-labour').value)||0;
+    apiPost('saveSettings', settings).then(function(){
+      var msg = document.getElementById('settings-saved');
+      msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
+    }).catch(function(e){ alert(backendErrorMsg(e)); });
+  });
+
+  // ================= UPLOAD + EXTRACT =================
+  function renderUploadArea(){
+    var area = document.getElementById('upload-area');
+    area.innerHTML = '<div class="dropzone" id="dropzone"><strong>Drop a drawing PDF here, or click to choose one</strong>Accepts CAD-exported PDFs with a materials / hardware schedule on the sheet<input type="file" id="file-input" accept="application/pdf" hidden></div>';
+    var dz = document.getElementById('dropzone');
+    var fi = document.getElementById('file-input');
+    dz.addEventListener('click', function(){ fi.click(); });
+    dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
+    dz.addEventListener('drop', function(e){
+      e.preventDefault(); dz.classList.remove('drag');
+      if(e.dataTransfer.files && e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+    fi.addEventListener('change', function(){ if(fi.files[0]) handleFile(fi.files[0]); });
+  }
+
+  function handleFile(file){
+    currentFileName = file.name;
+    pdfImages = [];
+    document.getElementById('thumbs').innerHTML = '<div class="status-msg thinking">Reading pages of ' + esc(file.name) + '…</div>';
+    document.getElementById('extract-row').hidden = true;
+    var reader = new FileReader();
+    reader.onload = function(){
+      var typedArray = new Uint8Array(reader.result);
+      pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      pdfjsLib.getDocument({ data: typedArray }).promise.then(function(pdf){
+        var maxPages = Math.min(pdf.numPages, 4);
+        var pagePromises = [];
+        for(var i=1;i<=maxPages;i++) pagePromises.push(renderPage(pdf, i));
+        return Promise.all(pagePromises);
+      }).then(function(results){
+        pdfImages = results;
+        var thumbs = document.getElementById('thumbs');
+        thumbs.innerHTML = '';
+        results.forEach(function(r){ thumbs.appendChild(r.canvas); });
+        document.getElementById('extract-row').hidden = false;
+      }).catch(function(e){
+        console.error(e);
+        document.getElementById('thumbs').innerHTML = '<div class="status-msg error">Couldn\'t read that PDF (' + esc(e.message||'unknown error') + '). Try a different file or start a blank quote.</div>';
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  }
+
+  function renderPage(pdf, num){
+    return pdf.getPage(num).then(function(page){
+      var vp0 = page.getViewport({ scale:1 });
+      var scale = Math.min(2, 1600/vp0.width);
+      var viewport = page.getViewport({ scale: scale });
+      var canvas = document.createElement('canvas');
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      var ctx = canvas.getContext('2d');
+      return page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function(){
+        return new Promise(function(resolve){
+          canvas.toBlob(function(blob){ resolve({ canvas: canvas, blob: blob }); }, 'image/png');
+        });
+      });
+    });
+  }
+
+  function blobToBase64(blob){
+    return new Promise(function(resolve, reject){
+      var reader = new FileReader();
+      reader.onload = function(){ resolve(String(reader.result).split(',')[1]); };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  document.getElementById('btn-extract').addEventListener('click', function(){
+    if(!pdfImages.length) return;
+    var statusEl = document.getElementById('extract-status');
+    var btn = document.getElementById('btn-extract');
+    btn.disabled = true;
+    statusEl.innerHTML = '<div class="status-msg thinking">Reading the drawing… (usually 10–30 seconds)</div>';
+    Promise.all(pdfImages.map(function(p){ return blobToBase64(p.blob); })).then(function(b64s){
+      return apiPost('extractDrawing', { images: b64s });
+    }).then(function(res){
+      btn.disabled = false;
+      if(res && res.error){ statusEl.innerHTML = '<div class="status-msg error">'+esc(res.error)+'</div>'; return; }
+      statusEl.innerHTML = '';
+      startJobFromExtraction((res && res.data) || {});
+    }).catch(function(e){
+      btn.disabled = false;
+      statusEl.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  });
+
+  document.getElementById('btn-manual').addEventListener('click', function(){ startJobFromExtraction({}); });
+
+  // ================= JOB / LINE ITEMS =================
+  function startJobFromExtraction(data){
+    data = data || {};
+    var lineItems = [];
+
+    (data.hardware||[]).forEach(function(h){
+      var match = matchRate('hardware', h.description, h.sku);
+      lineItems.push({
+        id: uid(), type:'hardware', description: h.description || 'Hardware item',
+        qty: (h.quantity!=null? h.quantity : 1), unit:'each', sku: h.sku||null,
+        rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0
+      });
+    });
+
+    var panels = data.estimatedPanels || [];
+    var usedIdx = {};
+    (data.materials||[]).forEach(function(m){
+      var key = normalize(m.description);
+      var totalM2 = 0, matchedAny = false;
+      panels.forEach(function(p,i){
+        var pm = normalize(p.material||'');
+        if(!pm) return;
+        if(key.indexOf(pm)!==-1 || pm.indexOf(key)!==-1){
+          var area = ((p.length_mm||0)*(p.width_mm||0))/1e6*(p.quantity||1);
+          totalM2 += area; matchedAny = true; usedIdx[i]=true;
+        }
+      });
+      var desc = m.description + (m.colour ? (' — ' + m.colour) : '');
+      var match = matchRate('material', m.description, null);
+      lineItems.push({
+        id: uid(), type:'material', description: desc,
+        qty: matchedAny ? Math.round(totalM2*100)/100 : 0, unit:'m²',
+        rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0
+      });
+    });
+    var leftover = panels.filter(function(p,i){ return !usedIdx[i]; });
+    if(leftover.length){
+      var totalM2 = leftover.reduce(function(s,p){ return s+((p.length_mm||0)*(p.width_mm||0))/1e6*(p.quantity||1); },0);
+      if(totalM2>0){
+        lineItems.push({ id: uid(), type:'material', description:'Unclassified panel material — check against drawing', qty: Math.round(totalM2*100)/100, unit:'m²', rateId:null, unitPrice:0 });
+      }
+    }
+
+    var labourMatch = matchRate('labour','Labour',null);
+    lineItems.push({ id: uid(), type:'labour', description:'Workshop labour', qty:0, unit:'hour', rateId: labourMatch?labourMatch.id:null, unitPrice: labourMatch? Number(labourMatch.price)||0 : settings.labourRate });
+
+    job = {
+      drawingNumber: data.drawingNumber || null,
+      productName: data.productName || (currentFileName ? currentFileName.replace(/\.pdf$/i,'') : 'Untitled quote'),
+      revision: data.revision || null,
+      quantity: data.quantity || 1,
+      colour: data.colour || null,
+      overallDimensions: data.overallDimensions || {},
+      sourceFileName: currentFileName,
+      flags: data.flags || [],
+      lineItems: lineItems,
+      markupPct: settings.markupPct
+    };
+    renderReview();
+  }
+
+  function computeTotals(j){
+    function byType(t){ return (j.lineItems||[]).filter(function(i){ return i.type===t; }).reduce(function(s,i){ return s + (Number(i.qty)||0)*(Number(i.unitPrice)||0); }, 0); }
+    var materials = byType('material'), hardware = byType('hardware'), labour = byType('labour');
+    var subtotal = materials+hardware+labour;
+    var markup = subtotal * (Number(j.markupPct)||0) / 100;
+    return { materials:materials, hardware:hardware, labour:labour, subtotal:subtotal, markup:markup, total:subtotal+markup };
+  }
+
+  function lineRow(item){
+    var rate = item.rateId ? rates.find(function(r){ return r.id===item.rateId; }) : null;
+    var chip;
+    if(rate){
+      chip = '<span class="chip '+(rate.example?'example':'good')+'">'+(rate.example?'Example rate':'On rate card')+'</span>';
+    } else {
+      chip = '<span class="chip warn">No rate <button class="link-add-rate" data-id="'+item.id+'">+ save price</button></span>';
+    }
+    return '<tr data-id="'+item.id+'">' +
+      '<td class="cell-desc"><input type="text" class="li-desc" value="'+esc(item.description)+'"></td>' +
+      '<td class="cell-qty"><input type="number" class="li-qty num" step="0.01" value="'+item.qty+'"></td>' +
+      '<td class="cell-unit"><input type="text" class="li-unit" value="'+esc(item.unit)+'"></td>' +
+      '<td class="cell-rate num"><input type="number" class="li-price num" step="0.01" value="'+item.unitPrice+'"></td>' +
+      '<td class="num">'+money((Number(item.qty)||0)*(Number(item.unitPrice)||0))+'</td>' +
+      '<td>'+chip+'</td>' +
+      '<td><button class="btn ghost li-del" title="Remove line">✕</button></td>' +
+      '</tr>';
+  }
+
+  function renderReview(){
+    var panel = document.getElementById('review-panel');
+    panel.hidden = false;
+    var t = computeTotals(job);
+    var dims = job.overallDimensions || {};
+    var dimStr = [dims.width_mm, dims.height_mm, dims.depth_mm].filter(function(v){return v!=null;}).join(' × ');
+    var groups = [['material','Materials'],['hardware','Hardware'],['labour','Labour']];
+
+    var rowsHtml = '';
+    groups.forEach(function(g){
+      var items = job.lineItems.filter(function(i){ return i.type===g[0]; });
+      rowsHtml += '<tr class="section-row"><td colspan="7">'+g[1]+'</td></tr>';
+      if(!items.length) rowsHtml += '<tr><td colspan="7" class="empty">No '+g[1].toLowerCase()+' lines yet.</td></tr>';
+      items.forEach(function(i){ rowsHtml += lineRow(i); });
+    });
+
+    var flagsHtml = (job.flags && job.flags.length) ? job.flags.map(function(f){ return '<div class="flag">⚠ '+esc(f)+'</div>'; }).join('') : '';
+
+    panel.innerHTML =
+      '<div class="panel">' +
+        '<h2>2 · Drawing details</h2>' +
+        '<div class="field-row">' +
+          '<div class="field"><span class="label">Product</span><input type="text" id="job-name" value="'+esc(job.productName||'')+'"></div>' +
+          '<div class="field"><span class="label">Drawing no.</span><input type="text" id="job-drawno" value="'+esc(job.drawingNumber||'')+'"></div>' +
+          '<div class="field"><span class="label">Quantity</span><input type="number" id="job-qty" min="1" value="'+(job.quantity||1)+'"></div>' +
+          '<div class="field"><span class="label">Colour / finish</span><input type="text" id="job-colour" value="'+esc(job.colour||'')+'"></div>' +
+        '</div>' +
+        (dimStr ? '<div class="sub" style="margin-top:10px;color:var(--ink-soft);">Overall (mm): <span class="num">'+esc(dimStr)+'</span></div>' : '') +
+        (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '') +
+      '</div>' +
+      '<div class="panel">' +
+        '<h2>3 · Bill of materials</h2>' +
+        '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Rate (R)</th><th class="num">Line total</th><th>Rate card</th><th></th></tr></thead><tbody id="li-body">'+rowsHtml+'</tbody></table></div>' +
+        '<div class="field-row"><button class="btn" id="btn-add-line-material">+ Material line</button><button class="btn" id="btn-add-line-hardware">+ Hardware line</button><button class="btn" id="btn-add-line-labour">+ Labour line</button></div>' +
+      '</div>' +
+      '<div class="panel">' +
+        '<h2>4 · Markup &amp; total</h2>' +
+        '<div class="field-row"><div class="field"><span class="label">Markup %</span><input type="number" id="job-markup" step="1" min="0" value="'+job.markupPct+'"></div></div>' +
+        '<div class="stats" id="job-stats"></div>' +
+        '<div class="field-row" style="margin-top:18px;"><button class="btn primary" id="btn-save-job">Save quote</button><span id="save-confirm" class="sub" style="align-self:center;"></span></div>' +
+      '</div>';
+
+    renderStats(t);
+    wireReviewEvents();
+  }
+
+  function renderStats(t){
+    document.getElementById('job-stats').innerHTML =
+      '<div class="stat"><span class="label">Materials</span><div class="value num">'+money(t.materials)+'</div></div>' +
+      '<div class="stat"><span class="label">Hardware</span><div class="value num">'+money(t.hardware)+'</div></div>' +
+      '<div class="stat"><span class="label">Labour</span><div class="value num">'+money(t.labour)+'</div></div>' +
+      '<div class="stat"><span class="label">Subtotal</span><div class="value num">'+money(t.subtotal)+'</div></div>' +
+      '<div class="stat"><span class="label">Markup</span><div class="value num">'+money(t.markup)+'</div></div>' +
+      '<div class="stat total"><span class="label">Total (sell price)</span><div class="value num">'+money(t.total)+'</div></div>';
+  }
+
+  function refreshTotalsOnly(){ renderStats(computeTotals(job)); }
+  function findItem(id){ return job.lineItems.find(function(i){ return i.id===id; }); }
+
+  function wireReviewEvents(){
+    document.getElementById('job-name').addEventListener('input', function(e){ job.productName = e.target.value; });
+    document.getElementById('job-drawno').addEventListener('input', function(e){ job.drawingNumber = e.target.value; });
+    document.getElementById('job-qty').addEventListener('input', function(e){ job.quantity = Number(e.target.value)||1; });
+    document.getElementById('job-colour').addEventListener('input', function(e){ job.colour = e.target.value; });
+    document.getElementById('job-markup').addEventListener('input', function(e){ job.markupPct = Number(e.target.value)||0; refreshTotalsOnly(); });
+
+    var body = document.getElementById('li-body');
+    body.addEventListener('input', function(e){
+      var tr = e.target.closest('tr'); if(!tr || !tr.dataset.id) return;
+      var item = findItem(tr.dataset.id); if(!item) return;
+      if(e.target.classList.contains('li-desc')) item.description = e.target.value;
+      if(e.target.classList.contains('li-qty')) item.qty = Number(e.target.value)||0;
+      if(e.target.classList.contains('li-unit')) item.unit = e.target.value;
+      if(e.target.classList.contains('li-price')) item.unitPrice = Number(e.target.value)||0;
+      if(e.target.classList.contains('li-qty') || e.target.classList.contains('li-price')){
+        var td = tr.querySelectorAll('td.num')[1];
+        if(td) td.textContent = money((Number(item.qty)||0)*(Number(item.unitPrice)||0));
+        refreshTotalsOnly();
+      }
+    });
+    body.addEventListener('click', function(e){
+      var delBtn = e.target.closest('.li-del');
+      if(delBtn){
+        var tr = delBtn.closest('tr');
+        job.lineItems = job.lineItems.filter(function(i){ return i.id!==tr.dataset.id; });
+        renderReview();
+        return;
+      }
+      var addBtn = e.target.closest('.link-add-rate');
+      if(addBtn){
+        var item = findItem(addBtn.dataset.id); if(!item) return;
+        quickAddRate(item).then(function(){ renderReview(); }).catch(function(e2){ alert(backendErrorMsg(e2)); });
+      }
+    });
+
+    document.getElementById('btn-add-line-material').addEventListener('click', function(){ addLine('material'); });
+    document.getElementById('btn-add-line-hardware').addEventListener('click', function(){ addLine('hardware'); });
+    document.getElementById('btn-add-line-labour').addEventListener('click', function(){ addLine('labour'); });
+    document.getElementById('btn-save-job').addEventListener('click', saveJob);
+  }
+
+  function addLine(type){
+    var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : 'm²');
+    job.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, rateId:null, unitPrice:0 });
+    renderReview();
+  }
+
+  function saveJob(){
+    var payload = {
+      drawingNumber: job.drawingNumber, productName: job.productName, revision: job.revision,
+      quantity: job.quantity, colour: job.colour, overallDimensions: job.overallDimensions,
+      sourceFileName: job.sourceFileName, flags: job.flags, lineItems: job.lineItems,
+      markupPct: job.markupPct
+    };
+    apiPost('addJob', { job: payload }).then(function(){
+      document.getElementById('save-confirm').textContent = 'Saved.';
+      setTimeout(function(){ showView('quotes'); }, 500);
+    }).catch(function(e){
+      document.getElementById('save-confirm').textContent = backendErrorMsg(e);
+    });
+  }
+
+  // ================= QUOTES LIST =================
+  function loadQuotes(){
+    var list = document.getElementById('quotes-list');
+    list.innerHTML = '<div class="empty">Loading…</div>';
+    apiGet('getJobs').then(function(res){
+      jobsCache = res.jobs || [];
+      jobsCache.sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
+      document.getElementById('quotes-count').textContent = jobsCache.length + (jobsCache.length===1?' quote':' quotes');
+      if(!jobsCache.length){ list.innerHTML = '<div class="empty">No quotes yet — create one from New Quote.</div>'; return; }
+      list.innerHTML = '';
+      jobsCache.forEach(function(j){ list.appendChild(renderJobCard(j)); });
+    }).catch(function(e){ list.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+
+  function renderJobCard(j){
+    var t = computeTotals(j);
+    var card = el('<div class="job-card"></div>');
+    var date = j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-ZA', {year:'numeric',month:'short',day:'numeric'}) : '';
+    card.innerHTML =
+      '<div class="row1"><strong>'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+'</span></div>' +
+      '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+'</div>' +
+      '<div class="job-detail" hidden></div>';
+    card.addEventListener('click', function(e){
+      if(e.target.closest('.job-del')) return;
+      var d = card.querySelector('.job-detail');
+      if(d.hidden){
+        d.hidden = false;
+        d.innerHTML = jobDetailHtml(j, t);
+        var delBtn = d.querySelector('.job-del');
+        if(delBtn) delBtn.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          if(confirm('Delete this quote?')) apiPost('deleteJob', { id:j.id }).then(loadQuotes).catch(function(e2){ alert(backendErrorMsg(e2)); });
+        });
+      } else { d.hidden = true; }
+    });
+    return card;
+  }
+
+  function jobDetailHtml(j, t){
+    var groups = [['material','Materials'],['hardware','Hardware'],['labour','Labour']];
+    var rows = '';
+    groups.forEach(function(g){
+      var items = (j.lineItems||[]).filter(function(i){ return i.type===g[0]; });
+      if(!items.length) return;
+      rows += '<tr class="section-row"><td colspan="4">'+g[1]+'</td></tr>';
+      items.forEach(function(i){
+        rows += '<tr><td>'+esc(i.description)+'</td><td class="num">'+i.qty+' '+esc(i.unit)+'</td><td class="num">'+money(i.unitPrice)+'</td><td class="num">'+money((Number(i.qty)||0)*(Number(i.unitPrice)||0))+'</td></tr>';
+      });
+    });
+    var flags = (j.flags||[]).map(function(f){ return '<div class="flag">⚠ '+esc(f)+'</div>'; }).join('');
+    return '<div class="table-wrap"><table><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Total</th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
+      flags +
+      '<div class="stats" style="margin-top:12px;">' +
+      '<div class="stat"><span class="label">Subtotal</span><div class="value num">'+money(t.subtotal)+'</div></div>' +
+      '<div class="stat"><span class="label">Markup '+((j.markupPct)||0)+'%</span><div class="value num">'+money(t.markup)+'</div></div>' +
+      '<div class="stat total"><span class="label">Total</span><div class="value num">'+money(t.total)+'</div></div>' +
+      '</div>' +
+      '<div class="field-row" style="margin-top:12px;"><button class="btn danger job-del">Delete this quote</button></div>';
+  }
+
+  // ================= BOOT =================
+  function boot(){
+    if(!apiConfigured()){
+      document.body.insertAdjacentHTML('afterbegin',
+        '<div class="status-msg error" style="margin:14px 14px 0;">Not connected to a backend yet — set <code>API_URL</code> near the top of index.html to your Apps Script Web App URL. See SETUP.md.</div>');
+    }
+    renderUploadArea();
+    loadRates();
+    apiGet('getSettings').then(function(res){
+      if(res && res.settings) settings = res.settings;
+      if(view==='settings') fillSettingsForm();
+    }).catch(function(){});
+    showView('new');
+  }
+  boot();
+})();
+</script>
+</body>
+</html>
