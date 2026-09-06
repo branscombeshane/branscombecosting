@@ -239,8 +239,8 @@
   "use strict";
 
   // ============================================================
-  // Point this at your deployed Apps Script Web App URL.
-  // See SETUP.md — Deploy the Web App — for how to get this.
+  // Your deployed Apps Script Web App URL (from Deploy > Manage
+  // deployments > Web app > URL). See SETUP.md if this changes.
   // ============================================================
   var API_URL = "https://script.google.com/macros/s/AKfycbxQ0cNotDUzckTVzm8fZgUPaEyZpBlVCCI4Plbuh1pIy1X8bGO0McJCckkX_xGtASPM3w/exec";
 
@@ -252,7 +252,7 @@
   var settings = { markupPct: 35, labourRate: 220 };
   var currentFileName = null;
 
-  function uid(){ return 'id-' + Math.random().toString(36).slice(2) + Date.now().toString(36); }
+  function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
   function money(n){ return 'R ' + (Number(n)||0).toLocaleString('en-ZA', {minimumFractionDigits:2, maximumFractionDigits:2}); }
   function normalize(s){ return (s||'').toString().toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
@@ -260,20 +260,65 @@
 
   function apiConfigured(){ return API_URL && API_URL.indexOf('PASTE_') !== 0; }
 
-  function apiGet(action){
+  // ------------------------------------------------------------------------
+  // Talking to Apps Script. Google Apps Script Web Apps don't reliably
+  // support being called with fetch() from another domain (no CORS preflight
+  // support, and the /exec redirect often drops the header a cross-origin
+  // fetch() needs) — so reads go out as JSONP (a <script> tag, never subject
+  // to CORS) and writes go out as a real <form method="post"> submitted into
+  // a hidden iframe (also never subject to CORS). See the note at the top of
+  // Code.gs for the full explanation.
+  // ------------------------------------------------------------------------
+  var jsonpSeq = 0;
+  function apiRead(action, params){
     if(!apiConfigured()) return Promise.reject(new Error('not_configured'));
-    return fetch(API_URL + '?action=' + encodeURIComponent(action)).then(function(r){ return r.json(); });
+    return new Promise(function(resolve, reject){
+      var cbName = '_batten_cb_' + (jsonpSeq++) + '_' + Date.now();
+      var done = false;
+      var script = document.createElement('script');
+      var timer = setTimeout(function(){ if(done) return; done=true; cleanup(); reject(new Error('timeout')); }, 25000);
+      function cleanup(){
+        clearTimeout(timer);
+        try{ window[cbName] = undefined; delete window[cbName]; }catch(e){}
+        if(script.parentNode) script.parentNode.removeChild(script);
+      }
+      window[cbName] = function(data){ if(done) return; done=true; cleanup(); resolve(data); };
+      var qs = 'action=' + encodeURIComponent(action) + '&callback=' + cbName;
+      Object.keys(params||{}).forEach(function(k){ qs += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); });
+      script.src = API_URL + '?' + qs;
+      script.onerror = function(){ if(done) return; done=true; cleanup(); reject(new Error('script_error')); };
+      document.head.appendChild(script);
+    });
   }
-  function apiPost(action, payload){
+
+  function ensureHiddenFrame(){
+    if(document.getElementById('batten-hidden-frame')) return;
+    var f = document.createElement('iframe');
+    f.name = 'batten-hidden-frame'; f.id = 'batten-hidden-frame';
+    f.style.display = 'none';
+    document.body.appendChild(f);
+  }
+  function apiWrite(action, payload){
     if(!apiConfigured()) return Promise.reject(new Error('not_configured'));
-    var body = Object.assign({ action: action }, payload || {});
-    // Sent without a JSON content-type header on purpose, so the browser treats this as a
-    // "simple request" and skips the CORS preflight Apps Script doesn't answer.
-    return fetch(API_URL, { method:'POST', body: JSON.stringify(body) }).then(function(r){ return r.json(); });
+    ensureHiddenFrame();
+    var form = document.createElement('form');
+    form.method = 'POST'; form.action = API_URL; form.target = 'batten-hidden-frame'; form.style.display = 'none';
+    function field(name, value){ var i=document.createElement('input'); i.type='hidden'; i.name=name; i.value=value; form.appendChild(i); }
+    field('action', action);
+    field('payload', JSON.stringify(payload||{}));
+    document.body.appendChild(form);
+    form.submit();
+    setTimeout(function(){ if(form.parentNode) form.parentNode.removeChild(form); }, 2000);
+    // Fire-and-forget: a cross-origin iframe's response can't be read back, so callers
+    // that need an id pass one in (see uid()), and callers that need real data (drawing
+    // extraction) poll for it separately via apiRead('getExtraction', ...).
+    return Promise.resolve({ ok: true });
   }
+
   function backendErrorMsg(e){
     if(e && e.message==='not_configured') return 'This copy isn\'t connected to a backend yet. Set API_URL near the top of index.html to your Apps Script Web App URL — see SETUP.md.';
-    return 'Couldn\'t reach the backend. Check your internet connection and that API_URL points at a deployed, published Web App.';
+    if(e && e.message==='timeout') return 'The backend took too long to respond. Check the Apps Script is deployed and reachable, then try again.';
+    return 'Couldn\'t reach the backend. Check that API_URL points at a deployed, published Web App.';
   }
 
   document.getElementById('nav').addEventListener('click', function(e){
@@ -320,8 +365,8 @@
   }
 
   function loadRates(){
-    return apiGet('getRates').then(function(res){
-      rates = res.rates || [];
+    return apiRead('getRates').then(function(res){
+      rates = (res && res.rates) || [];
       if(view==='rates') renderRatesTables();
     }).catch(function(e){
       if(view==='rates') document.getElementById('rates-tables').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
@@ -357,14 +402,14 @@
       btn.addEventListener('click', function(){
         var tr = btn.closest('tr'); var id = tr.dataset.id;
         var price = Number(tr.querySelector('.rate-price').value)||0;
-        apiPost('updateRate', { id:id, price:price }).then(loadRates).catch(function(e){ alert(backendErrorMsg(e)); });
+        apiWrite('updateRate', { id:id, price:price }).then(function(){ setTimeout(loadRates, 900); });
       });
     });
     wrap.querySelectorAll('.rate-del').forEach(function(btn){
       btn.addEventListener('click', function(){
         var tr = btn.closest('tr'); var id = tr.dataset.id;
         if(!confirm('Remove this rate card item?')) return;
-        apiPost('deleteRate', { id:id }).then(loadRates).catch(function(e){ alert(backendErrorMsg(e)); });
+        apiWrite('deleteRate', { id:id }).then(function(){ setTimeout(loadRates, 900); });
       });
     });
   }
@@ -376,20 +421,28 @@
     var price = Number(document.getElementById('rf-price').value)||0;
     var sku = document.getElementById('rf-sku').value.trim();
     if(!name){ document.getElementById('rf-name').focus(); return; }
-    apiPost('addRate', { name:name, category:category, unit:unit, price:price, sku:sku||null }).then(function(){
+    var newId = 'r_' + uid();
+    apiWrite('addRate', { id:newId, name:name, category:category, unit:unit, price:price, sku:sku||null }).then(function(){
+      rates.push({ id:newId, name:name, category:category, unit:unit, price:price, sku:sku||null, example:false });
       document.getElementById('rf-name').value='';
       document.getElementById('rf-unit').value='';
       document.getElementById('rf-price').value='';
       document.getElementById('rf-sku').value='';
-      return loadRates();
-    }).catch(function(e){ alert(backendErrorMsg(e)); });
+      renderRatesTables();
+      setTimeout(loadRates, 900);
+    });
   });
 
   function quickAddRate(item){
-    return apiPost('addRate', {
-      name: item.description, category: item.type, unit: item.unit,
+    var newId = 'r_' + uid();
+    return apiWrite('addRate', {
+      id: newId, name: item.description, category: item.type, unit: item.unit,
       price: Number(item.unitPrice)||0, sku: item.sku||null
-    }).then(function(res){ item.rateId = res.id; return loadRates(); });
+    }).then(function(){
+      item.rateId = newId;
+      rates.push({ id:newId, name:item.description, category:item.type, unit:item.unit, price:Number(item.unitPrice)||0, sku:item.sku||null, example:false });
+      setTimeout(loadRates, 900);
+    });
   }
 
   // ================= SETTINGS =================
@@ -400,10 +453,10 @@
   document.getElementById('btn-save-settings').addEventListener('click', function(){
     settings.markupPct = Number(document.getElementById('set-markup').value)||0;
     settings.labourRate = Number(document.getElementById('set-labour').value)||0;
-    apiPost('saveSettings', settings).then(function(){
+    apiWrite('saveSettings', settings).then(function(){
       var msg = document.getElementById('settings-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
-    }).catch(function(e){ alert(backendErrorMsg(e)); });
+    });
   });
 
   // ================= UPLOAD + EXTRACT =================
@@ -475,24 +528,54 @@
     });
   }
 
+  function pollExtraction(token){
+    var attempts = 0, maxAttempts = 45; // ~90s at 2s each
+    return new Promise(function(resolve, reject){
+      function tick(){
+        attempts++;
+        apiRead('getExtraction', { token: token }).then(function(res){
+          if(res && res.status === 'done'){ resolve(res.data || {}); }
+          else if(res && res.status === 'error'){ reject(new Error(res.error || 'Extraction failed')); }
+          else if(attempts >= maxAttempts){ reject(new Error('timeout')); }
+          else {
+            var t = document.getElementById('think-msg');
+            if(t) t.textContent = 'Reading the drawing… (' + (attempts*2) + 's)';
+            setTimeout(tick, 2000);
+          }
+        }).catch(function(e){
+          if(attempts >= maxAttempts) reject(e); else setTimeout(tick, 2000);
+        });
+      }
+      tick();
+    });
+  }
+
   document.getElementById('btn-extract').addEventListener('click', function(){
     if(!pdfImages.length) return;
     var statusEl = document.getElementById('extract-status');
     var btn = document.getElementById('btn-extract');
     btn.disabled = true;
-    statusEl.innerHTML = '<div class="status-msg thinking">Reading the drawing… (usually 10–30 seconds)</div>';
+    statusEl.innerHTML = '<div class="status-msg thinking" id="think-msg">Reading the drawing… (usually 10–30 seconds)</div>';
     Promise.all(pdfImages.map(function(p){ return blobToBase64(p.blob); })).then(function(b64s){
-      return apiPost('extractDrawing', { images: b64s });
-    }).then(function(res){
+      var token = uid();
+      return apiWrite('extractDrawing', { token: token, images: b64s }).then(function(){ return pollExtraction(token); });
+    }).then(function(data){
       btn.disabled = false;
-      if(res && res.error){ statusEl.innerHTML = '<div class="status-msg error">'+esc(res.error)+'</div>'; return; }
       statusEl.innerHTML = '';
-      startJobFromExtraction((res && res.data) || {});
+      startJobFromExtraction(data || {});
     }).catch(function(e){
       btn.disabled = false;
-      statusEl.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+      statusEl.innerHTML = '<div class="status-msg error">'+esc(extractErrorMessage(e))+'</div>';
     });
   });
+
+  function extractErrorMessage(e){
+    if(e && e.message==='timeout') return 'This is taking unusually long — the backend may be stuck, or Claude is taking longer than usual. Try again in a moment.';
+    if(e && e.message==='not_configured') return backendErrorMsg(e);
+    if(e && /anthropic api error/i.test(e.message||'')) return e.message;
+    if(e && /clean json/i.test(e.message||'')) return 'Got a reply that wasn’t clean JSON — try again, or start a blank quote and enter items by hand.';
+    return (e && e.message) ? e.message : 'Something went wrong reading the drawing. Try again in a moment.';
+  }
 
   document.getElementById('btn-manual').addEventListener('click', function(){ startJobFromExtraction({}); });
 
@@ -675,7 +758,7 @@
       var addBtn = e.target.closest('.link-add-rate');
       if(addBtn){
         var item = findItem(addBtn.dataset.id); if(!item) return;
-        quickAddRate(item).then(function(){ renderReview(); }).catch(function(e2){ alert(backendErrorMsg(e2)); });
+        quickAddRate(item).then(function(){ renderReview(); });
       }
     });
 
@@ -692,17 +775,17 @@
   }
 
   function saveJob(){
+    var newId = 'j_' + uid();
     var payload = {
+      id: newId,
       drawingNumber: job.drawingNumber, productName: job.productName, revision: job.revision,
       quantity: job.quantity, colour: job.colour, overallDimensions: job.overallDimensions,
       sourceFileName: job.sourceFileName, flags: job.flags, lineItems: job.lineItems,
       markupPct: job.markupPct
     };
-    apiPost('addJob', { job: payload }).then(function(){
+    apiWrite('addJob', { job: payload }).then(function(){
       document.getElementById('save-confirm').textContent = 'Saved.';
-      setTimeout(function(){ showView('quotes'); }, 500);
-    }).catch(function(e){
-      document.getElementById('save-confirm').textContent = backendErrorMsg(e);
+      setTimeout(function(){ showView('quotes'); }, 900);
     });
   }
 
@@ -710,8 +793,8 @@
   function loadQuotes(){
     var list = document.getElementById('quotes-list');
     list.innerHTML = '<div class="empty">Loading…</div>';
-    apiGet('getJobs').then(function(res){
-      jobsCache = res.jobs || [];
+    apiRead('getJobs').then(function(res){
+      jobsCache = (res && res.jobs) || [];
       jobsCache.sort(function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); });
       document.getElementById('quotes-count').textContent = jobsCache.length + (jobsCache.length===1?' quote':' quotes');
       if(!jobsCache.length){ list.innerHTML = '<div class="empty">No quotes yet — create one from New Quote.</div>'; return; }
@@ -737,7 +820,7 @@
         var delBtn = d.querySelector('.job-del');
         if(delBtn) delBtn.addEventListener('click', function(ev){
           ev.stopPropagation();
-          if(confirm('Delete this quote?')) apiPost('deleteJob', { id:j.id }).then(loadQuotes).catch(function(e2){ alert(backendErrorMsg(e2)); });
+          if(confirm('Delete this quote?')) apiWrite('deleteJob', { id:j.id }).then(function(){ setTimeout(loadQuotes, 900); });
         });
       } else { d.hidden = true; }
     });
@@ -774,7 +857,7 @@
     }
     renderUploadArea();
     loadRates();
-    apiGet('getSettings').then(function(res){
+    apiRead('getSettings').then(function(res){
       if(res && res.settings) settings = res.settings;
       if(view==='settings') fillSettingsForm();
     }).catch(function(){});
