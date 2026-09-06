@@ -82,6 +82,19 @@
     outline:2px solid var(--accent); outline-offset:1px;
   }
   .sidebar footer{ margin-top:auto; font-size:11px; color:var(--ink-soft); }
+  .logout-link{ background:none; border:none; padding:0; margin-top:10px; font-size:11px; color:var(--ink-soft);
+    text-decoration:underline; cursor:pointer; display:block; }
+  .logout-link:hover{ color:var(--ink); }
+
+  #login-gate{ position:fixed; inset:0; z-index:1000; display:flex; align-items:center; justify-content:center;
+    background:var(--paper); padding:20px; }
+  #login-gate .login-card{ width:100%; max-width:340px; border:1px solid var(--line-strong); background:var(--paper-raised); padding:28px 26px; }
+  #login-gate .wordmark{ margin-bottom:22px; margin-right:0; }
+  #login-gate .field{ min-width:0; margin-bottom:16px; }
+  #login-gate .field input{ width:100%; box-sizing:border-box; }
+  #login-gate .btn{ width:100%; }
+  body:not(.authed) .sidebar, body:not(.authed) main{ display:none; }
+  body.authed #login-gate{ display:none; }
 
   main{ flex:1; padding:28px 36px 60px; max-width:980px; }
   .view[hidden]{ display:none; }
@@ -121,7 +134,7 @@
   td{ padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
   td.num, th.num{ text-align:right; }
   tr.section-row td{ background:var(--paper); font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:.06em; color:var(--ink-soft); border-bottom:1px solid var(--line-strong); }
-  input[type="text"], input[type="number"], select{
+  input[type="text"], input[type="number"], input[type="password"], select{
     font-family:inherit; font-size:13px; border:1px solid var(--line); background:var(--paper);
     color:var(--ink); padding:5px 7px; width:100%;
   }
@@ -165,6 +178,17 @@
 </head>
 <body>
 
+<div id="login-gate">
+  <div class="login-card">
+    <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
+    <form id="login-form">
+      <div class="field"><span class="label">Password</span><input type="password" id="login-password" autocomplete="current-password"></div>
+      <button type="submit" class="btn primary" id="login-submit">Log in</button>
+      <div id="login-status" style="margin-top:14px;"></div>
+    </form>
+  </div>
+</div>
+
 <div class="sidebar">
   <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
   <nav id="nav">
@@ -173,7 +197,9 @@
     <button class="navbtn" data-view="rates">Rate Card</button>
     <button class="navbtn" data-view="settings">Settings</button>
   </nav>
-  <footer>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.</footer>
+  <footer>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
+    <button type="button" class="logout-link" id="btn-logout">Log out</button>
+  </footer>
 </div>
 
 <main>
@@ -332,6 +358,74 @@
     return 'Couldn\'t reach the backend. Check that API_URL points at a deployed, published Web App.';
   }
 
+  // ================= LOGIN GATE =================
+  // One shared password for the whole app, checked server-side against the
+  // Apps Script's APP_PASSWORD script property (never shipped in this file).
+  // Same POST-then-poll pattern as drawing extraction, since a hidden-iframe
+  // form POST can't read a response back directly.
+  var SESSION_KEY = 'batten_session';
+  function isAuthed(){ try{ return localStorage.getItem(SESSION_KEY)==='1'; }catch(e){ return false; } }
+  function setAuthed(v){ try{ if(v) localStorage.setItem(SESSION_KEY,'1'); else localStorage.removeItem(SESSION_KEY); }catch(e){} }
+
+  function pollLoginResult(token){
+    var attempts = 0, maxAttempts = 20; // ~8s at 400ms each
+    return new Promise(function(resolve, reject){
+      function tick(){
+        attempts++;
+        apiRead('getLoginResult', { token: token }).then(function(res){
+          if(res && res.status === 'done'){ resolve(res); }
+          else if(attempts >= maxAttempts){ resolve({ status:'done', ok:false, error:'timeout' }); }
+          else { setTimeout(tick, 400); }
+        }).catch(function(e){
+          if(attempts >= maxAttempts) reject(e); else setTimeout(tick, 400);
+        });
+      }
+      tick();
+    });
+  }
+
+  function loginErrorMsg(res){
+    if(res && res.error==='not_configured') return 'The app password hasn\'t been set up yet — set APP_PASSWORD in the Apps Script\'s Script Properties (see SETUP.md).';
+    if(res && res.error==='timeout') return 'The backend took too long to respond. Try again.';
+    return 'Incorrect password.';
+  }
+
+  document.getElementById('login-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    var statusEl = document.getElementById('login-status');
+    var submitBtn = document.getElementById('login-submit');
+    if(!apiConfigured()){
+      statusEl.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(new Error('not_configured')))+'</div>';
+      return;
+    }
+    var pwd = document.getElementById('login-password').value;
+    var token = uid();
+    submitBtn.disabled = true;
+    statusEl.innerHTML = '<div class="status-msg thinking">Checking…</div>';
+    apiWrite('login', { password: pwd, token: token }).then(function(){
+      return pollLoginResult(token);
+    }).then(function(res){
+      submitBtn.disabled = false;
+      if(res && res.ok){
+        setAuthed(true);
+        document.getElementById('login-password').value = '';
+        statusEl.innerHTML = '';
+        document.body.classList.add('authed');
+        boot();
+      } else {
+        statusEl.innerHTML = '<div class="status-msg error">'+esc(loginErrorMsg(res))+'</div>';
+      }
+    }).catch(function(e){
+      submitBtn.disabled = false;
+      statusEl.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  });
+
+  document.getElementById('btn-logout').addEventListener('click', function(){
+    setAuthed(false);
+    location.reload();
+  });
+
   document.getElementById('nav').addEventListener('click', function(e){
     var b = e.target.closest('.navbtn'); if(!b) return;
     showView(b.dataset.view);
@@ -409,18 +503,27 @@
     });
     wrap.innerHTML = html;
 
+    // These update the in-memory `rates` array directly rather than re-fetching
+    // afterwards — apiWrite can't read back a confirmation, and a reload racing
+    // ahead of the write landing on the backend would show the stale value.
     wrap.querySelectorAll('.rate-save').forEach(function(btn){
       btn.addEventListener('click', function(){
         var tr = btn.closest('tr'); var id = tr.dataset.id;
         var price = Number(tr.querySelector('.rate-price').value)||0;
-        apiWrite('updateRate', { id:id, price:price }).then(function(){ setTimeout(loadRates, 900); });
+        apiWrite('updateRate', { id:id, price:price }).then(function(){
+          var r = rates.find(function(x){ return x.id===id; });
+          if(r){ r.price = price; r.example = false; }
+        });
       });
     });
     wrap.querySelectorAll('.rate-del').forEach(function(btn){
       btn.addEventListener('click', function(){
         var tr = btn.closest('tr'); var id = tr.dataset.id;
         if(!confirm('Remove this rate card item?')) return;
-        apiWrite('deleteRate', { id:id }).then(function(){ setTimeout(loadRates, 900); });
+        apiWrite('deleteRate', { id:id }).then(function(){
+          rates = rates.filter(function(r){ return r.id!==id; });
+          renderRatesTables();
+        });
       });
     });
   }
@@ -440,7 +543,6 @@
       document.getElementById('rf-price').value='';
       document.getElementById('rf-sku').value='';
       renderRatesTables();
-      setTimeout(loadRates, 900);
     });
   });
 
@@ -452,7 +554,6 @@
     }).then(function(){
       item.rateId = newId;
       rates.push({ id:newId, name:item.description, category:item.type, unit:item.unit, price:Number(item.unitPrice)||0, sku:item.sku||null, example:false });
-      setTimeout(loadRates, 900);
     });
   }
 
@@ -675,13 +776,16 @@
   // Creates the rate if the line has none yet; updates the existing rate's price to
   // this line's price otherwise — either way the rate card ends up matching the
   // latest price actually used, which is the point of the button next to it.
+  // Updates the in-memory `rates` array immediately (apiWrite can't read back a
+  // confirmation) and deliberately does NOT re-fetch afterwards — a reload racing
+  // ahead of the write actually landing on the backend would overwrite this with
+  // the stale price and make the sync look like it silently failed.
   function syncRateFromLineItem(item){
     if(item.rateId){
       var price = Number(item.unitPrice)||0;
       return apiWrite('updateRate', { id:item.rateId, price:price }).then(function(){
         var r = rates.find(function(x){ return x.id===item.rateId; });
         if(r){ r.price = price; r.example = false; }
-        setTimeout(loadRates, 900);
       });
     }
     return quickAddRate(item);
@@ -791,6 +895,7 @@
       liBody.addEventListener('click', function(e){
         var delBtn = e.target.closest('.li-del');
         if(delBtn){
+          e.stopPropagation();
           var tr = delBtn.closest('tr');
           jobRef.lineItems = (jobRef.lineItems||[]).filter(function(i){ return i.id!==tr.dataset.id; });
           rerender();
@@ -798,6 +903,7 @@
         }
         var syncBtn = e.target.closest('.link-sync-rate');
         if(syncBtn){
+          e.stopPropagation();
           var item = (jobRef.lineItems||[]).find(function(i){ return i.id===syncBtn.dataset.id; }); if(!item) return;
           syncRateFromLineItem(item).then(rerender);
         }
@@ -805,7 +911,8 @@
     }
 
     container.querySelectorAll('.add-line').forEach(function(btn){
-      btn.addEventListener('click', function(){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
         var type = btn.dataset.type;
         var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : 'm²');
         jobRef.lineItems = jobRef.lineItems || [];
@@ -883,7 +990,8 @@
           '<span class="save-confirm sub" style="align-self:center;"></span>' +
         '</div>';
       wireJobEditor(editingJob, detail, { rerender: renderEditor });
-      detail.querySelector('.btn-save-existing').addEventListener('click', function(){
+      detail.querySelector('.btn-save-existing').addEventListener('click', function(e){
+        e.stopPropagation();
         apiWrite('updateJob', { job: editingJob }).then(function(){
           var el = detail.querySelector('.save-confirm');
           if(el) el.textContent = 'Saved.';
@@ -891,7 +999,8 @@
           setTimeout(loadQuotes, 900);
         });
       });
-      detail.querySelector('.job-del').addEventListener('click', function(){
+      detail.querySelector('.job-del').addEventListener('click', function(e){
+        e.stopPropagation();
         if(confirm('Delete this quote?')) apiWrite('deleteJob', { id:j.id }).then(function(){ setTimeout(loadQuotes, 900); });
       });
     }
@@ -923,7 +1032,13 @@
     }).catch(function(){});
     showView('new');
   }
-  boot();
+
+  if(isAuthed()){
+    document.body.classList.add('authed');
+    boot();
+  } else {
+    document.getElementById('login-password').focus();
+  }
 
   if('serviceWorker' in navigator){
     window.addEventListener('load', function(){
