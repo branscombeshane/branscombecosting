@@ -657,74 +657,50 @@
     return { materials:materials, hardware:hardware, labour:labour, subtotal:subtotal, markup:markup, total:subtotal+markup };
   }
 
-  function lineRow(item){
+  function rateChip(item){
     var rate = item.rateId ? rates.find(function(r){ return r.id===item.rateId; }) : null;
-    var chip;
-    if(rate){
-      chip = '<span class="chip '+(rate.example?'example':'good')+'">'+(rate.example?'Example rate':'On rate card')+'</span>';
-    } else {
-      chip = '<span class="chip warn">No rate <button class="link-add-rate" data-id="'+item.id+'">+ save price</button></span>';
+    if(!rate){
+      return '<span class="chip warn">No rate <button class="link-sync-rate" data-id="'+item.id+'">+ save price</button></span>';
     }
+    if(rate.example){
+      return '<span class="chip example">Example rate <button class="link-sync-rate" data-id="'+item.id+'">use '+money(item.unitPrice)+'</button></span>';
+    }
+    var differs = Math.abs((Number(rate.price)||0) - (Number(item.unitPrice)||0)) > 0.005;
+    if(differs){
+      return '<span class="chip warn">Rate card: '+money(rate.price)+' <button class="link-sync-rate" data-id="'+item.id+'">update to '+money(item.unitPrice)+'</button></span>';
+    }
+    return '<span class="chip good">On rate card</span>';
+  }
+
+  // Creates the rate if the line has none yet; updates the existing rate's price to
+  // this line's price otherwise — either way the rate card ends up matching the
+  // latest price actually used, which is the point of the button next to it.
+  function syncRateFromLineItem(item){
+    if(item.rateId){
+      var price = Number(item.unitPrice)||0;
+      return apiWrite('updateRate', { id:item.rateId, price:price }).then(function(){
+        var r = rates.find(function(x){ return x.id===item.rateId; });
+        if(r){ r.price = price; r.example = false; }
+        setTimeout(loadRates, 900);
+      });
+    }
+    return quickAddRate(item);
+  }
+
+  function lineRow(item){
     return '<tr data-id="'+item.id+'">' +
       '<td class="cell-desc"><input type="text" class="li-desc" value="'+esc(item.description)+'"></td>' +
       '<td class="cell-qty"><input type="number" class="li-qty num" step="0.01" value="'+item.qty+'"></td>' +
       '<td class="cell-unit"><input type="text" class="li-unit" value="'+esc(item.unit)+'"></td>' +
       '<td class="cell-rate num"><input type="number" class="li-price num" step="0.01" value="'+item.unitPrice+'"></td>' +
       '<td class="num">'+money((Number(item.qty)||0)*(Number(item.unitPrice)||0))+'</td>' +
-      '<td>'+chip+'</td>' +
+      '<td>'+rateChip(item)+'</td>' +
       '<td><button class="btn ghost li-del" title="Remove line">✕</button></td>' +
       '</tr>';
   }
 
-  function renderReview(){
-    var panel = document.getElementById('review-panel');
-    panel.hidden = false;
-    var t = computeTotals(job);
-    var dims = job.overallDimensions || {};
-    var dimStr = [dims.width_mm, dims.height_mm, dims.depth_mm].filter(function(v){return v!=null;}).join(' × ');
-    var groups = [['material','Materials'],['hardware','Hardware'],['labour','Labour']];
-
-    var rowsHtml = '';
-    groups.forEach(function(g){
-      var items = job.lineItems.filter(function(i){ return i.type===g[0]; });
-      rowsHtml += '<tr class="section-row"><td colspan="7">'+g[1]+'</td></tr>';
-      if(!items.length) rowsHtml += '<tr><td colspan="7" class="empty">No '+g[1].toLowerCase()+' lines yet.</td></tr>';
-      items.forEach(function(i){ rowsHtml += lineRow(i); });
-    });
-
-    var flagsHtml = (job.flags && job.flags.length) ? job.flags.map(function(f){ return '<div class="flag">⚠ '+esc(f)+'</div>'; }).join('') : '';
-
-    panel.innerHTML =
-      '<div class="panel">' +
-        '<h2>2 · Drawing details</h2>' +
-        '<div class="field-row">' +
-          '<div class="field"><span class="label">Product</span><input type="text" id="job-name" value="'+esc(job.productName||'')+'"></div>' +
-          '<div class="field"><span class="label">Drawing no.</span><input type="text" id="job-drawno" value="'+esc(job.drawingNumber||'')+'"></div>' +
-          '<div class="field"><span class="label">Quantity</span><input type="number" id="job-qty" min="1" value="'+(job.quantity||1)+'"></div>' +
-          '<div class="field"><span class="label">Colour / finish</span><input type="text" id="job-colour" value="'+esc(job.colour||'')+'"></div>' +
-        '</div>' +
-        (dimStr ? '<div class="sub" style="margin-top:10px;color:var(--ink-soft);">Overall (mm): <span class="num">'+esc(dimStr)+'</span></div>' : '') +
-        (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '') +
-      '</div>' +
-      '<div class="panel">' +
-        '<h2>3 · Bill of materials</h2>' +
-        '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Rate (R)</th><th class="num">Line total</th><th>Rate card</th><th></th></tr></thead><tbody id="li-body">'+rowsHtml+'</tbody></table></div>' +
-        '<div class="field-row"><button class="btn" id="btn-add-line-material">+ Material line</button><button class="btn" id="btn-add-line-hardware">+ Hardware line</button><button class="btn" id="btn-add-line-labour">+ Labour line</button></div>' +
-      '</div>' +
-      '<div class="panel">' +
-        '<h2>4 · Markup &amp; total</h2>' +
-        '<div class="field-row"><div class="field"><span class="label">Markup %</span><input type="number" id="job-markup" step="1" min="0" value="'+job.markupPct+'"></div></div>' +
-        '<div class="stats" id="job-stats"></div>' +
-        '<div class="field-row" style="margin-top:18px;"><button class="btn primary" id="btn-save-job">Save quote</button><span id="save-confirm" class="sub" style="align-self:center;"></span></div>' +
-      '</div>';
-
-    renderStats(t);
-    wireReviewEvents();
-  }
-
-  function renderStats(t){
-    document.getElementById('job-stats').innerHTML =
-      '<div class="stat"><span class="label">Materials</span><div class="value num">'+money(t.materials)+'</div></div>' +
+  function statsHtml(t){
+    return '<div class="stat"><span class="label">Materials</span><div class="value num">'+money(t.materials)+'</div></div>' +
       '<div class="stat"><span class="label">Hardware</span><div class="value num">'+money(t.hardware)+'</div></div>' +
       '<div class="stat"><span class="label">Labour</span><div class="value num">'+money(t.labour)+'</div></div>' +
       '<div class="stat"><span class="label">Subtotal</span><div class="value num">'+money(t.subtotal)+'</div></div>' +
@@ -732,55 +708,125 @@
       '<div class="stat total"><span class="label">Total (sell price)</span><div class="value num">'+money(t.total)+'</div></div>';
   }
 
-  function refreshTotalsOnly(){ renderStats(computeTotals(job)); }
-  function findItem(id){ return job.lineItems.find(function(i){ return i.id===id; }); }
+  // Builds the three editable sections (header fields / bill of materials / markup)
+  // shared by the New Quote draft and by re-opening a saved quote. Callers wrap these
+  // in whatever container markup suits their context and call wireJobEditor() on it.
+  function jobEditorParts(j){
+    var t = computeTotals(j);
+    var dims = j.overallDimensions || {};
+    var dimStr = [dims.width_mm, dims.height_mm, dims.depth_mm].filter(function(v){return v!=null;}).join(' × ');
+    var groups = [['material','Materials'],['hardware','Hardware'],['labour','Labour']];
 
-  function wireReviewEvents(){
-    document.getElementById('job-name').addEventListener('input', function(e){ job.productName = e.target.value; });
-    document.getElementById('job-drawno').addEventListener('input', function(e){ job.drawingNumber = e.target.value; });
-    document.getElementById('job-qty').addEventListener('input', function(e){ job.quantity = Number(e.target.value)||1; });
-    document.getElementById('job-colour').addEventListener('input', function(e){ job.colour = e.target.value; });
-    document.getElementById('job-markup').addEventListener('input', function(e){ job.markupPct = Number(e.target.value)||0; refreshTotalsOnly(); });
-
-    var body = document.getElementById('li-body');
-    body.addEventListener('input', function(e){
-      var tr = e.target.closest('tr'); if(!tr || !tr.dataset.id) return;
-      var item = findItem(tr.dataset.id); if(!item) return;
-      if(e.target.classList.contains('li-desc')) item.description = e.target.value;
-      if(e.target.classList.contains('li-qty')) item.qty = Number(e.target.value)||0;
-      if(e.target.classList.contains('li-unit')) item.unit = e.target.value;
-      if(e.target.classList.contains('li-price')) item.unitPrice = Number(e.target.value)||0;
-      if(e.target.classList.contains('li-qty') || e.target.classList.contains('li-price')){
-        var td = tr.querySelectorAll('td.num')[1];
-        if(td) td.textContent = money((Number(item.qty)||0)*(Number(item.unitPrice)||0));
-        refreshTotalsOnly();
-      }
-    });
-    body.addEventListener('click', function(e){
-      var delBtn = e.target.closest('.li-del');
-      if(delBtn){
-        var tr = delBtn.closest('tr');
-        job.lineItems = job.lineItems.filter(function(i){ return i.id!==tr.dataset.id; });
-        renderReview();
-        return;
-      }
-      var addBtn = e.target.closest('.link-add-rate');
-      if(addBtn){
-        var item = findItem(addBtn.dataset.id); if(!item) return;
-        quickAddRate(item).then(function(){ renderReview(); });
-      }
+    var rowsHtml = '';
+    groups.forEach(function(g){
+      var items = (j.lineItems||[]).filter(function(i){ return i.type===g[0]; });
+      rowsHtml += '<tr class="section-row"><td colspan="7">'+g[1]+'</td></tr>';
+      if(!items.length) rowsHtml += '<tr><td colspan="7" class="empty">No '+g[1].toLowerCase()+' lines yet.</td></tr>';
+      items.forEach(function(i){ rowsHtml += lineRow(i); });
     });
 
-    document.getElementById('btn-add-line-material').addEventListener('click', function(){ addLine('material'); });
-    document.getElementById('btn-add-line-hardware').addEventListener('click', function(){ addLine('hardware'); });
-    document.getElementById('btn-add-line-labour').addEventListener('click', function(){ addLine('labour'); });
-    document.getElementById('btn-save-job').addEventListener('click', saveJob);
+    var flagsHtml = (j.flags && j.flags.length) ? j.flags.map(function(f){ return '<div class="flag">⚠ '+esc(f)+'</div>'; }).join('') : '';
+
+    var header =
+      '<div class="field-row">' +
+        '<div class="field"><span class="label">Product</span><input type="text" data-f="productName" value="'+esc(j.productName||'')+'"></div>' +
+        '<div class="field"><span class="label">Drawing no.</span><input type="text" data-f="drawingNumber" value="'+esc(j.drawingNumber||'')+'"></div>' +
+        '<div class="field"><span class="label">Quantity</span><input type="number" data-f="quantity" min="1" value="'+(j.quantity||1)+'"></div>' +
+        '<div class="field"><span class="label">Colour / finish</span><input type="text" data-f="colour" value="'+esc(j.colour||'')+'"></div>' +
+      '</div>' +
+      (dimStr ? '<div class="sub" style="margin-top:10px;color:var(--ink-soft);">Overall (mm): <span class="num">'+esc(dimStr)+'</span></div>' : '') +
+      (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '');
+
+    var bom =
+      '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Rate (R)</th><th class="num">Line total</th><th>Rate card</th><th></th></tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
+      '<div class="field-row"><button class="btn add-line" data-type="material">+ Material line</button><button class="btn add-line" data-type="hardware">+ Hardware line</button><button class="btn add-line" data-type="labour">+ Labour line</button></div>';
+
+    var markup =
+      '<div class="field-row"><div class="field"><span class="label">Markup %</span><input type="number" class="markup-input" step="1" min="0" value="'+j.markupPct+'"></div></div>' +
+      '<div class="stats job-stats">'+statsHtml(t)+'</div>';
+
+    return { header: header, bom: bom, markup: markup };
   }
 
-  function addLine(type){
-    var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : 'm²');
-    job.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, rateId:null, unitPrice:0 });
-    renderReview();
+  // Wires every interactive bit of jobEditorParts() output, scoped to `container` so
+  // the same code drives the New Quote draft and any number of expanded saved quotes
+  // at once without their ids or listeners colliding. `jobRef` is mutated in place;
+  // `opts.rerender` re-renders the whole editor (simplest way to reflect add/delete).
+  function wireJobEditor(jobRef, container, opts){
+    opts = opts || {};
+    function rerender(){ if(opts.rerender) opts.rerender(); }
+    function refreshStats(){
+      var statsEl = container.querySelector('.job-stats');
+      if(statsEl) statsEl.innerHTML = statsHtml(computeTotals(jobRef));
+    }
+
+    container.querySelectorAll('[data-f]').forEach(function(inp){
+      inp.addEventListener('input', function(){
+        var f = inp.dataset.f;
+        jobRef[f] = (f==='quantity') ? (Number(inp.value)||1) : inp.value;
+      });
+    });
+
+    var markupInput = container.querySelector('.markup-input');
+    if(markupInput) markupInput.addEventListener('input', function(){
+      jobRef.markupPct = Number(markupInput.value)||0;
+      refreshStats();
+    });
+
+    var liBody = container.querySelector('.li-body');
+    if(liBody){
+      liBody.addEventListener('input', function(e){
+        var tr = e.target.closest('tr'); if(!tr || !tr.dataset.id) return;
+        var item = (jobRef.lineItems||[]).find(function(i){ return i.id===tr.dataset.id; }); if(!item) return;
+        if(e.target.classList.contains('li-desc')) item.description = e.target.value;
+        if(e.target.classList.contains('li-qty')) item.qty = Number(e.target.value)||0;
+        if(e.target.classList.contains('li-unit')) item.unit = e.target.value;
+        if(e.target.classList.contains('li-price')) item.unitPrice = Number(e.target.value)||0;
+        if(e.target.classList.contains('li-qty') || e.target.classList.contains('li-price')){
+          var td = tr.querySelectorAll('td.num')[1];
+          if(td) td.textContent = money((Number(item.qty)||0)*(Number(item.unitPrice)||0));
+          refreshStats();
+        }
+      });
+      liBody.addEventListener('click', function(e){
+        var delBtn = e.target.closest('.li-del');
+        if(delBtn){
+          var tr = delBtn.closest('tr');
+          jobRef.lineItems = (jobRef.lineItems||[]).filter(function(i){ return i.id!==tr.dataset.id; });
+          rerender();
+          return;
+        }
+        var syncBtn = e.target.closest('.link-sync-rate');
+        if(syncBtn){
+          var item = (jobRef.lineItems||[]).find(function(i){ return i.id===syncBtn.dataset.id; }); if(!item) return;
+          syncRateFromLineItem(item).then(rerender);
+        }
+      });
+    }
+
+    container.querySelectorAll('.add-line').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var type = btn.dataset.type;
+        var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : 'm²');
+        jobRef.lineItems = jobRef.lineItems || [];
+        jobRef.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, rateId:null, unitPrice:0 });
+        rerender();
+      });
+    });
+  }
+
+  function renderReview(){
+    var panel = document.getElementById('review-panel');
+    panel.hidden = false;
+    var parts = jobEditorParts(job);
+    panel.innerHTML =
+      '<div class="panel"><h2>2 · Drawing details</h2>' + parts.header + '</div>' +
+      '<div class="panel"><h2>3 · Bill of materials</h2>' + parts.bom + '</div>' +
+      '<div class="panel"><h2>4 · Markup &amp; total</h2>' + parts.markup +
+        '<div class="field-row" style="margin-top:18px;"><button class="btn primary btn-save-new">Save quote</button><span class="save-confirm sub" style="align-self:center;"></span></div>' +
+      '</div>';
+    wireJobEditor(job, panel, { rerender: renderReview });
+    panel.querySelector('.btn-save-new').addEventListener('click', saveJob);
   }
 
   function saveJob(){
@@ -793,7 +839,8 @@
       markupPct: job.markupPct
     };
     apiWrite('addJob', { job: payload }).then(function(){
-      document.getElementById('save-confirm').textContent = 'Saved.';
+      var el = document.querySelector('#review-panel .save-confirm');
+      if(el) el.textContent = 'Saved.';
       setTimeout(function(){ showView('quotes'); }, 900);
     });
   }
@@ -818,44 +865,48 @@
     var date = j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-ZA', {year:'numeric',month:'short',day:'numeric'}) : '';
     card.innerHTML =
       '<div class="row1"><strong>'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+'</span></div>' +
-      '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+'</div>' +
+      '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+' · <span style="text-decoration:underline;">edit</span></div>' +
       '<div class="job-detail" hidden></div>';
-    card.addEventListener('click', function(e){
-      if(e.target.closest('.job-del')) return;
-      var d = card.querySelector('.job-detail');
-      if(d.hidden){
-        d.hidden = false;
-        d.innerHTML = jobDetailHtml(j, t);
-        var delBtn = d.querySelector('.job-del');
-        if(delBtn) delBtn.addEventListener('click', function(ev){
-          ev.stopPropagation();
-          if(confirm('Delete this quote?')) apiWrite('deleteJob', { id:j.id }).then(function(){ setTimeout(loadQuotes, 900); });
+
+    var detail = card.querySelector('.job-detail');
+    var editingJob = null;
+
+    function renderEditor(){
+      var parts = jobEditorParts(editingJob);
+      detail.innerHTML =
+        '<div class="label" style="margin-bottom:8px;">Drawing details</div>' + parts.header +
+        '<div class="label" style="margin:18px 0 8px;">Bill of materials</div>' + parts.bom +
+        '<div class="label" style="margin:18px 0 8px;">Markup &amp; total</div>' + parts.markup +
+        '<div class="field-row" style="margin-top:16px;">' +
+          '<button class="btn primary btn-save-existing">Save changes</button>' +
+          '<button class="btn danger job-del">Delete this quote</button>' +
+          '<span class="save-confirm sub" style="align-self:center;"></span>' +
+        '</div>';
+      wireJobEditor(editingJob, detail, { rerender: renderEditor });
+      detail.querySelector('.btn-save-existing').addEventListener('click', function(){
+        apiWrite('updateJob', { job: editingJob }).then(function(){
+          var el = detail.querySelector('.save-confirm');
+          if(el) el.textContent = 'Saved.';
+          Object.assign(j, editingJob);
+          setTimeout(loadQuotes, 900);
         });
-      } else { d.hidden = true; }
+      });
+      detail.querySelector('.job-del').addEventListener('click', function(){
+        if(confirm('Delete this quote?')) apiWrite('deleteJob', { id:j.id }).then(function(){ setTimeout(loadQuotes, 900); });
+      });
+    }
+
+    card.addEventListener('click', function(e){
+      if(e.target.closest('.job-detail')) return; // clicks inside the editor manage themselves
+      if(detail.hidden){
+        detail.hidden = false;
+        editingJob = JSON.parse(JSON.stringify(j)); // edit a working copy until "Save changes"
+        renderEditor();
+      } else {
+        detail.hidden = true;
+      }
     });
     return card;
-  }
-
-  function jobDetailHtml(j, t){
-    var groups = [['material','Materials'],['hardware','Hardware'],['labour','Labour']];
-    var rows = '';
-    groups.forEach(function(g){
-      var items = (j.lineItems||[]).filter(function(i){ return i.type===g[0]; });
-      if(!items.length) return;
-      rows += '<tr class="section-row"><td colspan="4">'+g[1]+'</td></tr>';
-      items.forEach(function(i){
-        rows += '<tr><td>'+esc(i.description)+'</td><td class="num">'+i.qty+' '+esc(i.unit)+'</td><td class="num">'+money(i.unitPrice)+'</td><td class="num">'+money((Number(i.qty)||0)*(Number(i.unitPrice)||0))+'</td></tr>';
-      });
-    });
-    var flags = (j.flags||[]).map(function(f){ return '<div class="flag">⚠ '+esc(f)+'</div>'; }).join('');
-    return '<div class="table-wrap"><table><thead><tr><th>Description</th><th class="num">Qty</th><th class="num">Rate</th><th class="num">Total</th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
-      flags +
-      '<div class="stats" style="margin-top:12px;">' +
-      '<div class="stat"><span class="label">Subtotal</span><div class="value num">'+money(t.subtotal)+'</div></div>' +
-      '<div class="stat"><span class="label">Markup '+((j.markupPct)||0)+'%</span><div class="value num">'+money(t.markup)+'</div></div>' +
-      '<div class="stat total"><span class="label">Total</span><div class="value num">'+money(t.total)+'</div></div>' +
-      '</div>' +
-      '<div class="field-row" style="margin-top:12px;"><button class="btn danger job-del">Delete this quote</button></div>';
   }
 
   // ================= BOOT =================
