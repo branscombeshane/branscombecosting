@@ -135,10 +135,11 @@
   td.num, th.num{ text-align:right; }
   tr.section-row td{ background:var(--paper); font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:.06em; color:var(--ink-soft); border-bottom:1px solid var(--line-strong); }
   tr.subgroup-row td{ font-weight:600; font-size:11px; letter-spacing:.03em; color:var(--ink-soft); padding-top:12px; border-bottom:1px solid var(--line); }
-  input[type="text"], input[type="number"], input[type="password"], select{
+  input[type="text"], input[type="number"], input[type="password"], select, textarea{
     font-family:inherit; font-size:13px; border:1px solid var(--line); background:var(--paper);
     color:var(--ink); padding:5px 7px; width:100%;
   }
+  textarea{ resize:vertical; box-sizing:border-box; line-height:1.5; }
   input.num, td input[type="number"]{ font-family:"IBM Plex Mono",monospace; text-align:right; }
   .cell-desc{ min-width:190px; }
   .cell-qty, .cell-unit{ width:84px; }
@@ -219,6 +220,10 @@
       <h2>1 · Drawing</h2>
       <div id="upload-area"></div>
       <div id="thumbs" class="thumbs"></div>
+      <div class="field" style="margin-top:14px;">
+        <span class="label">Notes about this drawing (optional)</span>
+        <textarea id="drawing-notes" rows="3" placeholder="Anything the drawing doesn't show, or that should override it — e.g. &quot;use steel legs, not the wood shown&quot; or &quot;customer wants 2 coats of oil&quot;. Taken into account when reading the drawing."></textarea>
+      </div>
       <div class="field-row" id="extract-row" hidden>
         <button class="btn primary" id="btn-extract">Extract bill of materials</button>
         <button class="btn ghost" id="btn-manual">or start a blank quote instead</button>
@@ -830,15 +835,18 @@
     if(!pdfImages.length) return;
     var statusEl = document.getElementById('extract-status');
     var btn = document.getElementById('btn-extract');
+    var notes = document.getElementById('drawing-notes').value.trim();
     btn.disabled = true;
     statusEl.innerHTML = '<div class="status-msg thinking" id="think-msg">Reading the drawing… (usually 10–30 seconds)</div>';
     Promise.all(pdfImages.map(function(p){ return blobToBase64(p.blob); })).then(function(b64s){
       var token = uid();
-      return apiWrite('extractDrawing', { token: token, images: b64s }).then(function(){ return pollExtraction(token); });
+      // Notes travel with the images so the drawing is read taking them into account
+      // (see EXTRACTION_PROMPT in Code.gs) — not just tacked onto the quote afterwards.
+      return apiWrite('extractDrawing', { token: token, images: b64s, notes: notes }).then(function(){ return pollExtraction(token); });
     }).then(function(data){
       btn.disabled = false;
       statusEl.innerHTML = '';
-      startJobFromExtraction(data || {});
+      startJobFromExtraction(data || {}, notes);
     }).catch(function(e){
       btn.disabled = false;
       statusEl.innerHTML = '<div class="status-msg error">'+esc(extractErrorMessage(e))+'</div>';
@@ -851,10 +859,12 @@
     return (e && e.message) ? e.message : 'Something went wrong reading the drawing. Try again in a moment.';
   }
 
-  document.getElementById('btn-manual').addEventListener('click', function(){ startJobFromExtraction({}); });
+  document.getElementById('btn-manual').addEventListener('click', function(){
+    startJobFromExtraction({}, document.getElementById('drawing-notes').value.trim());
+  });
 
   // ================= JOB / LINE ITEMS =================
-  function startJobFromExtraction(data){
+  function startJobFromExtraction(data, notes){
     data = data || {};
     var lineItems = [];
 
@@ -927,6 +937,7 @@
 
     job = {
       customerName: '',
+      notes: notes || '',
       drawingNumber: data.drawingNumber || null,
       productName: data.productName || (currentFileName ? currentFileName.replace(/\.pdf$/i,'') : 'Untitled quote'),
       revision: data.revision || null,
@@ -1038,6 +1049,7 @@
         '<div class="field"><span class="label">Colour / finish</span><input type="text" data-f="colour" value="'+esc(j.colour||'')+'"></div>' +
       '</div>' +
       (dimStr ? '<div class="sub" style="margin-top:10px;color:var(--ink-soft);">Overall (mm): <span class="num">'+esc(dimStr)+'</span></div>' : '') +
+      '<div class="field" style="margin-top:14px;"><span class="label">Notes about this drawing</span><textarea data-f="notes" rows="2" placeholder="Anything the drawing doesn\'t show, or that should override it.">'+esc(j.notes||'')+'</textarea></div>' +
       (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '');
 
     var bom =
@@ -1160,7 +1172,7 @@
   function saveJob(){
     var newId = 'j_' + uid();
     var payload = {
-      id: newId, customerName: job.customerName,
+      id: newId, customerName: job.customerName, notes: job.notes,
       drawingNumber: job.drawingNumber, productName: job.productName, revision: job.revision,
       quantity: job.quantity, colour: job.colour, overallDimensions: job.overallDimensions,
       sourceFileName: job.sourceFileName, flags: job.flags, lineItems: job.lineItems,
