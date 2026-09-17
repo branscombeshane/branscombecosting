@@ -932,13 +932,19 @@
       var matchInfo = matchRateWithConfidence_('material', m.description, null);
       var match = matchInfo && matchInfo.exact ? matchInfo.rate : null;
       var suggestion = matchInfo && !matchInfo.exact ? matchInfo.rate : null;
+      // Only an exact match auto-links (sets rateId/price) — a fuzzy "suggestion" still
+      // needs the person to confirm it. But the unit and area-vs-volume basis are just a
+      // best guess at this point regardless, so lean on the suggestion for those too when
+      // there's no exact match yet, rather than defaulting to m² and getting solid-timber
+      // quantities wrong before the person's even had a chance to confirm the suggestion.
+      var basisRate = match || suggestion;
       // Sheet goods (melamine, MDF, mirror glass...) are naturally costed by area, but a
       // rate card entry for solid/chunky timber can be priced by volume instead (a normal
       // way hardwood is sold) — when that's the case, follow its unit and sum component
       // volume (needs thickness_mm) rather than area, so qty and price stay on the same
       // basis. Bounding-box area/volume is still only a rough estimate for anything that
       // isn't a simple rectangle (an organic or contour shape) — check it against the drawing.
-      var volumeBased = match && isVolumeUnit_(match.unit);
+      var volumeBased = basisRate && isVolumeUnit_(basisRate.unit);
       var components = m.components || [];
       var total = 0, hasAny = false, missingThickness = false;
       components.forEach(function(c){
@@ -955,14 +961,14 @@
       var qty = 0;
       if(volumeBased){
         if(hasAny && !missingThickness && total>0) qty = Math.round(total*1000)/1000;
-        else volumeFlags.push('Couldn\'t work out a volume for "'+m.description+'" (rate card unit: '+(match.unit||'m³')+') — enter the actual quantity by hand.');
+        else volumeFlags.push('Couldn\'t work out a volume for "'+m.description+'" (rate card unit: '+(basisRate.unit||'m³')+') — enter the actual quantity by hand.');
       } else {
         if(hasAny && total>0) qty = Math.round(total*100)/100;
         else volumeFlags.push('No size given for "'+m.description+'" — enter the quantity by hand.');
       }
       lineItems.push({
         id: uid(), type:'material', description: desc,
-        qty: qty, unit: match ? (match.unit || 'm²') : 'm²',
+        qty: qty, unit: basisRate ? (basisRate.unit || 'm²') : 'm²',
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
         suggestedRateId: suggestion ? suggestion.id : null
       });
