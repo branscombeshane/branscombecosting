@@ -925,42 +925,38 @@
       });
     });
 
-    var panels = data.estimatedPanels || [];
-    var usedIdx = {};
     var volumeFlags = [];
     (data.materials||[]).forEach(function(m){
-      var key = normalize(m.description);
       var matchInfo = matchRateWithConfidence_('material', m.description, null);
       var match = matchInfo && matchInfo.exact ? matchInfo.rate : null;
       var suggestion = matchInfo && !matchInfo.exact ? matchInfo.rate : null;
       // Sheet goods (melamine, MDF, mirror glass...) are naturally costed by area, but a
       // rate card entry for solid/chunky timber can be priced by volume instead (a normal
-      // way hardwood is sold) — when that's the case, follow its unit and sum panel
+      // way hardwood is sold) — when that's the case, follow its unit and sum component
       // volume (needs thickness_mm) rather than area, so qty and price stay on the same
       // basis. Bounding-box area/volume is still only a rough estimate for anything that
       // isn't a simple rectangle (an organic or contour shape) — check it against the drawing.
       var volumeBased = match && isVolumeUnit_(match.unit);
-      var total = 0, matchedAny = false, missingThickness = false;
-      panels.forEach(function(p,i){
-        var pm = normalize(p.material||'');
-        if(!pm) return;
-        if(key.indexOf(pm)!==-1 || pm.indexOf(key)!==-1){
-          matchedAny = true; usedIdx[i]=true;
-          if(volumeBased){
-            if(p.thickness_mm){ total += ((p.length_mm||0)*(p.width_mm||0)*p.thickness_mm)/1e9*(p.quantity||1); }
-            else { missingThickness = true; }
-          } else {
-            total += ((p.length_mm||0)*(p.width_mm||0))/1e6*(p.quantity||1);
-          }
+      var components = m.components || [];
+      var total = 0, hasAny = false, missingThickness = false;
+      components.forEach(function(c){
+        if(!c || !c.length_mm || !c.width_mm) return;
+        hasAny = true;
+        if(volumeBased){
+          if(c.thickness_mm){ total += (c.length_mm*c.width_mm*c.thickness_mm)/1e9*(c.quantity||1); }
+          else { missingThickness = true; }
+        } else {
+          total += (c.length_mm*c.width_mm)/1e6*(c.quantity||1);
         }
       });
       var desc = m.description + (m.colour ? (' — ' + m.colour) : '');
       var qty = 0;
       if(volumeBased){
-        if(matchedAny && !missingThickness && total>0) qty = Math.round(total*1000)/1000;
-        else volumeFlags.push('Couldn\'t work out a volume for "'+m.description+'" from the drawing (rate card unit: '+(match.unit||'m³')+') — enter the actual quantity by hand.');
+        if(hasAny && !missingThickness && total>0) qty = Math.round(total*1000)/1000;
+        else volumeFlags.push('Couldn\'t work out a volume for "'+m.description+'" (rate card unit: '+(match.unit||'m³')+') — enter the actual quantity by hand.');
       } else {
-        qty = matchedAny ? Math.round(total*100)/100 : 0;
+        if(hasAny && total>0) qty = Math.round(total*100)/100;
+        else volumeFlags.push('No size given for "'+m.description+'" — enter the quantity by hand.');
       }
       lineItems.push({
         id: uid(), type:'material', description: desc,
@@ -969,13 +965,6 @@
         suggestedRateId: suggestion ? suggestion.id : null
       });
     });
-    var leftover = panels.filter(function(p,i){ return !usedIdx[i]; });
-    if(leftover.length){
-      var totalM2 = leftover.reduce(function(s,p){ return s+((p.length_mm||0)*(p.width_mm||0))/1e6*(p.quantity||1); },0);
-      if(totalM2>0){
-        lineItems.push({ id: uid(), type:'material', description:'Unclassified panel material — check against drawing', qty: Math.round(totalM2*100)/100, unit:'m²', rateId:null, unitPrice:0 });
-      }
-    }
 
     var labourMatch = matchRate('labour','Labour',null);
     lineItems.push({ id: uid(), type:'labour', description:'Workshop labour', qty:0, unit:'hour', rateId: labourMatch?labourMatch.id:null, unitPrice: labourMatch? Number(labourMatch.price)||0 : settings.labourRate });
