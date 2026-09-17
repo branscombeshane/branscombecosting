@@ -746,10 +746,14 @@
   // ================= UPLOAD + EXTRACT =================
   function renderUploadArea(){
     var area = document.getElementById('upload-area');
-    area.innerHTML = '<div class="dropzone" id="dropzone"><strong>Drop a drawing PDF or a product photo here, or click to choose one</strong>Accepts CAD-exported PDFs with a materials / hardware schedule on the sheet, or a JPEG/PNG photo of the product — describe dimensions, materials etc. in the notes box below when using a photo<input type="file" id="file-input" accept="application/pdf,image/jpeg,image/png,image/jpg" hidden></div>';
+    area.innerHTML = '<div class="dropzone" id="dropzone"><strong>Drop a drawing PDF or a product photo here</strong>Accepts CAD-exported PDFs with a materials / hardware schedule on the sheet, or a JPEG/PNG photo of the product — describe dimensions, materials etc. in the notes box below when using a photo'
+      + '<div style="margin-top:14px;"><button type="button" class="btn" id="btn-choose-file">Choose file</button></div>'
+      + '<input type="file" id="file-input" accept="application/pdf,image/jpeg,image/png,image/jpg" hidden></div>';
     var dz = document.getElementById('dropzone');
     var fi = document.getElementById('file-input');
+    var chooseBtn = document.getElementById('btn-choose-file');
     dz.addEventListener('click', function(){ fi.click(); });
+    chooseBtn.addEventListener('click', function(e){ e.stopPropagation(); fi.click(); });
     dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag'); });
     dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
     dz.addEventListener('drop', function(e){
