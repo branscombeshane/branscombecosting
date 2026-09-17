@@ -943,6 +943,12 @@
     });
 
     var volumeFlags = [];
+    // Finish (oil/varnish/paint) is applied to a surface, not a volume, so it's tracked
+    // separately in m² regardless of what basis each material itself prices on — a solid
+    // timber component contributes its face area (length × width) here even though its own
+    // line costs by volume (length × width × thickness), while an area-priced board material
+    // contributes the exact same number to both, since its own basis already is that area.
+    var totalFinishArea = 0;
     (data.materials||[]).forEach(function(m){
       var matchInfo = matchRateWithConfidence_('material', m.description, null);
       var match = matchInfo && matchInfo.exact ? matchInfo.rate : null;
@@ -965,11 +971,13 @@
       components.forEach(function(c){
         if(!c || !c.length_mm || !c.width_mm) return;
         hasAny = true;
+        var area = (c.length_mm*c.width_mm)/1e6*(c.quantity||1);
+        totalFinishArea += area;
         if(volumeBased){
-          if(c.thickness_mm){ total += (c.length_mm*c.width_mm*c.thickness_mm)/1e9*(c.quantity||1); }
+          if(c.thickness_mm){ total += area*c.thickness_mm/1000; }
           else { missingThickness = true; }
         } else {
-          total += (c.length_mm*c.width_mm)/1e6*(c.quantity||1);
+          total += area;
         }
       });
       var desc = m.description + (m.colour ? (' — ' + m.colour) : '');
@@ -988,6 +996,17 @@
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
         suggestedRateId: suggestion ? suggestion.id : null
       });
+    });
+
+    // Every product gets finished, so a finish line is standard on every quote rather than
+    // something that has to be added by hand — pre-filled with the total surface area of the
+    // materials above (see totalFinishArea note), ready for the person costing the job to
+    // pick the actual product (oil, varnish, paint...) from the rate card.
+    lineItems.push({
+      id: uid(), type:'finish', description:'Finish',
+      qty: Math.round(totalFinishArea*100)/100, unit:'m²',
+      wastagePct: Number(settings.defaultWastePct)||0,
+      rateId: null, unitPrice: 0
     });
 
     var labourMatch = matchRate('labour','Labour',null);
@@ -1247,7 +1266,7 @@
       btn.addEventListener('click', function(e){
         e.stopPropagation();
         var type = btn.dataset.type;
-        var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : (type==='finish' ? 'litre' : 'm²'));
+        var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : 'm²');
         var defWaste = (type==='material' || type==='finish') ? (Number(settings.defaultWastePct)||0) : 0;
         jobRef.lineItems = jobRef.lineItems || [];
         jobRef.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, wastagePct:defWaste, rateId:null, unitPrice:0 });
