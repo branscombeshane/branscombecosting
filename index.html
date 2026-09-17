@@ -134,6 +134,7 @@
   td{ padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
   td.num, th.num{ text-align:right; }
   tr.section-row td{ background:var(--paper); font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:.06em; color:var(--ink-soft); border-bottom:1px solid var(--line-strong); }
+  tr.subgroup-row td{ font-weight:600; font-size:11px; letter-spacing:.03em; color:var(--ink-soft); padding-top:12px; border-bottom:1px solid var(--line); }
   input[type="text"], input[type="number"], input[type="password"], select{
     font-family:inherit; font-size:13px; border:1px solid var(--line); background:var(--paper);
     color:var(--ink); padding:5px 7px; width:100%;
@@ -244,9 +245,11 @@
         <div class="field" style="min-width:110px;"><span class="label">Category</span>
           <select id="rf-category"><option value="material">Material</option><option value="hardware">Hardware</option><option value="finish">Finish</option><option value="labour">Labour</option></select>
         </div>
+        <div class="field" style="min-width:120px;"><span class="label">Subcategory</span><input type="text" id="rf-subcategory" placeholder="Wood, Steel, Veneer…" list="subcategory-list"></div>
+        <datalist id="subcategory-list"></datalist>
         <div class="field" style="min-width:90px;"><span class="label">Unit</span><input type="text" id="rf-unit" placeholder="m², each, hour" list="unit-list"></div>
         <datalist id="unit-list"><option value="m²"><option value="m³"><option value="m"><option value="each"><option value="sheet"><option value="hour"><option value="litre"><option value="kg"></datalist>
-        <div class="field" style="min-width:100px;"><span class="label">Price (R)</span><input type="number" id="rf-price" step="0.01" min="0"></div>
+        <div class="field" style="min-width:100px;"><span class="label">Price (R, excl. VAT)</span><input type="number" id="rf-price" step="0.01" min="0"></div>
         <div class="field" style="min-width:90px;"><span class="label">SKU (optional)</span><input type="text" id="rf-sku"></div>
         <button class="btn primary" id="btn-add-rate">Add to rate card</button>
       </div>
@@ -261,7 +264,7 @@
     <div class="panel" style="max-width:440px;">
       <div class="field-row">
         <div class="field"><span class="label">Default markup %</span><input type="number" id="set-markup" step="1" min="0"></div>
-        <div class="field"><span class="label">Default labour rate (R / hour)</span><input type="number" id="set-labour" step="1" min="0"></div>
+        <div class="field"><span class="label">Default labour rate (R / hour, excl. VAT)</span><input type="number" id="set-labour" step="1" min="0"></div>
       </div>
       <div class="field-row"><button class="btn primary" id="btn-save-settings">Save defaults</button></div>
       <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
@@ -498,41 +501,94 @@
     });
   }
 
+  // One row of a rate card table. Description is always editable (wording drifts —
+  // different designers describe the same product differently, so being able to fix
+  // it in place beats deleting and re-adding). Subcategory is Materials-only: it's
+  // what groups the Materials block into Wood / Steel / Veneer / etc. sections below.
+  function rateRow_(r, showSubcategory){
+    return '<tr data-id="'+r.id+'">' +
+      '<td><input type="text" class="rate-name" value="'+esc(r.name)+'">'+(r.example?' <span class="chip example">example</span>':'')+'</td>' +
+      (showSubcategory ? '<td><input type="text" class="rate-subcategory" list="subcategory-list" value="'+esc(r.subcategory||'')+'"></td>' : '') +
+      '<td>'+esc(r.unit||'')+'</td>' +
+      '<td class="num"><input type="number" class="num rate-price" step="0.01" min="0" value="'+(r.price!=null?r.price:0)+'"></td>' +
+      '<td>'+esc(r.sku||'')+'</td>' +
+      '<td><button class="btn small rate-save">Save</button></td>' +
+      '<td><button class="btn small danger rate-del">Delete</button></td>' +
+      '</tr>';
+  }
+
+  // Keeps the Subcategory field's autocomplete in sync with whatever's actually in
+  // use on the rate card, on top of a few sensible starting suggestions.
+  function updateSubcategoryDatalist_(){
+    var dl = document.getElementById('subcategory-list');
+    if(!dl) return;
+    var base = ['Wood','Steel','Veneer','Glass','Laminate'];
+    var existing = rates.filter(function(r){ return r.category==='material' && r.subcategory; }).map(function(r){ return r.subcategory; });
+    var all = base.concat(existing).filter(function(v,i,arr){ return arr.indexOf(v)===i; }).sort();
+    dl.innerHTML = all.map(function(v){ return '<option value="'+esc(v)+'">'; }).join('');
+  }
+
   function renderRatesTables(){
     var wrap = document.getElementById('rates-tables');
     var cats = [['material','Materials'],['hardware','Hardware'],['finish','Finish'],['labour','Labour']];
     var html = '';
     cats.forEach(function(c){
-      var rows = rates.filter(function(r){ return r.category===c[0]; }).sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
-      html += '<div class="table-wrap"><table><thead><tr class="section-row"><td colspan="6">'+c[1]+'</td></tr>' +
-        '<tr><th>Description</th><th>Unit</th><th class="num">Price</th><th>SKU</th><th></th><th></th></tr></thead><tbody>';
+      var isMaterial = c[0]==='material';
+      var cols = isMaterial ? 7 : 6;
+      var rows = rates.filter(function(r){ return r.category===c[0]; });
+      html += '<div class="table-wrap"><table><thead><tr class="section-row"><td colspan="'+cols+'">'+c[1]+'</td></tr>' +
+        '<tr><th>Description</th>'+(isMaterial?'<th>Subcategory</th>':'')+'<th>Unit</th><th class="num">Price (excl. VAT)</th><th>SKU</th><th></th><th></th></tr></thead><tbody>';
       if(!rows.length){
-        html += '<tr><td colspan="6" class="empty">No '+c[1].toLowerCase()+' on the rate card yet.</td></tr>';
+        html += '<tr><td colspan="'+cols+'" class="empty">No '+c[1].toLowerCase()+' on the rate card yet.</td></tr>';
+      } else if(!isMaterial){
+        rows.sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); }).forEach(function(r){
+          html += rateRow_(r, false);
+        });
+      } else {
+        // Group Materials by subcategory (Wood, Steel, Veneer, ...) so a growing rate
+        // card stays browsable; anything without one yet lands in "Uncategorized".
+        var NO_SUBCATEGORY = 'zzz-uncategorized';
+        var groups = {};
+        rows.forEach(function(r){
+          var key = (r.subcategory||'').trim() || NO_SUBCATEGORY;
+          (groups[key] = groups[key] || []).push(r);
+        });
+        Object.keys(groups).sort(function(a,b){
+          if(a===NO_SUBCATEGORY) return 1;
+          if(b===NO_SUBCATEGORY) return -1;
+          return a.localeCompare(b);
+        }).forEach(function(key){
+          var label = key===NO_SUBCATEGORY ? 'Uncategorized' : key;
+          html += '<tr class="subgroup-row"><td colspan="'+cols+'">'+esc(label)+'</td></tr>';
+          groups[key].sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); }).forEach(function(r){
+            html += rateRow_(r, true);
+          });
+        });
       }
-      rows.forEach(function(r){
-        html += '<tr data-id="'+r.id+'">' +
-          '<td>'+esc(r.name)+(r.example?' <span class="chip example">example</span>':'')+'</td>' +
-          '<td>'+esc(r.unit||'')+'</td>' +
-          '<td class="num"><input type="number" class="num rate-price" step="0.01" min="0" value="'+(r.price!=null?r.price:0)+'"></td>' +
-          '<td>'+esc(r.sku||'')+'</td>' +
-          '<td><button class="btn small rate-save">Save</button></td>' +
-          '<td><button class="btn small danger rate-del">Delete</button></td>' +
-          '</tr>';
-      });
       html += '</tbody></table></div>';
     });
     wrap.innerHTML = html;
+    updateSubcategoryDatalist_();
 
     // These update the in-memory `rates` array directly rather than re-fetching
     // afterwards — apiWrite can't read back a confirmation, and a reload racing
-    // ahead of the write landing on the backend would show the stale value.
+    // ahead of the write landing on the backend would show the stale value. Editing
+    // name/subcategory can change sort order or grouping, so those re-render.
     wrap.querySelectorAll('.rate-save').forEach(function(btn){
       btn.addEventListener('click', function(){
         var tr = btn.closest('tr'); var id = tr.dataset.id;
+        var name = tr.querySelector('.rate-name').value.trim();
         var price = Number(tr.querySelector('.rate-price').value)||0;
-        apiWrite('updateRate', { id:id, price:price }).then(function(){
+        var subInput = tr.querySelector('.rate-subcategory');
+        var payload = { id:id, name:name, price:price };
+        if(subInput) payload.subcategory = subInput.value.trim();
+        apiWrite('updateRate', payload).then(function(){
           var r = rates.find(function(x){ return x.id===id; });
-          if(r){ r.price = price; r.example = false; }
+          if(r){
+            r.name = name; r.price = price; r.example = false;
+            if(subInput) r.subcategory = payload.subcategory;
+          }
+          renderRatesTables();
         });
       });
     });
@@ -551,14 +607,16 @@
   document.getElementById('btn-add-rate').addEventListener('click', function(){
     var name = document.getElementById('rf-name').value.trim();
     var category = document.getElementById('rf-category').value;
+    var subcategory = category==='material' ? document.getElementById('rf-subcategory').value.trim() : '';
     var unit = document.getElementById('rf-unit').value.trim();
     var price = Number(document.getElementById('rf-price').value)||0;
     var sku = document.getElementById('rf-sku').value.trim();
     if(!name){ document.getElementById('rf-name').focus(); return; }
     var newId = 'r_' + uid();
-    apiWrite('addRate', { id:newId, name:name, category:category, unit:unit, price:price, sku:sku||null }).then(function(){
-      rates.push({ id:newId, name:name, category:category, unit:unit, price:price, sku:sku||null, example:false });
+    apiWrite('addRate', { id:newId, name:name, category:category, subcategory:subcategory, unit:unit, price:price, sku:sku||null }).then(function(){
+      rates.push({ id:newId, name:name, category:category, subcategory:subcategory, unit:unit, price:price, sku:sku||null, example:false });
       document.getElementById('rf-name').value='';
+      document.getElementById('rf-subcategory').value='';
       document.getElementById('rf-unit').value='';
       document.getElementById('rf-price').value='';
       document.getElementById('rf-sku').value='';
@@ -863,7 +921,7 @@
       '<div class="stat"><span class="label">Labour</span><div class="value num">'+money(t.labour)+'</div></div>' +
       '<div class="stat"><span class="label">Subtotal</span><div class="value num">'+money(t.subtotal)+'</div></div>' +
       '<div class="stat"><span class="label">Markup</span><div class="value num">'+money(t.markup)+'</div></div>' +
-      '<div class="stat total"><span class="label">Total (sell price)</span><div class="value num">'+money(t.total)+'</div></div>';
+      '<div class="stat total"><span class="label">Total (sell price, excl. VAT)</span><div class="value num">'+money(t.total)+'</div></div>';
   }
 
   // Builds the three editable sections (header fields / bill of materials / markup)
@@ -897,7 +955,7 @@
       (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '');
 
     var bom =
-      '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Rate (R)</th><th class="num">Line total</th><th>Rate card</th><th></th></tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Rate (R, excl. VAT)</th><th class="num">Line total (excl. VAT)</th><th>Rate card</th><th></th></tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
       '<div class="field-row"><button class="btn add-line" data-type="material">+ Material line</button><button class="btn add-line" data-type="hardware">+ Hardware line</button><button class="btn add-line" data-type="finish">+ Finish line</button><button class="btn add-line" data-type="labour">+ Labour line</button></div>';
 
     var markup =
@@ -1048,7 +1106,7 @@
     var card = el('<div class="job-card"></div>');
     var date = j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-ZA', {year:'numeric',month:'short',day:'numeric'}) : '';
     card.innerHTML =
-      '<div class="row1"><strong>'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+'</span></div>' +
+      '<div class="row1"><strong>'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+' <span style="font-size:10px;font-weight:400;font-family:\'IBM Plex Sans\',sans-serif;color:var(--ink-soft);">excl. VAT</span></span></div>' +
       '<div class="meta">'+esc(j.customerName||'No customer')+' · '+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+' · <span style="text-decoration:underline;">edit</span></div>' +
       '<div class="job-detail" hidden></div>';
 
