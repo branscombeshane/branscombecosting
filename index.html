@@ -1105,9 +1105,10 @@
     var t = computeTotals(j);
     var card = el('<div class="job-card"></div>');
     var date = j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-ZA', {year:'numeric',month:'short',day:'numeric'}) : '';
+    var title = (j.customerName ? j.customerName+' - ' : '') + (j.productName||'Untitled');
     card.innerHTML =
-      '<div class="row1"><strong>'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+' <span style="font-size:10px;font-weight:400;font-family:\'IBM Plex Sans\',sans-serif;color:var(--ink-soft);">excl. VAT</span></span></div>' +
-      '<div class="meta">'+esc(j.customerName||'No customer')+' · '+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+' · <span style="text-decoration:underline;">edit</span></div>' +
+      '<div class="row1"><strong>'+esc(title)+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+' <span style="font-size:10px;font-weight:400;font-family:\'IBM Plex Sans\',sans-serif;color:var(--ink-soft);">excl. VAT</span></span></div>' +
+      '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+' · <span style="text-decoration:underline;">edit</span></div>' +
       '<div class="job-detail" hidden></div>';
 
     var detail = card.querySelector('.job-detail');
