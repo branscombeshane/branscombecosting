@@ -245,8 +245,7 @@
         <div class="field" style="min-width:110px;"><span class="label">Category</span>
           <select id="rf-category"><option value="material">Material</option><option value="hardware">Hardware</option><option value="finish">Finish</option><option value="labour">Labour</option></select>
         </div>
-        <div class="field" style="min-width:120px;"><span class="label">Subcategory</span><input type="text" id="rf-subcategory" placeholder="Wood, Steel, Veneer…" list="subcategory-list"></div>
-        <datalist id="subcategory-list"></datalist>
+        <div class="field" style="min-width:140px;"><span class="label">Subcategory</span><select id="rf-subcategory"></select></div>
         <div class="field" style="min-width:90px;"><span class="label">Unit</span><input type="text" id="rf-unit" placeholder="m², each, hour" list="unit-list"></div>
         <datalist id="unit-list"><option value="m²"><option value="m³"><option value="m"><option value="each"><option value="sheet"><option value="hour"><option value="litre"><option value="kg"></datalist>
         <div class="field" style="min-width:100px;"><span class="label">Price (R, excl. VAT)</span><input type="number" id="rf-price" step="0.01" min="0"></div>
@@ -269,6 +268,16 @@
       <div class="field-row"><button class="btn primary" id="btn-save-settings">Save defaults</button></div>
       <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
+
+    <div class="panel" style="max-width:440px;">
+      <h2 style="margin:0 0 4px;">Material subcategories</h2>
+      <div class="sub" style="margin-bottom:14px;">Groups the Materials rate card into sections (Wood, Steel, Veneer…). Renaming one updates every rate card item using it; deleting one leaves those items as Uncategorized rather than losing them.</div>
+      <div id="subcategory-list-mgr"></div>
+      <div class="field-row" style="margin-top:16px;">
+        <div class="field"><span class="label">New subcategory</span><input type="text" id="sc-new-name" placeholder="e.g. Foam"></div>
+        <button class="btn primary" id="btn-add-subcategory" style="align-self:flex-end;">Add</button>
+      </div>
+    </div>
   </section>
 
 </main>
@@ -289,7 +298,7 @@
   var pdfImages = [];
   var job = null;
   var view = 'new';
-  var settings = { markupPct: 35, labourRate: 220 };
+  var settings = { markupPct: 35, labourRate: 220, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'] };
   var currentFileName = null;
 
   function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -508,7 +517,7 @@
   function rateRow_(r, showSubcategory){
     return '<tr data-id="'+r.id+'">' +
       '<td><input type="text" class="rate-name" value="'+esc(r.name)+'">'+(r.example?' <span class="chip example">example</span>':'')+'</td>' +
-      (showSubcategory ? '<td><input type="text" class="rate-subcategory" list="subcategory-list" value="'+esc(r.subcategory||'')+'"></td>' : '') +
+      (showSubcategory ? '<td><select class="rate-subcategory">'+subcategoryOptionsHtml_(r.subcategory||'')+'</select></td>' : '') +
       '<td>'+esc(r.unit||'')+'</td>' +
       '<td class="num"><input type="number" class="num rate-price" step="0.01" min="0" value="'+(r.price!=null?r.price:0)+'"></td>' +
       '<td>'+esc(r.sku||'')+'</td>' +
@@ -517,15 +526,19 @@
       '</tr>';
   }
 
-  // Keeps the Subcategory field's autocomplete in sync with whatever's actually in
-  // use on the rate card, on top of a few sensible starting suggestions.
-  function updateSubcategoryDatalist_(){
-    var dl = document.getElementById('subcategory-list');
-    if(!dl) return;
-    var base = ['Wood','Steel','Veneer','Glass','Laminate'];
-    var existing = rates.filter(function(r){ return r.category==='material' && r.subcategory; }).map(function(r){ return r.subcategory; });
-    var all = base.concat(existing).filter(function(v,i,arr){ return arr.indexOf(v)===i; }).sort();
-    dl.innerHTML = all.map(function(v){ return '<option value="'+esc(v)+'">'; }).join('');
+  // Options for a subcategory <select>, built from the managed list in Settings.
+  // If the row's current value has since been removed from that list (e.g. deleted
+  // by someone else), it's still included so the field doesn't silently change what
+  // it shows — it'll only disappear once actually re-saved to something else.
+  function subcategoryOptionsHtml_(selected){
+    var list = (settings.materialSubcategories || []).slice();
+    if(selected && list.indexOf(selected)===-1) list.push(selected);
+    list.sort();
+    var html = '<option value=""'+(selected?'':' selected')+'>— none (Uncategorized) —</option>';
+    list.forEach(function(name){
+      html += '<option value="'+esc(name)+'"'+(name===selected?' selected':'')+'>'+esc(name)+'</option>';
+    });
+    return html;
   }
 
   function renderRatesTables(){
@@ -568,7 +581,7 @@
       html += '</tbody></table></div>';
     });
     wrap.innerHTML = html;
-    updateSubcategoryDatalist_();
+    refreshAddRateSubcategoryField_();
 
     // These update the in-memory `rates` array directly rather than re-fetching
     // afterwards — apiWrite can't read back a confirmation, and a reload racing
@@ -603,6 +616,17 @@
       });
     });
   }
+
+  // The "Add to rate card" form's Subcategory field only means anything for
+  // Materials — keep its options current and grey it out otherwise.
+  function refreshAddRateSubcategoryField_(){
+    var sel = document.getElementById('rf-subcategory');
+    if(!sel) return;
+    var isMaterial = document.getElementById('rf-category').value==='material';
+    sel.innerHTML = subcategoryOptionsHtml_('');
+    sel.disabled = !isMaterial;
+  }
+  document.getElementById('rf-category').addEventListener('change', refreshAddRateSubcategoryField_);
 
   document.getElementById('btn-add-rate').addEventListener('click', function(){
     var name = document.getElementById('rf-name').value.trim();
@@ -639,7 +663,65 @@
   function fillSettingsForm(){
     document.getElementById('set-markup').value = settings.markupPct;
     document.getElementById('set-labour').value = settings.labourRate;
+    renderSubcategoryManager();
   }
+
+  // Renaming or deleting a subcategory here is fire-and-forget on the backend (it
+  // cascades onto every Rates row using it), so we mirror the change onto the local
+  // `rates` array ourselves rather than waiting on a response that never comes back.
+  function renderSubcategoryManager(){
+    var wrap = document.getElementById('subcategory-list-mgr');
+    if(!wrap) return;
+    var list = settings.materialSubcategories || [];
+    if(!list.length){
+      wrap.innerHTML = '<div class="empty">No subcategories set up yet — add one below.</div>';
+    } else {
+      wrap.innerHTML = list.slice().sort().map(function(name){
+        return '<div class="field-row sc-row" data-name="'+esc(name)+'" style="margin-top:8px;align-items:center;">' +
+          '<input type="text" class="sc-rename-input" value="'+esc(name)+'" style="flex:1;min-width:120px;">' +
+          '<button class="btn small sc-rename">Save</button>' +
+          '<button class="btn small danger sc-delete">Delete</button>' +
+          '</div>';
+      }).join('');
+    }
+    wrap.querySelectorAll('.sc-rename').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var row = btn.closest('.sc-row'); var oldName = row.dataset.name;
+        var newName = row.querySelector('.sc-rename-input').value.trim();
+        if(!newName || newName===oldName) return;
+        apiWrite('renameSubcategory', { oldName:oldName, newName:newName }).then(function(){
+          settings.materialSubcategories = (settings.materialSubcategories||[]).filter(function(n){ return n!==oldName; });
+          if(settings.materialSubcategories.indexOf(newName)===-1) settings.materialSubcategories.push(newName);
+          rates.forEach(function(r){ if(r.category==='material' && r.subcategory===oldName) r.subcategory=newName; });
+          renderSubcategoryManager();
+        });
+      });
+    });
+    wrap.querySelectorAll('.sc-delete').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var row = btn.closest('.sc-row'); var name = row.dataset.name;
+        if(!confirm('Delete "'+name+'"? Materials using it will show as Uncategorized instead — they won\'t be removed.')) return;
+        apiWrite('deleteSubcategory', { name:name }).then(function(){
+          settings.materialSubcategories = (settings.materialSubcategories||[]).filter(function(n){ return n!==name; });
+          rates.forEach(function(r){ if(r.category==='material' && r.subcategory===name) r.subcategory=''; });
+          renderSubcategoryManager();
+        });
+      });
+    });
+  }
+  document.getElementById('btn-add-subcategory').addEventListener('click', function(){
+    var input = document.getElementById('sc-new-name');
+    var name = input.value.trim();
+    if(!name){ input.focus(); return; }
+    if((settings.materialSubcategories||[]).indexOf(name)!==-1){ input.value=''; return; }
+    apiWrite('addSubcategory', { name:name }).then(function(){
+      settings.materialSubcategories = settings.materialSubcategories || [];
+      settings.materialSubcategories.push(name);
+      input.value = '';
+      renderSubcategoryManager();
+    });
+  });
+
   document.getElementById('btn-save-settings').addEventListener('click', function(){
     settings.markupPct = Number(document.getElementById('set-markup').value)||0;
     settings.labourRate = Number(document.getElementById('set-labour').value)||0;
