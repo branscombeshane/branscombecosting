@@ -444,6 +444,13 @@
   }
 
   // ================= RATE CARD =================
+  // Recognises "m³" typed as the superscript character, plain "m3", or "cubic
+  // metre(s)/meter(s)" — anything else (m², each, hour, linear m, ...) is area/count/time
+  // basis and uses the existing length×width sheet-area math.
+  function isVolumeUnit_(u){
+    var n = (u||'').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
+    return n==='m3' || n==='cubicmetre' || n==='cubicmetres' || n==='cubicmeter' || n==='cubicmeters';
+  }
   function matchRate(type, description, sku){
     var pool = rates.filter(function(r){ return r.category===type; });
     if(sku){
@@ -705,22 +712,42 @@
 
     var panels = data.estimatedPanels || [];
     var usedIdx = {};
+    var volumeFlags = [];
     (data.materials||[]).forEach(function(m){
       var key = normalize(m.description);
-      var totalM2 = 0, matchedAny = false;
+      var match = matchRate('material', m.description, null);
+      // Sheet goods (melamine, MDF, mirror glass...) are naturally costed by area, but a
+      // rate card entry for solid/chunky timber can be priced by volume instead (a normal
+      // way hardwood is sold) — when that's the case, follow its unit and sum panel
+      // volume (needs thickness_mm) rather than area, so qty and price stay on the same
+      // basis. Bounding-box area/volume is still only a rough estimate for anything that
+      // isn't a simple rectangle (an organic or contour shape) — check it against the drawing.
+      var volumeBased = match && isVolumeUnit_(match.unit);
+      var total = 0, matchedAny = false, missingThickness = false;
       panels.forEach(function(p,i){
         var pm = normalize(p.material||'');
         if(!pm) return;
         if(key.indexOf(pm)!==-1 || pm.indexOf(key)!==-1){
-          var area = ((p.length_mm||0)*(p.width_mm||0))/1e6*(p.quantity||1);
-          totalM2 += area; matchedAny = true; usedIdx[i]=true;
+          matchedAny = true; usedIdx[i]=true;
+          if(volumeBased){
+            if(p.thickness_mm){ total += ((p.length_mm||0)*(p.width_mm||0)*p.thickness_mm)/1e9*(p.quantity||1); }
+            else { missingThickness = true; }
+          } else {
+            total += ((p.length_mm||0)*(p.width_mm||0))/1e6*(p.quantity||1);
+          }
         }
       });
       var desc = m.description + (m.colour ? (' — ' + m.colour) : '');
-      var match = matchRate('material', m.description, null);
+      var qty = 0;
+      if(volumeBased){
+        if(matchedAny && !missingThickness && total>0) qty = Math.round(total*1000)/1000;
+        else volumeFlags.push('Couldn\'t work out a volume for "'+m.description+'" from the drawing (rate card unit: '+(match.unit||'m³')+') — enter the actual quantity by hand.');
+      } else {
+        qty = matchedAny ? Math.round(total*100)/100 : 0;
+      }
       lineItems.push({
         id: uid(), type:'material', description: desc,
-        qty: matchedAny ? Math.round(totalM2*100)/100 : 0, unit:'m²',
+        qty: qty, unit: match ? (match.unit || 'm²') : 'm²',
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0
       });
     });
@@ -736,6 +763,7 @@
     lineItems.push({ id: uid(), type:'labour', description:'Workshop labour', qty:0, unit:'hour', rateId: labourMatch?labourMatch.id:null, unitPrice: labourMatch? Number(labourMatch.price)||0 : settings.labourRate });
 
     job = {
+      customerName: '',
       drawingNumber: data.drawingNumber || null,
       productName: data.productName || (currentFileName ? currentFileName.replace(/\.pdf$/i,'') : 'Untitled quote'),
       revision: data.revision || null,
@@ -743,7 +771,7 @@
       colour: data.colour || null,
       overallDimensions: data.overallDimensions || {},
       sourceFileName: currentFileName,
-      flags: data.flags || [],
+      flags: (data.flags || []).concat(volumeFlags),
       lineItems: lineItems,
       markupPct: settings.markupPct
     };
@@ -833,6 +861,7 @@
 
     var header =
       '<div class="field-row">' +
+        '<div class="field"><span class="label">Customer</span><input type="text" data-f="customerName" value="'+esc(j.customerName||'')+'"></div>' +
         '<div class="field"><span class="label">Product</span><input type="text" data-f="productName" value="'+esc(j.productName||'')+'"></div>' +
         '<div class="field"><span class="label">Drawing no.</span><input type="text" data-f="drawingNumber" value="'+esc(j.drawingNumber||'')+'"></div>' +
         '<div class="field"><span class="label">Quantity</span><input type="number" data-f="quantity" min="1" value="'+(j.quantity||1)+'"></div>' +
@@ -939,7 +968,7 @@
   function saveJob(){
     var newId = 'j_' + uid();
     var payload = {
-      id: newId,
+      id: newId, customerName: job.customerName,
       drawingNumber: job.drawingNumber, productName: job.productName, revision: job.revision,
       quantity: job.quantity, colour: job.colour, overallDimensions: job.overallDimensions,
       sourceFileName: job.sourceFileName, flags: job.flags, lineItems: job.lineItems,
@@ -972,7 +1001,7 @@
     var date = j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-ZA', {year:'numeric',month:'short',day:'numeric'}) : '';
     card.innerHTML =
       '<div class="row1"><strong>'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+'</span></div>' +
-      '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+' · <span style="text-decoration:underline;">edit</span></div>' +
+      '<div class="meta">'+esc(j.customerName||'No customer')+' · '+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+' · <span style="text-decoration:underline;">edit</span></div>' +
       '<div class="job-detail" hidden></div>';
 
     var detail = card.querySelector('.job-detail');
