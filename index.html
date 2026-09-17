@@ -143,7 +143,9 @@
   input.num, td input[type="number"]{ font-family:"IBM Plex Mono",monospace; text-align:right; }
   .cell-desc{ min-width:190px; }
   .cell-qty, .cell-unit{ width:84px; }
+  .cell-waste{ width:68px; }
   .cell-rate{ width:104px; }
+  .rate-pick{ margin-top:6px; font-size:11px; padding:3px 5px; }
   .input-affix{ position:relative; display:block; }
   .input-affix .affix{ position:absolute; left:7px; top:50%; transform:translateY(-50%); color:var(--ink-soft); font-size:13px; font-family:"IBM Plex Mono",monospace; pointer-events:none; }
   .input-affix input{ padding-left:18px; }
@@ -986,8 +988,16 @@
     renderReview();
   }
 
+  // Wastage % inflates the quantity actually charged for, to cover offcuts,
+  // over-cutting, breakage etc. — the qty column stays the net amount the job
+  // needs, and wastage is layered on top only when working out cost.
+  function lineTotal(item){
+    var qty = Number(item.qty)||0, waste = Number(item.wastagePct)||0, price = Number(item.unitPrice)||0;
+    return qty * (1 + waste/100) * price;
+  }
+
   function computeTotals(j){
-    function byType(t){ return (j.lineItems||[]).filter(function(i){ return i.type===t; }).reduce(function(s,i){ return s + (Number(i.qty)||0)*(Number(i.unitPrice)||0); }, 0); }
+    function byType(t){ return (j.lineItems||[]).filter(function(i){ return i.type===t; }).reduce(function(s,i){ return s + lineTotal(i); }, 0); }
     var materials = byType('material'), hardware = byType('hardware'), finish = byType('finish'), labour = byType('labour');
     var subtotal = materials+hardware+finish+labour;
     var markup = subtotal * (Number(j.markupPct)||0) / 100;
@@ -1015,6 +1025,19 @@
     return '<span class="chip good">On rate card</span>';
   }
 
+  // A manual escape hatch alongside the auto-match/suggestion chip above: wording
+  // sometimes differs enough from the rate card that even the "similar to" fuzzy
+  // match misses it, so this lets the person costing the job just pick the right
+  // existing rate directly instead of ending up with a duplicate "new" one.
+  function ratePickerHtml(item){
+    var pool = rates.filter(function(r){ return r.category===item.type; }).slice().sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+    if(!pool.length) return '';
+    var opts = pool.map(function(r){
+      return '<option value="'+r.id+'"'+(item.rateId===r.id?' selected':'')+'>'+esc(r.name)+' ('+money(r.price)+')</option>';
+    }).join('');
+    return '<div><select class="rate-pick li-pick-rate" data-id="'+item.id+'"><option value="">Choose from rate card…</option>'+opts+'</select></div>';
+  }
+
   // Creates the rate if the line has none yet; updates the existing rate's price to
   // this line's price otherwise — either way the rate card ends up matching the
   // latest price actually used, which is the point of the button next to it.
@@ -1038,9 +1061,10 @@
       '<td class="cell-desc"><input type="text" class="li-desc" value="'+esc(item.description)+'"></td>' +
       '<td class="cell-qty"><input type="number" class="li-qty num" step="0.01" value="'+item.qty+'"></td>' +
       '<td class="cell-unit"><input type="text" class="li-unit" value="'+esc(item.unit)+'"></td>' +
+      '<td class="cell-waste num"><input type="number" class="li-waste num" step="1" min="0" value="'+(item.wastagePct||0)+'"></td>' +
       '<td class="cell-rate num"><div class="input-affix"><span class="affix">R</span><input type="number" class="li-price num" step="0.01" value="'+item.unitPrice+'"></div></td>' +
-      '<td class="num">'+money((Number(item.qty)||0)*(Number(item.unitPrice)||0))+'</td>' +
-      '<td>'+rateChip(item)+'</td>' +
+      '<td class="num li-total">'+money(lineTotal(item))+'</td>' +
+      '<td>'+rateChip(item)+ratePickerHtml(item)+'</td>' +
       '<td><button class="btn ghost li-del" title="Remove line">✕</button></td>' +
       '</tr>';
   }
@@ -1067,8 +1091,8 @@
     var rowsHtml = '';
     groups.forEach(function(g){
       var items = (j.lineItems||[]).filter(function(i){ return i.type===g[0]; });
-      rowsHtml += '<tr class="section-row"><td colspan="7">'+g[1]+'</td></tr>';
-      if(!items.length) rowsHtml += '<tr><td colspan="7" class="empty">No '+g[1].toLowerCase()+' lines yet.</td></tr>';
+      rowsHtml += '<tr class="section-row"><td colspan="8">'+g[1]+'</td></tr>';
+      if(!items.length) rowsHtml += '<tr><td colspan="8" class="empty">No '+g[1].toLowerCase()+' lines yet.</td></tr>';
       items.forEach(function(i){ rowsHtml += lineRow(i); });
     });
 
@@ -1087,7 +1111,7 @@
       (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '');
 
     var bom =
-      '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Rate (excl. VAT)</th><th class="num">Line total (excl. VAT)</th><th>Rate card</th><th></th></tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Waste %</th><th class="num">Rate (excl. VAT)</th><th class="num">Line total (excl. VAT)</th><th>Rate card</th><th></th></tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
       '<div class="field-row"><button class="btn add-line" data-type="material">+ Material line</button><button class="btn add-line" data-type="hardware">+ Hardware line</button><button class="btn add-line" data-type="finish">+ Finish line</button><button class="btn add-line" data-type="labour">+ Labour line</button></div>';
 
     var markup =
@@ -1130,12 +1154,28 @@
         if(e.target.classList.contains('li-desc')) item.description = e.target.value;
         if(e.target.classList.contains('li-qty')) item.qty = Number(e.target.value)||0;
         if(e.target.classList.contains('li-unit')) item.unit = e.target.value;
+        if(e.target.classList.contains('li-waste')) item.wastagePct = Number(e.target.value)||0;
         if(e.target.classList.contains('li-price')) item.unitPrice = Number(e.target.value)||0;
-        if(e.target.classList.contains('li-qty') || e.target.classList.contains('li-price')){
-          var td = tr.querySelectorAll('td.num')[1];
-          if(td) td.textContent = money((Number(item.qty)||0)*(Number(item.unitPrice)||0));
+        if(e.target.classList.contains('li-qty') || e.target.classList.contains('li-waste') || e.target.classList.contains('li-price')){
+          var td = tr.querySelector('.li-total');
+          if(td) td.textContent = money(lineTotal(item));
           refreshStats();
         }
+      });
+      liBody.addEventListener('change', function(e){
+        var sel = e.target.closest('.li-pick-rate');
+        if(!sel) return;
+        var tr = sel.closest('tr'); if(!tr || !tr.dataset.id) return;
+        var item = (jobRef.lineItems||[]).find(function(i){ return i.id===tr.dataset.id; }); if(!item) return;
+        if(!sel.value) return;
+        var rate = rates.find(function(r){ return r.id===sel.value; });
+        if(rate){
+          item.rateId = rate.id;
+          item.unitPrice = Number(rate.price)||0;
+          item.unit = rate.unit || item.unit;
+          item.suggestedRateId = null;
+        }
+        rerender();
       });
       liBody.addEventListener('click', function(e){
         var delBtn = e.target.closest('.li-del');
@@ -1183,7 +1223,7 @@
         var type = btn.dataset.type;
         var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : (type==='finish' ? 'litre' : 'm²'));
         jobRef.lineItems = jobRef.lineItems || [];
-        jobRef.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, rateId:null, unitPrice:0 });
+        jobRef.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, wastagePct:0, rateId:null, unitPrice:0 });
         rerender();
       });
     });
