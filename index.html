@@ -242,10 +242,10 @@
       <div class="add-rate-form">
         <div class="field"><span class="label">Description</span><input type="text" id="rf-name" placeholder="e.g. 16mm Melamine"></div>
         <div class="field" style="min-width:110px;"><span class="label">Category</span>
-          <select id="rf-category"><option value="material">Material</option><option value="hardware">Hardware</option><option value="labour">Labour</option></select>
+          <select id="rf-category"><option value="material">Material</option><option value="hardware">Hardware</option><option value="finish">Finish</option><option value="labour">Labour</option></select>
         </div>
         <div class="field" style="min-width:90px;"><span class="label">Unit</span><input type="text" id="rf-unit" placeholder="m², each, hour" list="unit-list"></div>
-        <datalist id="unit-list"><option value="m²"><option value="m"><option value="each"><option value="sheet"><option value="hour"><option value="kg"></datalist>
+        <datalist id="unit-list"><option value="m²"><option value="m³"><option value="m"><option value="each"><option value="sheet"><option value="hour"><option value="litre"><option value="kg"></datalist>
         <div class="field" style="min-width:100px;"><span class="label">Price (R)</span><input type="number" id="rf-price" step="0.01" min="0"></div>
         <div class="field" style="min-width:90px;"><span class="label">SKU (optional)</span><input type="text" id="rf-sku"></div>
         <button class="btn primary" id="btn-add-rate">Add to rate card</button>
@@ -487,7 +487,7 @@
 
   function renderRatesTables(){
     var wrap = document.getElementById('rates-tables');
-    var cats = [['material','Materials'],['hardware','Hardware'],['labour','Labour']];
+    var cats = [['material','Materials'],['hardware','Hardware'],['finish','Finish'],['labour','Labour']];
     var html = '';
     cats.forEach(function(c){
       var rows = rates.filter(function(r){ return r.category===c[0]; }).sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
@@ -780,10 +780,10 @@
 
   function computeTotals(j){
     function byType(t){ return (j.lineItems||[]).filter(function(i){ return i.type===t; }).reduce(function(s,i){ return s + (Number(i.qty)||0)*(Number(i.unitPrice)||0); }, 0); }
-    var materials = byType('material'), hardware = byType('hardware'), labour = byType('labour');
-    var subtotal = materials+hardware+labour;
+    var materials = byType('material'), hardware = byType('hardware'), finish = byType('finish'), labour = byType('labour');
+    var subtotal = materials+hardware+finish+labour;
     var markup = subtotal * (Number(j.markupPct)||0) / 100;
-    return { materials:materials, hardware:hardware, labour:labour, subtotal:subtotal, markup:markup, total:subtotal+markup };
+    return { materials:materials, hardware:hardware, finish:finish, labour:labour, subtotal:subtotal, markup:markup, total:subtotal+markup };
   }
 
   function rateChip(item){
@@ -834,6 +834,7 @@
   function statsHtml(t){
     return '<div class="stat"><span class="label">Materials</span><div class="value num">'+money(t.materials)+'</div></div>' +
       '<div class="stat"><span class="label">Hardware</span><div class="value num">'+money(t.hardware)+'</div></div>' +
+      '<div class="stat"><span class="label">Finish</span><div class="value num">'+money(t.finish)+'</div></div>' +
       '<div class="stat"><span class="label">Labour</span><div class="value num">'+money(t.labour)+'</div></div>' +
       '<div class="stat"><span class="label">Subtotal</span><div class="value num">'+money(t.subtotal)+'</div></div>' +
       '<div class="stat"><span class="label">Markup</span><div class="value num">'+money(t.markup)+'</div></div>' +
@@ -847,7 +848,7 @@
     var t = computeTotals(j);
     var dims = j.overallDimensions || {};
     var dimStr = [dims.width_mm, dims.height_mm, dims.depth_mm].filter(function(v){return v!=null;}).join(' × ');
-    var groups = [['material','Materials'],['hardware','Hardware'],['labour','Labour']];
+    var groups = [['material','Materials'],['hardware','Hardware'],['finish','Finish'],['labour','Labour']];
 
     var rowsHtml = '';
     groups.forEach(function(g){
@@ -872,7 +873,7 @@
 
     var bom =
       '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Rate (R)</th><th class="num">Line total</th><th>Rate card</th><th></th></tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
-      '<div class="field-row"><button class="btn add-line" data-type="material">+ Material line</button><button class="btn add-line" data-type="hardware">+ Hardware line</button><button class="btn add-line" data-type="labour">+ Labour line</button></div>';
+      '<div class="field-row"><button class="btn add-line" data-type="material">+ Material line</button><button class="btn add-line" data-type="hardware">+ Hardware line</button><button class="btn add-line" data-type="finish">+ Finish line</button><button class="btn add-line" data-type="labour">+ Labour line</button></div>';
 
     var markup =
       '<div class="field-row"><div class="field"><span class="label">Markup %</span><input type="number" class="markup-input" step="1" min="0" value="'+j.markupPct+'"></div></div>' +
@@ -943,7 +944,7 @@
       btn.addEventListener('click', function(e){
         e.stopPropagation();
         var type = btn.dataset.type;
-        var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : 'm²');
+        var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : (type==='finish' ? 'litre' : 'm²'));
         jobRef.lineItems = jobRef.lineItems || [];
         jobRef.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, rateId:null, unitPrice:0 });
         rerender();
