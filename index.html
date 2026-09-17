@@ -146,6 +146,18 @@
   .cell-waste{ width:68px; }
   .cell-rate{ width:104px; }
   .rate-pick{ margin-top:6px; font-size:11px; padding:3px 5px; }
+  .bom-table{ table-layout:fixed; }
+  .bom-table .cell-desc{ width:220px; }
+  .bom-table .cell-qty{ width:80px; }
+  .bom-table .cell-unit{ width:70px; }
+  .bom-table .cell-waste{ width:80px; }
+  .bom-table .cell-rate{ width:110px; }
+  .bom-table .cell-total{ width:110px; }
+  .bom-table .cell-ratecard{ width:180px; }
+  .bom-table .cell-actions{ width:36px; }
+  .bom-table td, .bom-table th{ overflow:hidden; }
+  .bom-table .cell-ratecard .chip{ max-width:100%; white-space:normal; }
+  .bom-table .rate-pick{ width:100%; box-sizing:border-box; }
   .input-affix{ position:relative; display:block; }
   .input-affix .affix{ position:absolute; left:7px; top:50%; transform:translateY(-50%); color:var(--ink-soft); font-size:13px; font-family:"IBM Plex Mono",monospace; pointer-events:none; }
   .input-affix input{ padding-left:18px; }
@@ -275,6 +287,7 @@
       <div class="field-row">
         <div class="field"><span class="label">Default markup %</span><input type="number" id="set-markup" step="1" min="0"></div>
         <div class="field"><span class="label">Default labour rate (per hour, excl. VAT)</span><div class="input-affix"><span class="affix">R</span><input type="number" id="set-labour" step="1" min="0"></div></div>
+        <div class="field"><span class="label">Default waste % (materials &amp; finish)</span><input type="number" id="set-waste" step="1" min="0"></div>
       </div>
       <div class="field-row"><button class="btn primary" id="btn-save-settings">Save defaults</button></div>
       <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
@@ -309,7 +322,7 @@
   var pdfImages = [];
   var job = null;
   var view = 'new';
-  var settings = { markupPct: 35, labourRate: 220, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'] };
+  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'] };
   var currentFileName = null;
 
   function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -677,6 +690,7 @@
   function fillSettingsForm(){
     document.getElementById('set-markup').value = settings.markupPct;
     document.getElementById('set-labour').value = settings.labourRate;
+    document.getElementById('set-waste').value = settings.defaultWastePct||0;
     renderSubcategoryManager();
   }
 
@@ -739,6 +753,7 @@
   document.getElementById('btn-save-settings').addEventListener('click', function(){
     settings.markupPct = Number(document.getElementById('set-markup').value)||0;
     settings.labourRate = Number(document.getElementById('set-labour').value)||0;
+    settings.defaultWastePct = Number(document.getElementById('set-waste').value)||0;
     apiWrite('saveSettings', settings).then(function(){
       var msg = document.getElementById('settings-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
@@ -969,6 +984,7 @@
       lineItems.push({
         id: uid(), type:'material', description: desc,
         qty: qty, unit: basisRate ? (basisRate.unit || 'm²') : 'm²',
+        wastagePct: Number(settings.defaultWastePct)||0,
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
         suggestedRateId: suggestion ? suggestion.id : null
       });
@@ -1069,9 +1085,9 @@
       '<td class="cell-unit"><input type="text" class="li-unit" value="'+esc(item.unit)+'"></td>' +
       '<td class="cell-waste num"><input type="number" class="li-waste num" step="1" min="0" value="'+(item.wastagePct||0)+'"></td>' +
       '<td class="cell-rate num"><div class="input-affix"><span class="affix">R</span><input type="number" class="li-price num" step="0.01" value="'+item.unitPrice+'"></div></td>' +
-      '<td class="num li-total">'+money(lineTotal(item))+'</td>' +
-      '<td>'+rateChip(item)+ratePickerHtml(item)+'</td>' +
-      '<td><button class="btn ghost li-del" title="Remove line">✕</button></td>' +
+      '<td class="cell-total num li-total">'+money(lineTotal(item))+'</td>' +
+      '<td class="cell-ratecard">'+rateChip(item)+ratePickerHtml(item)+'</td>' +
+      '<td class="cell-actions"><button class="btn ghost li-del" title="Remove line">✕</button></td>' +
       '</tr>';
   }
 
@@ -1117,7 +1133,11 @@
       (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '');
 
     var bom =
-      '<div class="table-wrap"><table><thead><tr><th>Description</th><th>Qty</th><th>Unit</th><th class="num">Waste %</th><th class="num">Rate (excl. VAT)</th><th class="num">Line total (excl. VAT)</th><th>Rate card</th><th></th></tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
+      '<div class="table-wrap"><table class="bom-table"><thead><tr>' +
+        '<th class="cell-desc">Description</th><th class="cell-qty">Qty</th><th class="cell-unit">Unit</th>' +
+        '<th class="cell-waste num">Waste %</th><th class="cell-rate num">Rate (excl. VAT)</th>' +
+        '<th class="cell-total num">Line total (excl. VAT)</th><th class="cell-ratecard">Rate card</th><th class="cell-actions"></th>' +
+      '</tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
       '<div class="field-row"><button class="btn add-line" data-type="material">+ Material line</button><button class="btn add-line" data-type="hardware">+ Hardware line</button><button class="btn add-line" data-type="finish">+ Finish line</button><button class="btn add-line" data-type="labour">+ Labour line</button></div>';
 
     var markup =
@@ -1228,8 +1248,9 @@
         e.stopPropagation();
         var type = btn.dataset.type;
         var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : (type==='finish' ? 'litre' : 'm²'));
+        var defWaste = (type==='material' || type==='finish') ? (Number(settings.defaultWastePct)||0) : 0;
         jobRef.lineItems = jobRef.lineItems || [];
-        jobRef.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, wastagePct:0, rateId:null, unitPrice:0 });
+        jobRef.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, wastagePct:defWaste, rateId:null, unitPrice:0 });
         rerender();
       });
     });
