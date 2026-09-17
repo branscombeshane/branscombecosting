@@ -469,7 +469,10 @@
   // metre(s)/meter(s)" — anything else (m², each, hour, linear m, ...) is area/count/time
   // basis and uses the existing length×width sheet-area math.
   function isVolumeUnit_(u){
-    var n = (u||'').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
+    // The superscript "³" (U+00B3) isn't a-z0-9, so it must be turned into a plain "3"
+    // before stripping other punctuation — otherwise "m³" (what the Unit field's own
+    // dropdown offers) silently collapses to "m" and is never recognised as volume-based.
+    var n = (u||'').toString().toLowerCase().replace(/³/g,'3').replace(/[^a-z0-9]/g,'');
     return n==='m3' || n==='cubicmetre' || n==='cubicmetres' || n==='cubicmeter' || n==='cubicmeters';
   }
   // Different designers word the same product differently ("50 mm Solid Oak" vs
