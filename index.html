@@ -451,11 +451,16 @@
     var n = (u||'').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
     return n==='m3' || n==='cubicmetre' || n==='cubicmetres' || n==='cubicmeter' || n==='cubicmeters';
   }
-  function matchRate(type, description, sku){
+  // Different designers word the same product differently ("50 mm Solid Oak" vs
+  // "Solid Oak" vs "Oak - 50mm"), so a fuzzy word-overlap match is only trustworthy
+  // enough to auto-link when it's an exact match on the normalized name (or an exact
+  // SKU match for hardware). Anything weaker is a "does this look right?" suggestion
+  // for the person costing the job to confirm or dismiss, never a silent guess.
+  function matchRateWithConfidence_(type, description, sku){
     var pool = rates.filter(function(r){ return r.category===type; });
     if(sku){
       var bySku = pool.find(function(r){ return r.sku && String(r.sku).trim().toLowerCase()===String(sku).trim().toLowerCase(); });
-      if(bySku) return bySku;
+      if(bySku) return { rate: bySku, exact: true };
     }
     var n = normalize(description);
     if(!n) return null;
@@ -473,7 +478,15 @@
       }
       if(score>bestScore){ bestScore=score; best=r; }
     });
-    return bestScore>=20 ? best : null;
+    if(bestScore>=100) return { rate:best, exact:true };
+    if(bestScore>=20) return { rate:best, exact:false };
+    return null;
+  }
+  // Back-compat helper for callers (like labour matching) that just want the
+  // old best-effort behaviour without the exact/suggestion distinction.
+  function matchRate(type, description, sku){
+    var m = matchRateWithConfidence_(type, description, sku);
+    return m ? m.rate : null;
   }
 
   function loadRates(){
@@ -702,11 +715,14 @@
     var lineItems = [];
 
     (data.hardware||[]).forEach(function(h){
-      var match = matchRate('hardware', h.description, h.sku);
+      var m = matchRateWithConfidence_('hardware', h.description, h.sku);
+      var match = m && m.exact ? m.rate : null;
+      var suggestion = m && !m.exact ? m.rate : null;
       lineItems.push({
         id: uid(), type:'hardware', description: h.description || 'Hardware item',
         qty: (h.quantity!=null? h.quantity : 1), unit:'each', sku: h.sku||null,
-        rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0
+        rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
+        suggestedRateId: suggestion ? suggestion.id : null
       });
     });
 
@@ -715,7 +731,9 @@
     var volumeFlags = [];
     (data.materials||[]).forEach(function(m){
       var key = normalize(m.description);
-      var match = matchRate('material', m.description, null);
+      var matchInfo = matchRateWithConfidence_('material', m.description, null);
+      var match = matchInfo && matchInfo.exact ? matchInfo.rate : null;
+      var suggestion = matchInfo && !matchInfo.exact ? matchInfo.rate : null;
       // Sheet goods (melamine, MDF, mirror glass...) are naturally costed by area, but a
       // rate card entry for solid/chunky timber can be priced by volume instead (a normal
       // way hardwood is sold) — when that's the case, follow its unit and sum panel
@@ -748,7 +766,8 @@
       lineItems.push({
         id: uid(), type:'material', description: desc,
         qty: qty, unit: match ? (match.unit || 'm²') : 'm²',
-        rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0
+        rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
+        suggestedRateId: suggestion ? suggestion.id : null
       });
     });
     var leftover = panels.filter(function(p,i){ return !usedIdx[i]; });
@@ -789,6 +808,12 @@
   function rateChip(item){
     var rate = item.rateId ? rates.find(function(r){ return r.id===item.rateId; }) : null;
     if(!rate){
+      var suggestion = item.suggestedRateId ? rates.find(function(r){ return r.id===item.suggestedRateId; }) : null;
+      if(suggestion){
+        return '<span class="chip warn" style="white-space:normal;">Similar to "'+esc(suggestion.name)+'" ('+money(suggestion.price)+') ' +
+          '<button class="link-confirm-suggestion" data-id="'+item.id+'">Yes, that one</button> ' +
+          '<button class="link-dismiss-suggestion" data-id="'+item.id+'">Not the same</button></span>';
+      }
       return '<span class="chip warn">No rate <button class="link-sync-rate" data-id="'+item.id+'">+ save price</button></span>';
     }
     if(rate.example){
@@ -936,6 +961,28 @@
           e.stopPropagation();
           var item = (jobRef.lineItems||[]).find(function(i){ return i.id===syncBtn.dataset.id; }); if(!item) return;
           syncRateFromLineItem(item).then(rerender);
+          return;
+        }
+        var confirmBtn = e.target.closest('.link-confirm-suggestion');
+        if(confirmBtn){
+          e.stopPropagation();
+          var item = (jobRef.lineItems||[]).find(function(i){ return i.id===confirmBtn.dataset.id; }); if(!item) return;
+          var rate = item.suggestedRateId ? rates.find(function(r){ return r.id===item.suggestedRateId; }) : null;
+          if(rate){
+            item.rateId = rate.id;
+            item.unitPrice = Number(rate.price)||0;
+            item.unit = rate.unit || item.unit;
+          }
+          item.suggestedRateId = null;
+          rerender();
+          return;
+        }
+        var dismissBtn = e.target.closest('.link-dismiss-suggestion');
+        if(dismissBtn){
+          e.stopPropagation();
+          var item = (jobRef.lineItems||[]).find(function(i){ return i.id===dismissBtn.dataset.id; }); if(!item) return;
+          item.suggestedRateId = null;
+          rerender();
         }
       });
     }
