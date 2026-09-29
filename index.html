@@ -187,6 +187,20 @@
   .job-card .meta{ color:var(--ink-soft); font-size:12px; margin-top:2px; }
   .job-detail{ margin-top:12px; border-top:1px solid var(--line); padding-top:12px; }
 
+  tr.roster-row, tr.adj-emp-row{ cursor:pointer; }
+  tr.roster-row:hover td, tr.adj-emp-row:hover td{ background:var(--accent-soft); }
+  .py-tab.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .payslip-box{ border:1px solid var(--line-strong); background:var(--paper-raised); padding:22px 26px; max-width:640px; }
+  .payslip-box h2{ font-size:18px; margin:0 0 2px; text-transform:none; }
+  .payslip-box .payslip-grid{ display:grid; grid-template-columns:1fr 1fr; gap:2px 18px; font-size:12.5px; margin:14px 0; }
+  .payslip-box table{ margin-top:6px; }
+  .payslip-box .section-label{ margin-top:16px; }
+  @media print{
+    body *{ visibility:hidden; }
+    .payslip-box, .payslip-box *{ visibility:visible; }
+    .payslip-box{ position:absolute; top:0; left:0; border:none; }
+  }
+
   .empty{ color:var(--ink-soft); font-style:italic; padding:10px 2px; }
   .status-msg{ padding:12px 14px; border:1px solid var(--line); background:var(--paper); font-size:13px; margin-bottom:14px; }
   .status-msg.thinking{ border-color:var(--accent); color:var(--accent); }
@@ -215,6 +229,7 @@
     <button class="navbtn" data-view="new">New Quote</button>
     <button class="navbtn" data-view="quotes">Quotes</button>
     <button class="navbtn" data-view="rates">Rate Card</button>
+    <button class="navbtn" data-view="payroll">Payroll</button>
     <button class="navbtn" data-view="settings">Settings</button>
   </nav>
   <footer>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
@@ -278,6 +293,26 @@
     </div>
   </section>
 
+  <section class="view" id="view-payroll" hidden>
+    <div class="sheet-head">
+      <h1>Payroll</h1>
+      <div class="sub" id="payroll-sub">Salaries, PAYE/UIF/SDL and payslips for Natalie Branscombe (Pty) Ltd's staff</div>
+    </div>
+
+    <div class="field-row" style="align-items:flex-end; justify-content:space-between;">
+      <div class="field" style="min-width:170px;"><span class="label">Payroll month</span><input type="month" id="payroll-month"></div>
+      <div id="payroll-subnav" style="display:flex; gap:6px; flex-wrap:wrap;">
+        <button class="btn small py-tab" data-tab="roster">Roster</button>
+        <button class="btn small py-tab" data-tab="adjustments">Pay Adjustments</button>
+        <button class="btn small py-tab" data-tab="run">Run Payroll</button>
+        <button class="btn small py-tab" data-tab="irp5">IRP5 / IT3(a)</button>
+      </div>
+    </div>
+
+    <div id="payroll-stats" class="stats" style="margin-top:16px;"></div>
+    <div id="payroll-body" style="margin-top:20px;"></div>
+  </section>
+
   <section class="view" id="view-settings" hidden>
     <div class="sheet-head">
       <h1>Settings</h1>
@@ -302,6 +337,34 @@
         <button class="btn primary" id="btn-add-subcategory" style="align-self:flex-end;">Add</button>
       </div>
     </div>
+
+    <div class="panel" style="max-width:440px;">
+      <h2 style="margin:0 0 4px;">Payroll — Departments</h2>
+      <div class="sub" style="margin-bottom:14px;">Groups the Payroll roster (Management, Production, Admin…). Renaming one updates every employee in it; deleting one leaves those employees Unassigned rather than losing them.</div>
+      <div id="department-list-mgr"></div>
+      <div class="field-row" style="margin-top:16px;">
+        <div class="field"><span class="label">New department</span><input type="text" id="dept-new-name" placeholder="e.g. Warehouse"></div>
+        <button class="btn primary" id="btn-add-department" style="align-self:flex-end;">Add</button>
+      </div>
+    </div>
+
+    <div class="panel" style="max-width:440px;">
+      <h2 style="margin:0 0 4px;">Payroll — Company details</h2>
+      <div class="sub" style="margin-bottom:14px;">Printed on every payslip's letterhead and used for EMP201/IRP5 reference — this is a single-company payroll, so there's just the one record.</div>
+      <div class="field-row">
+        <div class="field" style="min-width:220px;"><span class="label">Company name</span><input type="text" id="co-name"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><span class="label">PAYE number</span><input type="text" id="co-paye"></div>
+        <div class="field"><span class="label">UIF number</span><input type="text" id="co-uif"></div>
+        <div class="field"><span class="label">SDL number</span><input type="text" id="co-sdl"></div>
+      </div>
+      <div class="field-row">
+        <div class="field" style="min-width:260px;"><span class="label">Address</span><textarea id="co-address" rows="2"></textarea></div>
+      </div>
+      <div class="field-row"><button class="btn primary" id="btn-save-company">Save company details</button></div>
+      <div id="company-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
+    </div>
   </section>
 
 </main>
@@ -322,7 +385,8 @@
   var pdfImages = [];
   var job = null;
   var view = 'new';
-  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'] };
+  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
+    payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'' } };
   var currentFileName = null;
 
   function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -468,7 +532,7 @@
   });
   function showView(v){
     view = v;
-    ['new','quotes','rates','settings'].forEach(function(name){
+    ['new','quotes','rates','payroll','settings'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
@@ -476,6 +540,7 @@
     });
     if(v==='quotes') loadQuotes();
     if(v==='rates') renderRatesTables();
+    if(v==='payroll') initPayrollView();
     if(v==='settings') fillSettingsForm();
   }
 
@@ -692,6 +757,8 @@
     document.getElementById('set-labour').value = settings.labourRate;
     document.getElementById('set-waste').value = settings.defaultWastePct||0;
     renderSubcategoryManager();
+    renderDepartmentManager();
+    fillCompanyForm();
   }
 
   // Renaming or deleting a subcategory here is fire-and-forget on the backend (it
@@ -756,6 +823,81 @@
     settings.defaultWastePct = Number(document.getElementById('set-waste').value)||0;
     apiWrite('saveSettings', settings).then(function(){
       var msg = document.getElementById('settings-saved');
+      msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
+    });
+  });
+
+  // ================= SETTINGS — PAYROLL DEPARTMENTS =================
+  // Same managed-list pattern as Material subcategories, but these two actions are
+  // registered as doGet/JSONP cases (see Code.gs) rather than the hidden-iframe
+  // apiWrite, so a rename/delete gets a real confirmed response back — there's no
+  // meaningful failure mode here, but it keeps every Payroll call on one consistent
+  // transport (see the note at the top of Code.gs).
+  function renderDepartmentManager(){
+    var wrap = document.getElementById('department-list-mgr');
+    if(!wrap) return;
+    var list = settings.payrollDepartments || [];
+    if(!list.length){
+      wrap.innerHTML = '<div class="empty">No departments set up yet — add one below.</div>';
+    } else {
+      wrap.innerHTML = list.slice().sort().map(function(name){
+        return '<div class="field-row dept-row" data-name="'+esc(name)+'" style="margin-top:8px;align-items:center;">' +
+          '<input type="text" class="dept-rename-input" value="'+esc(name)+'" style="flex:1;min-width:120px;">' +
+          '<button class="btn small dept-rename">Save</button>' +
+          '<button class="btn small danger dept-delete">Delete</button>' +
+          '</div>';
+      }).join('');
+    }
+    wrap.querySelectorAll('.dept-rename').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var row = btn.closest('.dept-row'); var oldName = row.dataset.name;
+        var newName = row.querySelector('.dept-rename-input').value.trim();
+        if(!newName || newName===oldName) return;
+        apiRead('renameDepartment', { oldName:oldName, newName:newName }).then(function(res){
+          if(res && res.ok){ settings.payrollDepartments = res.departments; renderDepartmentManager(); }
+        });
+      });
+    });
+    wrap.querySelectorAll('.dept-delete').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var row = btn.closest('.dept-row'); var name = row.dataset.name;
+        if(!confirm('Delete "'+name+'"? Employees in it will show as Unassigned instead — they won\'t be removed.')) return;
+        apiRead('deleteDepartment', { name:name }).then(function(res){
+          if(res && res.ok){ settings.payrollDepartments = res.departments; renderDepartmentManager(); }
+        });
+      });
+    });
+  }
+  document.getElementById('btn-add-department').addEventListener('click', function(){
+    var input = document.getElementById('dept-new-name');
+    var name = input.value.trim();
+    if(!name){ input.focus(); return; }
+    if((settings.payrollDepartments||[]).indexOf(name)!==-1){ input.value=''; return; }
+    apiRead('addDepartment', { name:name }).then(function(res){
+      if(res && res.ok){ settings.payrollDepartments = res.departments; input.value=''; renderDepartmentManager(); }
+    });
+  });
+
+  // ================= SETTINGS — PAYROLL COMPANY DETAILS =================
+  function fillCompanyForm(){
+    var c = settings.companyInfo || {};
+    document.getElementById('co-name').value = c.name||'';
+    document.getElementById('co-paye').value = c.payeNumber||'';
+    document.getElementById('co-uif').value = c.uifNumber||'';
+    document.getElementById('co-sdl').value = c.sdlNumber||'';
+    document.getElementById('co-address').value = c.address||'';
+  }
+  document.getElementById('btn-save-company').addEventListener('click', function(){
+    var info = {
+      name: document.getElementById('co-name').value.trim(),
+      payeNumber: document.getElementById('co-paye').value.trim(),
+      uifNumber: document.getElementById('co-uif').value.trim(),
+      sdlNumber: document.getElementById('co-sdl').value.trim(),
+      address: document.getElementById('co-address').value.trim()
+    };
+    apiRead('saveCompanyInfo', info).then(function(res){
+      settings.companyInfo = (res && res.companyInfo) || info;
+      var msg = document.getElementById('company-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
     });
   });
@@ -1370,6 +1512,687 @@
       }
     });
     return card;
+  }
+
+  // ================= PAYROLL =================
+  // Single-company payroll (Natalie's furniture business only) ported from Shane's
+  // "Daily Fruit Financials" app — see the PAYROLL section in Code.gs for the SARS
+  // calc engine and the full set of actions. Every Payroll call goes through apiRead
+  // (JSONP), never apiWrite — see the note at the top of Code.gs for why.
+  var payrollMonth = null;              // 'yyyy-MM', set to the current month on first visit
+  var payrollTab = 'roster';            // roster | adjustments | run | irp5
+  var payrollData = null;               // {month, employees[], departments[], headcount, totalMonthlyCost, processedCount}
+  var payrollAdjustmentsData = null;    // {month, items[], advanceBalances[], recurring[]}
+  var payrollRunData = null;            // {month, hasRun, payslips[], emp201}
+  var expandedEmployeeId = null;        // Roster tab: which employee's edit form is open
+  var expandedAdjEmployeeId = null;     // Pay Adjustments tab: which employee's panel is open
+  var ADJ_NET_SUBTRACT_TYPES = ['Deduction','AdvanceRepayment'];
+
+  function defaultPayrollMonth_(){
+    var d = new Date(); var m = d.getMonth()+1;
+    return d.getFullYear() + '-' + (m<10?'0'+m:m);
+  }
+  function round2Js_(n){ return Math.round((Number(n)||0)*100)/100; }
+
+  document.getElementById('payroll-month').addEventListener('change', function(){
+    payrollMonth = this.value || defaultPayrollMonth_();
+    expandedEmployeeId = null; expandedAdjEmployeeId = null;
+    loadPayrollForTab();
+  });
+  document.getElementById('payroll-subnav').addEventListener('click', function(e){
+    var b = e.target.closest('.py-tab'); if(!b) return;
+    payrollTab = b.dataset.tab;
+    expandedEmployeeId = null; expandedAdjEmployeeId = null;
+    renderPayrollSubnav();
+    loadPayrollForTab();
+  });
+
+  function renderPayrollSubnav(){
+    Array.prototype.forEach.call(document.querySelectorAll('.py-tab'), function(b){
+      b.classList.toggle('primary', b.dataset.tab===payrollTab);
+    });
+  }
+
+  function initPayrollView(){
+    if(!payrollMonth) payrollMonth = defaultPayrollMonth_();
+    var monthInput = document.getElementById('payroll-month');
+    if(monthInput.value !== payrollMonth) monthInput.value = payrollMonth;
+    renderPayrollSubnav();
+    loadPayrollForTab();
+  }
+
+  function loadPayrollForTab(){
+    var body = document.getElementById('payroll-body');
+    body.innerHTML = '<div class="empty">Loading…</div>';
+    if(payrollTab==='roster') loadPayrollRoster();
+    else if(payrollTab==='adjustments') loadPayrollAdjustments();
+    else if(payrollTab==='run') loadPayrollRun();
+    else if(payrollTab==='irp5') loadIrp5();
+  }
+
+  // -------- Roster --------
+  function loadPayrollRoster(){
+    apiRead('getPayroll', { month: payrollMonth }).then(function(res){
+      payrollData = (res && res.payroll) || null;
+      if(payrollTab==='roster') renderPayrollRoster();
+    }).catch(function(e){
+      document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
+
+  function departmentOptionsHtml_(selected){
+    var list = (settings.payrollDepartments||[]).slice();
+    if(selected && list.indexOf(selected)===-1) list.push(selected);
+    list.sort();
+    return '<option value="">— choose —</option>' + list.map(function(name){
+      return '<option value="'+esc(name)+'"'+(name===selected?' selected':'')+'>'+esc(name)+'</option>';
+    }).join('');
+  }
+
+  function employeeRowHtml_(e){
+    var statusChip = !e.active
+      ? '<span class="chip warn">Discharged</span>'
+      : (e.status==='finalized' ? '<span class="chip good">Finalized</span>' : (e.status==='in_progress' ? '<span class="chip">Saved</span>' : '<span class="chip warn">Not started</span>'));
+    var rateStr = e.days ? (e.days+' d/wk · '+money(e.dayRate)+'/day') : 'Salaried';
+    return '<tr class="roster-row" data-id="'+e.id+'">' +
+      '<td>'+esc(e.name)+(e.etiEligible?' <span class="chip good" title="Eligible for the Employment Tax Incentive this month">ETI</span>':'')+'</td>' +
+      '<td>'+esc(e.department||'—')+'</td>' +
+      '<td style="font-size:11.5px;color:var(--ink-soft);">'+esc(rateStr)+'</td>' +
+      '<td class="num">'+money(e.amount)+'</td>' +
+      '<td>'+statusChip+'</td>' +
+      '<td><span style="text-decoration:underline;font-size:12px;">'+(expandedEmployeeId===e.id?'close':'edit')+'</span></td>' +
+      '</tr>' +
+      (expandedEmployeeId===e.id ? '<tr><td colspan="6"><div class="job-detail" id="roster-detail-'+e.id+'"></div></td></tr>' : '');
+  }
+
+  function renderPayrollRoster(){
+    var body = document.getElementById('payroll-body');
+    var stats = document.getElementById('payroll-stats');
+    if(!payrollData){ body.innerHTML=''; stats.innerHTML=''; return; }
+
+    stats.innerHTML =
+      '<div class="stat"><span class="label">Active employees</span><span class="value num">'+payrollData.headcount+'</span></div>' +
+      '<div class="stat"><span class="label">Monthly cost (base)</span><span class="value num">'+money(payrollData.totalMonthlyCost)+'</span></div>' +
+      '<div class="stat total"><span class="label">Finalized this month</span><span class="value num">'+payrollData.processedCount+' / '+payrollData.headcount+'</span></div>';
+
+    var employees = payrollData.employees.slice().sort(function(a,b){
+      if(a.active!==b.active) return a.active ? -1 : 1;
+      return (a.name||'').localeCompare(b.name||'');
+    });
+    var rowsHtml = employees.map(employeeRowHtml_).join('');
+
+    body.innerHTML =
+      '<div class="panel">' +
+        '<div class="field-row" style="justify-content:space-between;align-items:center;margin-bottom:4px;">' +
+          '<h2 style="margin:0;">Roster</h2>' +
+          '<button class="btn primary" id="btn-add-employee">+ Add employee</button>' +
+        '</div>' +
+        '<div id="add-employee-panel" hidden></div>' +
+        '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Department</th><th>Rate</th><th class="num">Monthly amount</th><th>Status</th><th></th></tr></thead>' +
+        '<tbody>' + (rowsHtml || '<tr><td colspan="6" class="empty">No employees yet — add one above.</td></tr>') + '</tbody></table></div>' +
+      '</div>';
+
+    document.getElementById('btn-add-employee').addEventListener('click', function(){
+      var panel = document.getElementById('add-employee-panel');
+      panel.hidden = !panel.hidden;
+      if(!panel.hidden){
+        panel.innerHTML = '<div class="job-detail" style="margin-top:14px;">' + employeeFormHtml_(null) + '</div>';
+        wireEmployeeForm_(panel, null, function(){ panel.hidden = true; loadPayrollRoster(); });
+      }
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.roster-row'), function(tr){
+      tr.addEventListener('click', function(){
+        var id = tr.dataset.id;
+        expandedEmployeeId = (expandedEmployeeId===id) ? null : id;
+        renderPayrollRoster();
+      });
+    });
+
+    if(expandedEmployeeId){
+      var e = payrollData.employees.find(function(x){ return x.id===expandedEmployeeId; });
+      var container = document.getElementById('roster-detail-'+expandedEmployeeId);
+      if(container && e) renderEmployeeDetail_(container, e);
+      else expandedEmployeeId = null;
+    }
+  }
+
+  function employeeFormHtml_(e){
+    e = e || {};
+    return '<div class="label" style="margin-bottom:8px;">'+(e.id?'Edit employee':'New employee')+'</div>' +
+      '<div class="field-row">' +
+        '<div class="field" style="min-width:180px;"><span class="label">Full name</span><input type="text" class="emp-name" value="'+esc(e.name||'')+'"></div>' +
+        '<div class="field"><span class="label">Employee #</span><input type="text" class="emp-employeeNumber" value="'+esc(e.employeeNumber||'')+'"></div>' +
+        '<div class="field" style="min-width:150px;"><span class="label">Department</span><select class="emp-department">'+departmentOptionsHtml_(e.department||'')+'</select></div>' +
+        '<div class="field"><span class="label">Job title</span><input type="text" class="emp-jobTitle" value="'+esc(e.jobTitle||'')+'"></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><span class="label">Date employed</span><input type="date" class="emp-dateEmployed" value="'+esc(e.dateEmployed||'')+'"></div>' +
+        '<div class="field"><span class="label">Date of birth</span><input type="date" class="emp-dateOfBirth" value="'+esc(e.dateOfBirth||'')+'"></div>' +
+        '<div class="field" style="min-width:240px;"><span class="label">Notes</span><input type="text" class="emp-notes" value="'+esc(e.notes||'')+'"></div>' +
+      '</div>' +
+      '<div class="label" style="margin:16px 0 8px;">Pay</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><span class="label">Monthly amount</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num emp-amount" step="0.01" min="0" value="'+(e.amount!=null?e.amount:'')+'"></div></div>' +
+        '<div class="field"><span class="label">Days/week (blank = salaried)</span><input type="number" class="num emp-days" step="1" min="1" max="7" value="'+(e.days!=null?e.days:'')+'"></div>' +
+        '<div class="field"><span class="label">Pay method</span><input type="text" class="emp-payMethod" value="'+esc(e.payMethod||'EFT / Bank Transfer')+'"></div>' +
+      '</div>' +
+      '<div class="label" style="margin:16px 0 8px;">SARS &amp; deductions</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><span class="label">ID number</span><input type="text" class="emp-idNumber" value="'+esc(e.idNumber||'')+'"></div>' +
+        '<div class="field"><span class="label">Tax number</span><input type="text" class="emp-taxNumber" value="'+esc(e.taxNumber||'')+'"></div>' +
+        '<div class="field"><label class="label" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="emp-uifExempt" style="width:auto;"'+(e.uifExempt?' checked':'')+'>UIF exempt</label></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><span class="label">Medical members</span><input type="number" class="num emp-medicalMembers" step="1" min="0" value="'+(e.medicalMembers!=null?e.medicalMembers:0)+'"></div>' +
+        '<div class="field"><span class="label">Medical contribution (deduction)</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num emp-medicalContribution" step="0.01" min="0" value="'+(e.medicalContribution!=null?e.medicalContribution:0)+'"></div></div>' +
+        '<div class="field"><span class="label">Retirement contribution</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num emp-retirementContribution" step="0.01" min="0" value="'+(e.retirementContribution!=null?e.retirementContribution:0)+'"></div></div>' +
+      '</div>' +
+      '<div class="label" style="margin:16px 0 8px;">Address &amp; banking</div>' +
+      '<div class="field-row">' +
+        '<div class="field" style="min-width:280px;"><span class="label">Address</span><input type="text" class="emp-address" value="'+esc(e.address||'')+'"></div>' +
+      '</div>' +
+      '<div class="field-row">' +
+        '<div class="field"><span class="label">Bank name</span><input type="text" class="emp-bankName" value="'+esc(e.bankName||'')+'"></div>' +
+        '<div class="field"><span class="label">Branch code</span><input type="text" class="emp-branchCode" value="'+esc(e.branchCode||'')+'"></div>' +
+        '<div class="field"><span class="label">Account number</span><input type="text" class="emp-accountNumber" value="'+esc(e.accountNumber||'')+'"></div>' +
+      '</div>';
+  }
+
+  function readEmployeeForm_(container){
+    var daysVal = container.querySelector('.emp-days').value;
+    return {
+      name: container.querySelector('.emp-name').value.trim(),
+      employeeNumber: container.querySelector('.emp-employeeNumber').value.trim(),
+      department: container.querySelector('.emp-department').value,
+      jobTitle: container.querySelector('.emp-jobTitle').value.trim(),
+      dateEmployed: container.querySelector('.emp-dateEmployed').value,
+      dateOfBirth: container.querySelector('.emp-dateOfBirth').value,
+      notes: container.querySelector('.emp-notes').value.trim(),
+      amount: Number(container.querySelector('.emp-amount').value)||0,
+      days: daysVal===''? '' : Number(daysVal),
+      payMethod: container.querySelector('.emp-payMethod').value.trim(),
+      idNumber: container.querySelector('.emp-idNumber').value.trim(),
+      taxNumber: container.querySelector('.emp-taxNumber').value.trim(),
+      uifExempt: container.querySelector('.emp-uifExempt').checked,
+      medicalMembers: Number(container.querySelector('.emp-medicalMembers').value)||0,
+      medicalContribution: Number(container.querySelector('.emp-medicalContribution').value)||0,
+      retirementContribution: Number(container.querySelector('.emp-retirementContribution').value)||0,
+      address: container.querySelector('.emp-address').value.trim(),
+      bankName: container.querySelector('.emp-bankName').value.trim(),
+      branchCode: container.querySelector('.emp-branchCode').value.trim(),
+      accountNumber: container.querySelector('.emp-accountNumber').value.trim()
+    };
+  }
+
+  function wireEmployeeForm_(container, e, onSaved){
+    var saveBtn = container.querySelector('.emp-save');
+    if(!saveBtn) return;
+    saveBtn.addEventListener('click', function(){
+      var rec = readEmployeeForm_(container);
+      var errSpan = container.querySelector('.save-confirm');
+      if(!rec.name || !rec.department){
+        if(errSpan) errSpan.textContent = 'Name and department are required.';
+        return;
+      }
+      rec.uifExempt = String(rec.uifExempt);
+      rec.month = payrollMonth;
+      var action = (e && e.id) ? 'updateEmployee' : 'addEmployee';
+      if(e && e.id) rec.id = e.id;
+      apiRead(action, rec).then(function(res){
+        if(res && res.ok){
+          if(typeof onSaved==='function') onSaved(res.payroll);
+        } else if(errSpan){
+          errSpan.textContent = (res && res.error) || 'Could not save this employee.';
+        }
+      });
+    });
+  }
+
+  function renderEmployeeDetail_(container, e){
+    container.innerHTML =
+      employeeFormHtml_(e) +
+      '<div class="field-row" style="margin-top:16px;">' +
+        '<button class="btn primary emp-save">Save changes</button>' +
+        (e.active ? '<button class="btn danger emp-discharge-toggle">Discharge…</button>' : '<button class="btn emp-rehire-toggle">Rehire…</button>') +
+        '<button class="btn ghost emp-history-toggle">Employment history</button>' +
+        '<span class="save-confirm sub" style="align-self:center;"></span>' +
+      '</div>' +
+      '<div class="emp-discharge-form" hidden style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);">' +
+        '<div class="field-row">' +
+          '<div class="field"><span class="label">Discharge date</span><input type="date" class="emp-discharge-date"></div>' +
+          '<div class="field" style="min-width:220px;"><span class="label">Reason (optional)</span><input type="text" class="emp-discharge-reason"></div>' +
+          '<button class="btn danger emp-discharge-confirm" style="align-self:flex-end;">Confirm discharge</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="emp-rehire-form" hidden style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);">' +
+        '<div class="field-row">' +
+          '<div class="field"><span class="label">Rehire date</span><input type="date" class="emp-rehire-date"></div>' +
+          '<button class="btn primary emp-rehire-confirm" style="align-self:flex-end;">Confirm rehire</button>' +
+        '</div>' +
+      '</div>' +
+      '<div class="emp-history" hidden style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);"></div>';
+
+    wireEmployeeForm_(container, e, function(updatedPayroll){
+      payrollData = updatedPayroll;
+      renderPayrollRoster();
+    });
+
+    function showErr(msg){ var span = container.querySelector('.save-confirm'); if(span) span.textContent = msg; }
+
+    var dischargeToggle = container.querySelector('.emp-discharge-toggle');
+    if(dischargeToggle) dischargeToggle.addEventListener('click', function(){ container.querySelector('.emp-discharge-form').hidden = false; });
+    var rehireToggle = container.querySelector('.emp-rehire-toggle');
+    if(rehireToggle) rehireToggle.addEventListener('click', function(){ container.querySelector('.emp-rehire-form').hidden = false; });
+
+    var dischargeConfirm = container.querySelector('.emp-discharge-confirm');
+    if(dischargeConfirm) dischargeConfirm.addEventListener('click', function(){
+      var date = container.querySelector('.emp-discharge-date').value;
+      var reason = container.querySelector('.emp-discharge-reason').value.trim();
+      if(!date){ showErr('Pick a discharge date.'); return; }
+      apiRead('dischargeEmployee', { id:e.id, dateDischarged:date, reason:reason, month:payrollMonth }).then(function(res){
+        if(res && res.ok){ payrollData = res.payroll; renderPayrollRoster(); }
+        else showErr((res&&res.error)||'Could not discharge this employee.');
+      });
+    });
+    var rehireConfirm = container.querySelector('.emp-rehire-confirm');
+    if(rehireConfirm) rehireConfirm.addEventListener('click', function(){
+      var date = container.querySelector('.emp-rehire-date').value;
+      if(!date){ showErr('Pick a rehire date.'); return; }
+      apiRead('rehireEmployee', { id:e.id, dateEmployed:date, month:payrollMonth }).then(function(res){
+        if(res && res.ok){ payrollData = res.payroll; renderPayrollRoster(); }
+        else showErr((res&&res.error)||'Could not rehire this employee.');
+      });
+    });
+    var historyToggle = container.querySelector('.emp-history-toggle');
+    if(historyToggle) historyToggle.addEventListener('click', function(){
+      var box = container.querySelector('.emp-history');
+      box.hidden = !box.hidden;
+      if(!box.hidden){
+        box.innerHTML = '<div class="empty">Loading…</div>';
+        apiRead('getEmploymentHistory', { id:e.id }).then(function(res){
+          var events = (res && res.history) || [];
+          if(!events.length){ box.innerHTML = '<div class="empty">No history recorded.</div>'; return; }
+          box.innerHTML = '<div class="label" style="margin-bottom:8px;">Employment history</div><table><thead><tr><th>Event</th><th>Date</th><th>Reason</th></tr></thead><tbody>' +
+            events.map(function(ev){
+              var label = ev.type==='hired'?'Hired':ev.type==='discharged'?'Discharged':ev.type==='rehired'?'Rehired':ev.type;
+              return '<tr><td>'+esc(label)+'</td><td>'+esc(ev.date||'—')+'</td><td>'+esc(ev.reason||'')+'</td></tr>';
+            }).join('') + '</tbody></table>';
+        });
+      }
+    });
+  }
+
+  // -------- Pay adjustments --------
+  function loadPayrollAdjustments(){
+    var body = document.getElementById('payroll-body');
+    Promise.all([
+      apiRead('getPayroll', { month: payrollMonth }),
+      apiRead('getPayrollAdjustments', { month: payrollMonth })
+    ]).then(function(results){
+      payrollData = (results[0] && results[0].payroll) || null;
+      payrollAdjustmentsData = (results[1] && results[1].payrollAdjustments) || null;
+      if(payrollTab==='adjustments') renderPayrollAdjustments();
+    }).catch(function(e){ body.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+
+  function renderPayrollAdjustments(){
+    var body = document.getElementById('payroll-body');
+    var stats = document.getElementById('payroll-stats');
+    if(!payrollData || !payrollAdjustmentsData){ body.innerHTML=''; stats.innerHTML=''; return; }
+
+    stats.innerHTML =
+      '<div class="stat"><span class="label">Active employees</span><span class="value num">'+payrollData.headcount+'</span></div>' +
+      '<div class="stat total"><span class="label">Finalized this month</span><span class="value num">'+payrollData.processedCount+' / '+payrollData.headcount+'</span></div>' +
+      '<div class="stat"><span class="label">Outstanding advances</span><span class="value num">'+payrollAdjustmentsData.advanceBalances.length+'</span></div>';
+
+    var active = payrollData.employees.filter(function(e){ return e.active; }).sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
+    var itemsByEmployee = {};
+    payrollAdjustmentsData.items.forEach(function(it){ (itemsByEmployee[it.employeeId]=itemsByEmployee[it.employeeId]||[]).push(it); });
+
+    var rowsHtml = active.map(function(e){
+      var items = itemsByEmployee[e.id]||[];
+      var summary = items.length ? items.map(function(it){
+        var sign = (ADJ_NET_SUBTRACT_TYPES.indexOf(it.type)!==-1) ? '-' : '+';
+        return sign+money(it.amount)+' '+it.type;
+      }).join(', ') : '—';
+      var statusChip = e.status==='finalized' ? '<span class="chip good">Finalized</span>' : (e.status==='in_progress' ? '<span class="chip">Saved</span>' : '<span class="chip warn">Not started</span>');
+      return '<tr class="adj-emp-row" data-id="'+e.id+'">' +
+        '<td>'+esc(e.name)+'</td><td>'+esc(e.department||'—')+'</td>' +
+        '<td style="font-size:11.5px;">'+esc(summary)+'</td>' +
+        '<td>'+statusChip+'</td>' +
+        '<td><span style="text-decoration:underline;font-size:12px;">'+(expandedAdjEmployeeId===e.id?'close':'open')+'</span></td>' +
+        '</tr>' +
+        (expandedAdjEmployeeId===e.id ? '<tr><td colspan="5"><div class="job-detail" id="adj-detail-'+e.id+'"></div></td></tr>' : '');
+    }).join('');
+
+    var advHtml = payrollAdjustmentsData.advanceBalances.length ? (
+      '<div class="panel"><h2>Outstanding advances</h2><table><thead><tr><th>Employee</th><th class="num">Balance owed</th></tr></thead><tbody>' +
+      payrollAdjustmentsData.advanceBalances.map(function(b){ return '<tr><td>'+esc(b.name)+'</td><td class="num">'+money(b.balance)+'</td></tr>'; }).join('') +
+      '</tbody></table></div>'
+    ) : '';
+
+    body.innerHTML =
+      '<div class="panel">' +
+        '<h2 style="margin:0 0 10px;">Pay adjustments — '+esc(payrollMonth)+'</h2>' +
+        '<div class="sub" style="margin-bottom:14px;">Click an employee to add commission, bonus, overtime, deductions or advances, then Finalize once they\'re done for the month — Run Payroll refuses to run until every active employee is finalized.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Department</th><th>This month</th><th>Status</th><th></th></tr></thead><tbody>' +
+        (rowsHtml || '<tr><td colspan="5" class="empty">No active employees.</td></tr>') +
+        '</tbody></table></div>' +
+      '</div>' +
+      advHtml +
+      renderRecurringPanelHtml_();
+
+    Array.prototype.forEach.call(document.querySelectorAll('.adj-emp-row'), function(tr){
+      tr.addEventListener('click', function(){
+        var id = tr.dataset.id;
+        expandedAdjEmployeeId = (expandedAdjEmployeeId===id) ? null : id;
+        renderPayrollAdjustments();
+      });
+    });
+    wireRecurringPanel_();
+
+    if(expandedAdjEmployeeId){
+      var e = active.find(function(x){ return x.id===expandedAdjEmployeeId; });
+      var container = document.getElementById('adj-detail-'+expandedAdjEmployeeId);
+      if(container && e) renderAdjEmployeeDetail_(container, e, itemsByEmployee[e.id]||[]);
+      else expandedAdjEmployeeId = null;
+    }
+  }
+
+  function renderAdjEmployeeDetail_(container, e, items){
+    var itemsHtml = items.length ? (
+      '<table><thead><tr><th>Type</th><th class="num">Amount</th><th>Note</th><th></th></tr></thead><tbody>' +
+      items.map(function(it){
+        return '<tr data-id="'+it.id+'"><td>'+esc(it.type)+(it.type==='Overtime'&&it.hours?' ('+it.hours+'h)':'')+'</td><td class="num">'+money(it.amount)+'</td><td>'+esc(it.note||'')+'</td><td><button class="btn small danger adj-item-del">Delete</button></td></tr>';
+      }).join('') + '</tbody></table>'
+    ) : '<div class="empty">No adjustments yet this month.</div>';
+
+    var typeOptions = ['Commission','Bonus','Overtime','Other','Deduction','AdvanceGiven','AdvanceRepayment'].map(function(t){
+      return '<option value="'+t+'">'+t+'</option>';
+    }).join('');
+
+    container.innerHTML =
+      '<div class="label" style="margin-bottom:8px;">'+esc(e.name)+' — '+esc(payrollMonth)+'</div>' +
+      itemsHtml +
+      '<div class="field-row" style="margin-top:14px;align-items:flex-end;">' +
+        '<div class="field" style="min-width:140px;"><span class="label">Type</span><select class="adj-type">'+typeOptions+'</select></div>' +
+        '<div class="field adj-amount-field"><span class="label">Amount</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-amount" step="0.01" min="0"></div></div>' +
+        '<div class="field adj-hours-field" hidden><span class="label">Hours</span><input type="number" class="num adj-hours" step="0.25" min="0"></div>' +
+        '<div class="field" style="min-width:160px;"><span class="label">Note (optional)</span><input type="text" class="adj-note"></div>' +
+        '<button class="btn primary adj-add">Add</button>' +
+        '<label class="adj-recurring-label" style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:6px;"><input type="checkbox" class="adj-recurring" style="width:auto;">Make recurring</label>' +
+      '</div>' +
+      '<div class="adj-err sub" style="color:var(--warn);margin-top:6px;"></div>' +
+      '<div class="field-row" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line);">' +
+        '<button class="btn adj-save-status" data-status="in_progress">Save (in progress)</button>' +
+        '<button class="btn primary adj-save-status" data-status="finalized">Finalize</button>' +
+      '</div>';
+
+    var typeSel = container.querySelector('.adj-type');
+    var hoursField = container.querySelector('.adj-hours-field');
+    var amountField = container.querySelector('.adj-amount-field');
+    var amountInput = container.querySelector('.adj-amount');
+    var hoursInput = container.querySelector('.adj-hours');
+    var recurringLabel = container.querySelector('.adj-recurring-label');
+    function syncOvertimeFields(){
+      var isOt = typeSel.value==='Overtime';
+      hoursField.hidden = !isOt;
+      recurringLabel.hidden = isOt; // overtime can't be a recurring template
+      if(isOt){
+        amountInput.value = (hoursInput.value && e.hourRate) ? round2Js_(Number(hoursInput.value)*e.hourRate) : '';
+        amountInput.readOnly = true; amountField.style.opacity = .7;
+      } else {
+        amountInput.readOnly = false; amountField.style.opacity = 1;
+      }
+    }
+    typeSel.addEventListener('change', syncOvertimeFields);
+    hoursInput.addEventListener('input', syncOvertimeFields);
+    syncOvertimeFields();
+
+    Array.prototype.forEach.call(container.querySelectorAll('.adj-item-del'), function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.closest('tr').dataset.id;
+        apiRead('deleteAdjustment', { id:id, month:payrollMonth }).then(function(res){
+          if(res && res.ok) loadPayrollAdjustments();
+        });
+      });
+    });
+
+    container.querySelector('.adj-add').addEventListener('click', function(){
+      var type = typeSel.value;
+      var amount = Number(amountInput.value)||0;
+      var hours = Number(hoursInput.value)||0;
+      var note = container.querySelector('.adj-note').value.trim();
+      var recurring = container.querySelector('.adj-recurring').checked;
+      var errBox = container.querySelector('.adj-err');
+      errBox.textContent = '';
+      if(type==='Overtime' && (!hours||hours<=0)){ errBox.textContent='Enter the number of overtime hours.'; return; }
+      if(type!=='Overtime' && (!amount||amount<=0)){ errBox.textContent='Amount must be a positive number.'; return; }
+
+      var call = (recurring && type!=='Overtime')
+        ? apiRead('saveRecurringAdjustment', { employeeId:e.id, type:type, amount:amount, note:note, month:payrollMonth })
+        : apiRead('addAdjustment', { employeeId:e.id, month:payrollMonth, type:type, amount:amount, hours:hours, note:note });
+
+      call.then(function(res){
+        if(res && res.ok) loadPayrollAdjustments();
+        else errBox.textContent = (res && res.error) || 'Could not add this adjustment.';
+      });
+    });
+
+    Array.prototype.forEach.call(container.querySelectorAll('.adj-save-status'), function(btn){
+      btn.addEventListener('click', function(){
+        apiRead('setPayrollAdjustmentStatus', { month:payrollMonth, id:e.id, status:btn.dataset.status }).then(function(res){
+          if(res && res.ok){
+            payrollData = res.payroll;
+            payrollAdjustmentsData = res.payrollAdjustments;
+            renderPayrollAdjustments();
+          }
+        });
+      });
+    });
+  }
+
+  function renderRecurringPanelHtml_(){
+    var recurring = payrollAdjustmentsData.recurring || [];
+    var rows = recurring.map(function(r){
+      return '<tr data-id="'+r.id+'"><td>'+esc(r.name)+'</td><td>'+esc(r.type)+'</td><td class="num">'+money(r.amount)+'</td><td>'+esc(r.note||'')+'</td>' +
+        '<td><input type="checkbox" class="rec-active-toggle"'+(r.active?' checked':'')+'></td>' +
+        '<td><button class="btn small danger rec-delete">Delete</button></td></tr>';
+    }).join('');
+    return '<div class="panel"><h2>Recurring adjustments</h2>' +
+      '<div class="sub" style="margin-bottom:10px;">Standing monthly items (e.g. a car allowance) — copied automatically into each new month. Add one from an employee\'s panel above with "Make recurring" ticked.</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th class="num">Amount</th><th>Note</th><th>Active</th><th></th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="6" class="empty">None set up.</td></tr>') +
+      '</tbody></table></div></div>';
+  }
+
+  function wireRecurringPanel_(){
+    Array.prototype.forEach.call(document.querySelectorAll('.rec-active-toggle'), function(cb){
+      cb.addEventListener('change', function(){
+        var id = cb.closest('tr').dataset.id;
+        apiRead('saveRecurringAdjustment', { id:id, active:cb.checked, month:payrollMonth }).then(function(res){
+          if(res && res.ok) payrollAdjustmentsData = res.payrollAdjustments;
+        });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.rec-delete'), function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.closest('tr').dataset.id;
+        if(!confirm('Delete this recurring adjustment? Months it has already been copied into keep their own copy.')) return;
+        apiRead('deleteRecurringAdjustment', { id:id, month:payrollMonth }).then(function(res){
+          if(res && res.ok){ payrollAdjustmentsData = res.payrollAdjustments; renderPayrollAdjustments(); }
+        });
+      });
+    });
+  }
+
+  // -------- Run payroll / EMP201 / payslips --------
+  function loadPayrollRun(){
+    apiRead('getPayrollRun', { month: payrollMonth }).then(function(res){
+      payrollRunData = (res && res.payrollRun) || null;
+      if(payrollTab==='run') renderPayrollRun();
+    }).catch(function(e){ document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+
+  function renderPayrollRun(){
+    var body = document.getElementById('payroll-body');
+    var stats = document.getElementById('payroll-stats');
+    if(!payrollRunData){ body.innerHTML=''; stats.innerHTML=''; return; }
+    var emp201 = payrollRunData.emp201;
+    stats.innerHTML =
+      '<div class="stat"><span class="label">Gross payroll</span><span class="value num">'+money(emp201.grossPayroll)+'</span></div>' +
+      '<div class="stat"><span class="label">PAYE</span><span class="value num">'+money(emp201.paye)+'</span></div>' +
+      '<div class="stat"><span class="label">UIF (total)</span><span class="value num">'+money(emp201.uifTotal)+'</span></div>' +
+      '<div class="stat"><span class="label">SDL</span><span class="value num">'+money(emp201.sdl)+'</span></div>' +
+      '<div class="stat"><span class="label">ETI credit</span><span class="value num">'+money(emp201.eti)+'</span></div>' +
+      '<div class="stat total"><span class="label">Net due to SARS</span><span class="value num">'+money(emp201.netToSars)+'</span></div>';
+
+    var payslipRows = payrollRunData.payslips.map(function(ps){
+      return '<tr data-id="'+ps.employeeId+'"><td>'+esc(ps.name)+'</td><td>'+esc(ps.department||'')+'</td>' +
+        '<td class="num">'+money(ps.gross)+'</td><td class="num">'+money(ps.paye)+'</td><td class="num">'+money(ps.net)+'</td>' +
+        '<td><button class="btn small view-payslip">Payslip</button></td></tr>';
+    }).join('');
+
+    body.innerHTML =
+      '<div class="panel">' +
+        '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
+          '<h2 style="margin:0;">EMP201 — '+esc(payrollMonth)+'</h2>' +
+          '<button class="btn primary" id="btn-run-payroll">'+(payrollRunData.hasRun?'Re-run payroll for this month':'Run payroll for this month')+'</button>' +
+        '</div>' +
+        (payrollRunData.hasRun ? '' : '<div class="empty" style="margin-top:10px;">Payroll hasn\'t been run for this month yet — run it once every active employee is Finalized in Pay Adjustments.</div>') +
+        '<div id="run-payroll-error"></div>' +
+      '</div>' +
+      (payrollRunData.hasRun ? (
+        '<div class="panel"><h2>Payslips</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>Department</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th></th></tr></thead><tbody>' +
+        payslipRows + '</tbody></table></div></div><div id="payslip-view"></div>'
+      ) : '');
+
+    document.getElementById('btn-run-payroll').addEventListener('click', function(){
+      var errBox = document.getElementById('run-payroll-error');
+      errBox.innerHTML = '';
+      apiRead('runPayroll', { month: payrollMonth }).then(function(res){
+        if(res && res.ok){ payrollRunData = res.payrollRun; renderPayrollRun(); }
+        else errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not run payroll.')+'</div>';
+      });
+    });
+
+    Array.prototype.forEach.call(document.querySelectorAll('.view-payslip'), function(btn){
+      btn.addEventListener('click', function(){ loadPayslip_(btn.closest('tr').dataset.id); });
+    });
+  }
+
+  function loadPayslip_(employeeId){
+    var box = document.getElementById('payslip-view');
+    box.innerHTML = '<div class="empty">Loading payslip…</div>';
+    apiRead('getPayslip', { month: payrollMonth, employeeId: employeeId }).then(function(res){
+      if(!res || !res.ok){ box.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load payslip.')+'</div>'; return; }
+      box.innerHTML = payslipHtml_(res);
+      var printBtn = box.querySelector('.btn-print-payslip');
+      if(printBtn) printBtn.addEventListener('click', function(){ window.print(); });
+    });
+  }
+
+  function payslipHtml_(ps){
+    var co = ps.company || {};
+    var e = ps.employee;
+    var c = ps.calc;
+    var taxableLabels = { Commission:'Commission', Bonus:'Bonus', Overtime:'Overtime', Other:'Other allowance' };
+    var earningsRows = '<tr><td>Basic salary</td><td class="num">'+money(c.baseAmount)+'</td></tr>';
+    Object.keys(taxableLabels).forEach(function(t){
+      var amt = c.adjustments[t];
+      if(amt){
+        var label = taxableLabels[t];
+        if(t==='Overtime' && c.overtimeHours) label += ' ('+c.overtimeHours+' hrs)';
+        earningsRows += '<tr><td>'+esc(label)+'</td><td class="num">'+money(amt)+'</td></tr>';
+      }
+    });
+    if(c.adjustments.AdvanceGiven) earningsRows += '<tr><td>Advance paid out</td><td class="num">'+money(c.adjustments.AdvanceGiven)+'</td></tr>';
+
+    var deductionRows =
+      '<tr><td>PAYE</td><td class="num">'+money(c.paye)+'</td></tr>' +
+      '<tr><td>UIF</td><td class="num">'+money(c.uifEmployee)+'</td></tr>' +
+      (c.retirementDeduction ? '<tr><td>Retirement fund</td><td class="num">'+money(c.retirementDeduction)+'</td></tr>' : '') +
+      (c.medicalContribution ? '<tr><td>Medical aid</td><td class="num">'+money(c.medicalContribution)+'</td></tr>' : '') +
+      (c.adjustments.Deduction ? '<tr><td>Deduction</td><td class="num">'+money(c.adjustments.Deduction)+'</td></tr>' : '') +
+      (c.adjustments.AdvanceRepayment ? '<tr><td>Advance repayment</td><td class="num">'+money(c.adjustments.AdvanceRepayment)+'</td></tr>' : '');
+
+    return '<div class="payslip-box">' +
+      '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
+      '<div class="sub">'+esc(co.address||'')+'</div>' +
+      '<div class="sub">PAYE '+esc(co.payeNumber||'—')+' · UIF '+esc(co.uifNumber||'—')+' · SDL '+esc(co.sdlNumber||'—')+'</div>' +
+      '<div class="label section-label">Payslip'+(ps.isFinal?'':' (preview — payroll not yet run for this month)')+'</div>' +
+      '<div class="payslip-grid">' +
+        '<div><strong>'+esc(e.name)+'</strong></div><div></div>' +
+        '<div>Employee #: '+esc(e.employeeNumber||'—')+'</div><div>Job title: '+esc(e.jobTitle||'—')+'</div>' +
+        '<div>ID number: '+esc(e.idNumber||'—')+'</div><div>Tax number: '+esc(e.taxNumber||'—')+'</div>' +
+        '<div>Department: '+esc(e.department||'—')+'</div><div>Pay date: '+esc(ps.payDate||'—')+'</div>' +
+        '<div>Pay period: '+esc(ps.payrunPeriod.from)+' to '+esc(ps.payrunPeriod.to)+'</div><div>Tax year: '+esc(ps.taxYear)+'</div>' +
+        '<div>Bank: '+esc(e.bankName||'—')+'</div><div>Acc: '+esc(e.accountNumber||'—')+' ('+esc(e.branchCode||'—')+')</div>' +
+      '</div>' +
+      '<div class="label section-label">Earnings</div><table>'+earningsRows+'</table>' +
+      '<div class="label section-label">Deductions</div><table>'+deductionRows+'</table>' +
+      '<div class="field-row" style="justify-content:space-between;margin-top:14px;padding-top:10px;border-top:1px solid var(--line-strong);">' +
+        '<strong>Net pay</strong><strong class="num">'+money(c.net)+'</strong>' +
+      '</div>' +
+      '<div class="label section-label">Year to date ('+esc(ps.taxYear)+')</div>' +
+      '<div class="payslip-grid">' +
+        '<div>Basic salary: '+money(ps.ytdTotals.basicSalary)+'</div><div>Overtime: '+money(ps.ytdTotals.overtime)+'</div>' +
+        '<div>Gross taxable: '+money(ps.ytdTotals.grossTaxable)+'</div><div>UIF: '+money(ps.ytdTotals.uif)+'</div>' +
+        '<div>SDL: '+money(ps.ytdTotals.sdl)+'</div><div></div>' +
+      '</div>' +
+      '<div class="field-row" style="margin-top:16px;"><button class="btn btn-print-payslip">Print payslip</button></div>' +
+      '</div>';
+  }
+
+  // -------- IRP5 / IT3(a) --------
+  function loadIrp5(){
+    apiRead('getIrp5', { month: payrollMonth }).then(function(res){
+      if(!res || !res.ok){ document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load IRP5 data.')+'</div>'; return; }
+      renderIrp5_(res);
+    }).catch(function(e){ document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+
+  function renderIrp5_(res){
+    var stats = document.getElementById('payroll-stats');
+    stats.innerHTML = '<div class="stat total"><span class="label">Tax year</span><span class="value">'+esc(res.taxYear)+'</span></div>' +
+      '<div class="stat"><span class="label">Certificates</span><span class="value num">'+res.certificates.length+'</span></div>';
+
+    var rows = res.certificates.map(function(c){
+      return '<tr><td>'+esc(c.name)+'</td><td>'+esc(c.certificateType)+'</td><td class="num">'+c.monthsPaid+'</td>' +
+        '<td class="num">'+money(c.grossIncome_3601)+'</td><td class="num">'+money(c.payeDeducted_4102)+'</td>' +
+        '<td class="num">'+money(c.uifContribution_4141)+'</td><td class="num">'+money(c.sdlContribution_4142)+'</td>' +
+        '<td class="num">'+money(c.retirementContribution_4001)+'</td><td class="num">'+money(c.medicalContribution_4005)+'</td></tr>';
+    }).join('');
+
+    var body = document.getElementById('payroll-body');
+    body.innerHTML =
+      '<div class="panel">' +
+        '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
+          '<h2 style="margin:0;">IRP5 / IT3(a) figures — tax year '+esc(res.taxYear)+'</h2>' +
+          '<button class="btn" id="btn-export-irp5">Export CSV</button>' +
+        '</div>' +
+        '<div class="sub" style="margin:6px 0 14px;">These are the FIGURES for each certificate, summed from every payroll run in this tax year — use them to complete SARS\'s e@syFile / EMP501 process yourself; this app doesn\'t submit anything to SARS.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th class="num">Months paid</th><th class="num">Gross (3601)</th><th class="num">PAYE (4102)</th><th class="num">UIF (4141)</th><th class="num">SDL (4142)</th><th class="num">Retirement (4001)</th><th class="num">Medical (4005)</th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="9" class="empty">No payroll runs yet this tax year.</td></tr>') +
+        '</tbody></table></div>' +
+      '</div>';
+
+    document.getElementById('btn-export-irp5').addEventListener('click', function(){ exportIrp5Csv_(res); });
+  }
+
+  function exportIrp5Csv_(res){
+    var headers = ['Employee','Type','MonthsPaid','GrossIncome_3601','PAYEDeducted_4102','UIF_4141','SDL_4142','Retirement_4001','Medical_4005'];
+    var lines = [headers.join(',')];
+    res.certificates.forEach(function(c){
+      lines.push([c.name, c.certificateType, c.monthsPaid, c.grossIncome_3601, c.payeDeducted_4102, c.uifContribution_4141, c.sdlContribution_4142, c.retirementContribution_4001, c.medicalContribution_4005]
+        .map(function(v){ var s=String(v==null?'':v); return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s; }).join(','));
+    });
+    var blob = new Blob([lines.join('\n')], {type:'text/csv'});
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'irp5-'+res.taxYear.replace('/','-')+'.csv';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
   }
 
   // ================= BOOT =================
