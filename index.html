@@ -390,7 +390,12 @@
 
     <div class="panel" style="max-width:640px;">
       <h2 style="margin:0 0 4px;">Import previous payrolls</h2>
-      <div class="sub" style="margin-bottom:10px;">One-off backfill for months from before this app was used — e.g. this tax year's earlier months from an old spreadsheet. Paste one line per employee per month, 27 comma-separated columns each (see SETUP.md for the exact column order and a worked example). An employee is matched by Employee # only, never by name — if no employee has that number yet, one is created for you to check over on the Roster afterwards. Importing the same employee/month twice overwrites rather than duplicating.</div>
+      <div class="sub" style="margin-bottom:10px;">One-off backfill for months from before this app was used — e.g. this tax year's earlier months from an old spreadsheet. Drop a CSV file below, or paste the lines directly into the box — one line per employee per month, 27 comma-separated columns each (see SETUP.md for the exact column order and a worked example). An employee is matched by Employee # only, never by name — if no employee has that number yet, one is created for you to check over on the Roster afterwards. Importing the same employee/month twice overwrites rather than duplicating.</div>
+      <div class="dropzone" id="import-payroll-dropzone" style="padding:16px; margin-bottom:12px;">
+        <strong>Drop a CSV file here</strong>Or use Choose file — one row per employee per month, in the column order above
+        <div style="margin-top:10px;"><button type="button" class="btn" id="btn-import-payroll-choose-file">Choose file</button></div>
+        <input type="file" id="import-payroll-file-input" accept=".csv,.txt,text/csv,text/plain" hidden>
+      </div>
       <textarea id="import-payroll-lines" rows="6" placeholder="2026-04,101,Jane Smith,Production,8001015800081,1995-05-20,1234567890,Cabinet Maker,1 Furniture Way,18000,18000,1245,180,180,180,0,0,0,0,0,0,0,0,0,0,16215,Backfilled from old spreadsheet"></textarea>
       <div class="field-row" style="margin-top:12px;">
         <button class="btn primary" id="btn-import-payroll-history">Import</button>
@@ -1008,6 +1013,45 @@
     // refetches instead of showing pre-import figures.
     payrollData = null; payrollAdjustmentsData = null; payrollRunData = null;
   }
+
+  // Drag-and-drop (or Choose file) for a CSV of import lines — reads the file as
+  // plain text and drops it straight into the textarea, same as pasting it by hand,
+  // so the Import button and every check it runs work exactly the same way either way.
+  (function(){
+    var dz = document.getElementById('import-payroll-dropzone');
+    var fi = document.getElementById('import-payroll-file-input');
+    var chooseBtn = document.getElementById('btn-import-payroll-choose-file');
+    var textarea = document.getElementById('import-payroll-lines');
+    var statusEl = document.getElementById('import-payroll-status');
+
+    function loadImportFile(file){
+      if(!file) return;
+      var isTextLike = /\.(csv|txt)$/i.test(file.name) || /^text\//.test(file.type) || file.type==='text/csv' || file.type==='';
+      if(!isTextLike){
+        statusEl.innerHTML = '<div class="status-msg error">That doesn\'t look like a CSV or text file — drop the .csv file itself, not a spreadsheet workbook.</div>';
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function(){
+        textarea.value = String(reader.result||'').replace(/\r\n/g,'\n').trim();
+        statusEl.innerHTML = '<div class="status-msg">Loaded '+esc(file.name)+' — check it over below, then click Import.</div>';
+      };
+      reader.onerror = function(){
+        statusEl.innerHTML = '<div class="status-msg error">Couldn\'t read that file — try again, or paste the lines in directly.</div>';
+      };
+      reader.readAsText(file);
+    }
+
+    dz.addEventListener('click', function(){ fi.click(); });
+    chooseBtn.addEventListener('click', function(e){ e.stopPropagation(); fi.click(); });
+    dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
+    dz.addEventListener('drop', function(e){
+      e.preventDefault(); dz.classList.remove('drag');
+      if(e.dataTransfer.files && e.dataTransfer.files[0]) loadImportFile(e.dataTransfer.files[0]);
+    });
+    fi.addEventListener('change', function(){ if(fi.files[0]) loadImportFile(fi.files[0]); });
+  })();
 
   document.getElementById('btn-import-payroll-history').addEventListener('click', function(){
     var textarea = document.getElementById('import-payroll-lines');
