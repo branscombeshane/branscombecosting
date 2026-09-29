@@ -213,10 +213,28 @@
   .payslip-box .payslip-grid{ display:grid; grid-template-columns:1fr 1fr; gap:2px 18px; font-size:12.5px; margin:14px 0; }
   .payslip-box table{ margin-top:6px; }
   .payslip-box .section-label{ margin-top:16px; }
+
+  /* Generic printable-report styling, reused by the EMP201 report and the payments
+     report (the payslip keeps its own .payslip-box look above). */
+  .report-box{ border:1px solid var(--line-strong); background:var(--paper-raised); padding:22px 26px; }
+  .report-box h2{ font-size:18px; margin:0 0 2px; text-transform:none; }
+  .report-box .section-label{ margin-top:16px; }
+  .report-box table{ width:100%; margin-top:6px; border-collapse:collapse; }
+  .report-box table th, .report-box table td{ padding:4px 6px; }
+  .report-box table tfoot td{ font-weight:700; border-top:1px solid var(--line-strong); }
+
+  /* One payslip per printed page when downloading several at once. */
+  .payslip-page-break{ page-break-after:always; break-after:page; }
+  .payslip-page-break:last-child{ page-break-after:auto; break-after:auto; }
+
+  /* .print-area marks whichever block should be the entire printed page — the payslip
+     view, the EMP201 report, the payments report, or a multi-payslip run of them — so
+     everything else on screen (sidebar, tabs, buttons) disappears from the printout/PDF. */
   @media print{
     body *{ visibility:hidden; }
-    .payslip-box, .payslip-box *{ visibility:visible; }
-    .payslip-box{ position:absolute; top:0; left:0; border:none; }
+    .print-area, .print-area *{ visibility:visible; }
+    .print-area{ position:absolute; top:0; left:0; border:none; }
+    .no-print{ display:none !important; }
   }
 
   .empty{ color:var(--ink-soft); font-style:italic; padding:10px 2px; }
@@ -335,6 +353,7 @@
 
     <div id="payroll-stats" class="stats" style="margin-top:16px;"></div>
     <div id="payroll-body" style="margin-top:20px;"></div>
+    <div id="bulk-print-view" style="display:none;"></div>
   </section>
 
   <section class="view" id="view-settings" hidden>
@@ -529,6 +548,28 @@
     }
     promise.then(restore, restore);
     return promise;
+  }
+
+  // Puts `html` into the hidden #bulk-print-view container and prints it — used for the
+  // EMP201 report, the payments report, and "download all payslips", all of which build
+  // their own printable HTML then hand it here rather than each reimplementing the
+  // print/cleanup dance. window.print() blocks script execution until the dialog closes
+  // in most browsers, so the reset below runs right away there; 'afterprint' covers the
+  // rest, and calling reset() twice is harmless.
+  function printBulk_(html){
+    var box = document.getElementById('bulk-print-view');
+    box.innerHTML = html;
+    box.classList.add('print-area');
+    box.style.display = 'block';
+    function reset(){
+      box.style.display = 'none';
+      box.classList.remove('print-area');
+      box.innerHTML = '';
+      window.removeEventListener('afterprint', reset);
+    }
+    window.addEventListener('afterprint', reset);
+    window.print();
+    reset();
   }
 
   // ================= LOGIN GATE =================
@@ -2328,14 +2369,26 @@
       '<div class="panel">' +
         '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
           '<h2 style="margin:0;">EMP201 — '+esc(payrollMonth)+'</h2>' +
-          '<button class="btn primary" id="btn-run-payroll">'+(payrollRunData.hasRun?'Re-run payroll for this month':'Run payroll for this month')+'</button>' +
+          '<div class="field-row" style="width:auto;margin-top:0;gap:10px;">' +
+            (payrollRunData.hasRun ? '<button class="btn" id="btn-download-emp201">Download EMP201</button>' : '') +
+            '<button class="btn primary" id="btn-run-payroll">'+(payrollRunData.hasRun?'Re-run payroll for this month':'Run payroll for this month')+'</button>' +
+          '</div>' +
         '</div>' +
         (payrollRunData.hasRun ? '' : '<div class="empty" style="margin-top:10px;">Payroll hasn\'t been run for this month yet — run it once every active employee is Finalized in Pay Adjustments.</div>') +
         '<div id="run-payroll-error"></div>' +
       '</div>' +
       (payrollRunData.hasRun ? (
-        '<div class="panel"><h2>Payslips</h2><div class="table-wrap"><table><thead><tr><th>Name</th><th>Department</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th></th></tr></thead><tbody>' +
-        payslipRows + '</tbody></table></div></div><div id="payslip-view"></div>'
+        '<div class="panel">' +
+          '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
+            '<h2 style="margin:0;">Payslips</h2>' +
+            '<div class="field-row" style="width:auto;margin-top:0;gap:10px;">' +
+              '<button class="btn" id="btn-download-payments-report">Payments report</button>' +
+              '<button class="btn" id="btn-download-all-payslips">Download all payslips</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Name</th><th>Department</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th></th></tr></thead><tbody>' +
+          payslipRows + '</tbody></table></div>' +
+        '</div><div id="payslip-view"></div>'
       ) : '');
 
     document.getElementById('btn-run-payroll').addEventListener('click', function(){
@@ -2344,6 +2397,23 @@
       withBusy_(this, apiRead('runPayroll', { month: payrollMonth }), 'Running payroll…').then(function(res){
         if(res && res.ok){ payrollRunData = res.payrollRun; renderPayrollRun(); }
         else errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not run payroll.')+'</div>';
+      });
+    });
+
+    var emp201Btn = document.getElementById('btn-download-emp201');
+    if(emp201Btn) emp201Btn.addEventListener('click', function(){ printBulk_(emp201ReportHtml_(payrollRunData)); });
+
+    var paymentsBtn = document.getElementById('btn-download-payments-report');
+    if(paymentsBtn) paymentsBtn.addEventListener('click', function(){ printBulk_(paymentsReportHtml_(payrollRunData)); });
+
+    var allPayslipsBtn = document.getElementById('btn-download-all-payslips');
+    if(allPayslipsBtn) allPayslipsBtn.addEventListener('click', function(){
+      withBusy_(allPayslipsBtn, apiRead('getAllPayslips', { month: payrollMonth }), 'Preparing…').then(function(res){
+        if(!res || !res.ok){ alert((res && res.error) || 'Could not load payslips.'); return; }
+        var html = res.payslips.map(function(ps){
+          return '<div class="payslip-page-break">'+payslipHtml_(ps, {embed:true})+'</div>';
+        }).join('');
+        printBulk_(html);
       });
     });
 
@@ -2363,7 +2433,68 @@
     });
   }
 
-  function payslipHtml_(ps){
+  // "Download EMP201" — a printable version of the same summary + per-employee PAYE/
+  // SDL/UIF breakdown shown on screen, laid out to match what SARS/most payroll software
+  // calls an EMP201 reconciliation, for filing or for checking against another system.
+  function emp201ReportHtml_(run){
+    var co = run.company || {};
+    var emp201 = run.emp201;
+    var rows = run.payslips.map(function(ps){
+      var uifTotal = round2Js_((Number(ps.uifEmployee)||0) + (Number(ps.uifEmployer)||0));
+      return '<tr><td>'+esc(ps.employeeNumber||'—')+'</td><td>'+esc(ps.name)+'</td>' +
+        '<td class="num">'+money(ps.gross)+'</td><td class="num">'+money(ps.paye)+'</td>' +
+        '<td class="num">'+money(ps.sdlEmployer)+'</td><td class="num">'+money(uifTotal)+'</td></tr>';
+    }).join('');
+    return '<div class="report-box">' +
+      '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
+      '<div class="sub">'+esc(co.address||'')+'</div>' +
+      '<div class="sub">PAYE '+esc(co.payeNumber||'—')+' · UIF '+esc(co.uifNumber||'—')+' · SDL '+esc(co.sdlNumber||'—')+'</div>' +
+      '<div class="label section-label">EMP201 — for payment period '+esc(run.month)+'</div>' +
+      '<table><tbody>' +
+        '<tr><td>Gross payroll</td><td class="num">'+money(emp201.grossPayroll)+'</td></tr>' +
+        '<tr><td>PAYE</td><td class="num">'+money(emp201.paye)+'</td></tr>' +
+        '<tr><td>UIF — employee</td><td class="num">'+money(emp201.uifEmployee)+'</td></tr>' +
+        '<tr><td>UIF — employer</td><td class="num">'+money(emp201.uifEmployer)+'</td></tr>' +
+        '<tr><td>UIF — total</td><td class="num">'+money(emp201.uifTotal)+'</td></tr>' +
+        '<tr><td>SDL</td><td class="num">'+money(emp201.sdl)+'</td></tr>' +
+        '<tr><td>ETI credit</td><td class="num">-'+money(emp201.eti)+'</td></tr>' +
+      '</tbody></table>' +
+      '<div class="field-row" style="justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-strong);">' +
+        '<strong>Net due to SARS</strong><strong class="num">'+money(emp201.netToSars)+'</strong>' +
+      '</div>' +
+      '<div class="label section-label">By employee</div>' +
+      '<table><thead><tr><th>Emp #</th><th>Name</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">SDL</th><th class="num">UIF</th></tr></thead>' +
+      '<tbody>'+rows+'</tbody>' +
+      '<tfoot><tr><td colspan="2">Total</td><td class="num">'+money(emp201.grossPayroll)+'</td><td class="num">'+money(emp201.paye)+'</td><td class="num">'+money(emp201.sdl)+'</td><td class="num">'+money(emp201.uifTotal)+'</td></tr></tfoot>' +
+      '</table>' +
+    '</div>';
+  }
+
+  // "Payments report" — who gets paid what, for handing to whoever runs the actual bank
+  // transfers each month.
+  function paymentsReportHtml_(run){
+    var co = run.company || {};
+    var rows = run.payslips.map(function(ps){
+      return '<tr><td>'+esc(ps.employeeNumber||'—')+'</td><td>'+esc(ps.name)+'</td><td>'+esc(ps.department||'')+'</td><td class="num">'+money(ps.net)+'</td></tr>';
+    }).join('');
+    var total = run.payslips.reduce(function(sum, ps){ return sum + (Number(ps.net)||0); }, 0);
+    return '<div class="report-box">' +
+      '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
+      '<div class="label section-label">Payments report — '+esc(run.month)+'</div>' +
+      '<div class="sub" style="margin-bottom:10px;">Net pay due to each employee for '+esc(run.month)+'.</div>' +
+      '<table><thead><tr><th>Emp #</th><th>Name</th><th>Department</th><th class="num">Net pay</th></tr></thead>' +
+      '<tbody>'+rows+'</tbody>' +
+      '<tfoot><tr><td colspan="3">Total</td><td class="num">'+money(total)+'</td></tr></tfoot>' +
+      '</table>' +
+    '</div>';
+  }
+
+  function payslipHtml_(ps, opts){
+    // opts.embed: true when this payslip is one of several being combined for the
+    // "Download all payslips" printout — in that case the OUTER wrapper gets print-area
+    // (so it's the one thing made visible/positioned for print), not every payslip
+    // inside it, or they'd all print stacked on top of each other at position:absolute.
+    var embed = !!(opts && opts.embed);
     var co = ps.company || {};
     var e = ps.employee;
     var c = ps.calc;
@@ -2401,7 +2532,7 @@
         '</table>';
     }
 
-    return '<div class="payslip-box">' +
+    return '<div class="payslip-box'+(embed?'':' print-area')+'">' +
       '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
       '<div class="sub">'+esc(co.address||'')+'</div>' +
       '<div class="sub">PAYE '+esc(co.payeNumber||'—')+' · UIF '+esc(co.uifNumber||'—')+' · SDL '+esc(co.sdlNumber||'—')+'</div>' +
@@ -2426,7 +2557,7 @@
         '<div>Gross taxable: '+money(ps.ytdTotals.grossTaxable)+'</div><div>UIF: '+money(ps.ytdTotals.uif)+'</div>' +
         '<div>SDL: '+money(ps.ytdTotals.sdl)+'</div><div></div>' +
       '</div>' +
-      '<div class="field-row" style="margin-top:16px;"><button class="btn btn-print-payslip">Print payslip</button></div>' +
+      '<div class="field-row no-print" style="margin-top:16px;"><button class="btn btn-print-payslip">Print / save as PDF</button></div>' +
       '</div>';
   }
 
