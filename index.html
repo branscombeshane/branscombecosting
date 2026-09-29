@@ -1694,7 +1694,7 @@
   var payrollMonth = null;              // 'yyyy-MM', set to the current month on first visit
   var payrollTab = 'roster';            // roster | adjustments | run | irp5
   var payrollData = null;               // {month, employees[], departments[], headcount, totalMonthlyCost, processedCount}
-  var payrollAdjustmentsData = null;    // {month, items[], advanceBalances[], recurring[]}
+  var payrollAdjustmentsData = null;    // {month, items[], advanceBalances[]}
   var payrollRunData = null;            // {month, hasRun, payslips[], emp201}
   var expandedEmployeeId = null;        // Roster tab: which employee's edit form is open
   var expandedAdjEmployeeId = null;     // Pay Adjustments tab: which employee's panel is open
@@ -2041,8 +2041,7 @@
         (rowsHtml || '<tr><td colspan="5" class="empty">No active employees.</td></tr>') +
         '</tbody></table></div>' +
       '</div>' +
-      advHtml +
-      renderRecurringPanelHtml_();
+      advHtml;
 
     Array.prototype.forEach.call(document.querySelectorAll('.adj-emp-row'), function(tr){
       tr.addEventListener('click', function(){
@@ -2051,7 +2050,6 @@
         renderPayrollAdjustments();
       });
     });
-    wireRecurringPanel_();
 
     if(expandedAdjEmployeeId){
       var e = active.find(function(x){ return x.id===expandedAdjEmployeeId; });
@@ -2069,37 +2067,66 @@
       }).join('') + '</tbody></table>'
     ) : '<div class="empty">No adjustments yet this month.</div>';
 
-    var typeOptions = ['Commission','Bonus','Overtime','Other','Deduction','AdvanceGiven','AdvanceRepayment'].map(function(t){
+    // AdvanceGiven isn't offered here — a cash advance is recorded any time through
+    // the separate "Give advance" button below, not as a month-scoped adjustment.
+    var typeOptions = ['Commission','Bonus','Overtime','Other','Deduction','AdvanceRepayment'].map(function(t){
       return '<option value="'+t+'">'+t+'</option>';
     }).join('');
 
+    var basicSalaryNote = e.amountOverridden
+      ? ' <span class="sub adj-basic-salary-note">(overridden for '+esc(payrollMonth)+' — normally '+money(e.defaultAmount)+')</span>'
+      : '';
+
     container.innerHTML =
       '<div class="label" style="margin-bottom:8px;">'+esc(e.name)+' — '+esc(payrollMonth)+'</div>' +
-      itemsHtml +
-      '<div class="field-row" style="margin-top:14px;align-items:flex-end;">' +
+
+      '<div class="field-row" style="align-items:center;">' +
+        '<div class="sub">Basic salary: <strong class="adj-basic-salary-amount">'+money(e.amount)+'</strong>'+basicSalaryNote+'</div>' +
+        '<button class="btn small adj-basic-salary-edit">Edit</button>' +
+        (e.amountOverridden ? '<button class="btn small adj-basic-salary-revert">Revert to default</button>' : '') +
+      '</div>' +
+      '<div class="field-row adj-basic-salary-edit-form" hidden style="align-items:flex-end;margin-top:8px;">' +
+        '<div class="field" style="min-width:140px;"><span class="label">New Basic salary (this month only)</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-basic-salary-input" step="0.01" min="0" value="'+e.amount+'"></div></div>' +
+        '<button class="btn primary small adj-basic-salary-save">Save</button>' +
+        '<button class="btn small adj-basic-salary-cancel">Cancel</button>' +
+        '<span class="adj-basic-salary-status sub"></span>' +
+      '</div>' +
+      '<div class="sub" style="margin:6px 0 16px;">This only changes their pay for '+esc(payrollMonth)+' — it never touches their standing salary on the Roster.</div>' +
+
+      '<div class="field-row" style="align-items:flex-end;">' +
         '<div class="field" style="min-width:140px;"><span class="label">Type</span><select class="adj-type">'+typeOptions+'</select></div>' +
         '<div class="field adj-amount-field"><span class="label">Amount</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-amount" step="0.01" min="0"></div></div>' +
         '<div class="field adj-hours-field" hidden><span class="label">Hours</span><input type="number" class="num adj-hours" step="0.25" min="0"></div>' +
         '<div class="field" style="min-width:160px;"><span class="label">Note (optional)</span><input type="text" class="adj-note"></div>' +
         '<button class="btn primary adj-add">Add</button>' +
-        '<label class="adj-recurring-label" style="display:flex;align-items:center;gap:6px;font-size:12px;margin-left:6px;"><input type="checkbox" class="adj-recurring" style="width:auto;">Make recurring</label>' +
       '</div>' +
       '<div class="adj-err sub" style="color:var(--warn);margin-top:6px;"></div>' +
-      '<div class="field-row" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line);">' +
+
+      '<div class="field-row" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line);align-items:center;">' +
         '<button class="btn adj-save-status" data-status="in_progress">Save (in progress)</button>' +
         '<button class="btn primary adj-save-status" data-status="finalized">Finalize</button>' +
-      '</div>';
+        '<button class="btn adj-give-advance" style="margin-left:auto;">Give advance</button>' +
+      '</div>' +
+      '<div class="field-row adj-give-advance-form" hidden style="align-items:flex-end;margin-top:10px;">' +
+        '<div class="field"><span class="label">Advance amount</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-advance-amount" step="0.01" min="0"></div></div>' +
+        '<div class="field" style="min-width:160px;"><span class="label">Note (optional)</span><input type="text" class="adj-advance-note"></div>' +
+        '<button class="btn primary small adj-advance-confirm">Confirm</button>' +
+        '<button class="btn small adj-advance-cancel">Cancel</button>' +
+        '<span class="adj-advance-status sub"></span>' +
+      '</div>' +
+      '<div class="sub" style="margin-top:6px;">Give advance records a cash advance whenever it\'s handed over — it\'s not tied to '+esc(payrollMonth)+' and doesn\'t affect Net pay, it only raises the balance shown in Outstanding advances above.</div>' +
+
+      '<h3 style="margin:20px 0 8px;font-size:13px;color:var(--ink-soft);">This month\'s adjustments</h3>' +
+      itemsHtml;
 
     var typeSel = container.querySelector('.adj-type');
     var hoursField = container.querySelector('.adj-hours-field');
     var amountField = container.querySelector('.adj-amount-field');
     var amountInput = container.querySelector('.adj-amount');
     var hoursInput = container.querySelector('.adj-hours');
-    var recurringLabel = container.querySelector('.adj-recurring-label');
     function syncOvertimeFields(){
       var isOt = typeSel.value==='Overtime';
       hoursField.hidden = !isOt;
-      recurringLabel.hidden = isOt; // overtime can't be a recurring template
       if(isOt){
         amountInput.value = (hoursInput.value && e.hourRate) ? round2Js_(Number(hoursInput.value)*e.hourRate) : '';
         amountInput.readOnly = true; amountField.style.opacity = .7;
@@ -2125,17 +2152,12 @@
       var amount = Number(amountInput.value)||0;
       var hours = Number(hoursInput.value)||0;
       var note = container.querySelector('.adj-note').value.trim();
-      var recurring = container.querySelector('.adj-recurring').checked;
       var errBox = container.querySelector('.adj-err');
       errBox.textContent = '';
       if(type==='Overtime' && (!hours||hours<=0)){ errBox.textContent='Enter the number of overtime hours.'; return; }
       if(type!=='Overtime' && (!amount||amount<=0)){ errBox.textContent='Amount must be a positive number.'; return; }
 
-      var call = (recurring && type!=='Overtime')
-        ? apiRead('saveRecurringAdjustment', { employeeId:e.id, type:type, amount:amount, note:note, month:payrollMonth })
-        : apiRead('addAdjustment', { employeeId:e.id, month:payrollMonth, type:type, amount:amount, hours:hours, note:note });
-
-      call.then(function(res){
+      apiRead('addAdjustment', { employeeId:e.id, month:payrollMonth, type:type, amount:amount, hours:hours, note:note }).then(function(res){
         if(res && res.ok) loadPayrollAdjustments();
         else errBox.textContent = (res && res.error) || 'Could not add this adjustment.';
       });
@@ -2152,38 +2174,64 @@
         });
       });
     });
-  }
 
-  function renderRecurringPanelHtml_(){
-    var recurring = payrollAdjustmentsData.recurring || [];
-    var rows = recurring.map(function(r){
-      return '<tr data-id="'+r.id+'"><td>'+esc(r.name)+'</td><td>'+esc(r.type)+'</td><td class="num">'+money(r.amount)+'</td><td>'+esc(r.note||'')+'</td>' +
-        '<td><input type="checkbox" class="rec-active-toggle"'+(r.active?' checked':'')+'></td>' +
-        '<td><button class="btn small danger rec-delete">Delete</button></td></tr>';
-    }).join('');
-    return '<div class="panel"><h2>Recurring adjustments</h2>' +
-      '<div class="sub" style="margin-bottom:10px;">Standing monthly items (e.g. a car allowance) — copied automatically into each new month. Add one from an employee\'s panel above with "Make recurring" ticked.</div>' +
-      '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th class="num">Amount</th><th>Note</th><th>Active</th><th></th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="6" class="empty">None set up.</td></tr>') +
-      '</tbody></table></div></div>';
-  }
-
-  function wireRecurringPanel_(){
-    Array.prototype.forEach.call(document.querySelectorAll('.rec-active-toggle'), function(cb){
-      cb.addEventListener('change', function(){
-        var id = cb.closest('tr').dataset.id;
-        apiRead('saveRecurringAdjustment', { id:id, active:cb.checked, month:payrollMonth }).then(function(res){
-          if(res && res.ok) payrollAdjustmentsData = res.payrollAdjustments;
-        });
-      });
+    // ---- Basic salary (view + one-month-only edit) ----
+    var basicSalaryEditForm = container.querySelector('.adj-basic-salary-edit-form');
+    var basicSalaryInput = container.querySelector('.adj-basic-salary-input');
+    var basicSalaryStatus = container.querySelector('.adj-basic-salary-status');
+    container.querySelector('.adj-basic-salary-edit').addEventListener('click', function(){
+      basicSalaryEditForm.hidden = false;
+      basicSalaryInput.focus();
+      basicSalaryInput.select();
     });
-    Array.prototype.forEach.call(document.querySelectorAll('.rec-delete'), function(btn){
-      btn.addEventListener('click', function(){
-        var id = btn.closest('tr').dataset.id;
-        if(!confirm('Delete this recurring adjustment? Months it has already been copied into keep their own copy.')) return;
-        apiRead('deleteRecurringAdjustment', { id:id, month:payrollMonth }).then(function(res){
-          if(res && res.ok){ payrollAdjustmentsData = res.payrollAdjustments; renderPayrollAdjustments(); }
-        });
+    container.querySelector('.adj-basic-salary-cancel').addEventListener('click', function(){
+      basicSalaryEditForm.hidden = true;
+      basicSalaryStatus.textContent = '';
+    });
+    function saveBasicSalaryOverride_(amountOrNull){
+      basicSalaryStatus.textContent = 'Saving…';
+      apiRead('setBaseAmountOverride', { employeeId:e.id, month:payrollMonth, amount:(amountOrNull===null ? '' : amountOrNull) }).then(function(res){
+        if(res && res.ok){
+          payrollData = res.payroll;
+          renderPayrollAdjustments();
+        } else {
+          basicSalaryStatus.textContent = (res && res.error) || 'Could not save.';
+        }
+      });
+    }
+    container.querySelector('.adj-basic-salary-save').addEventListener('click', function(){
+      var val = basicSalaryInput.value;
+      if(val==='' || Number(val)<0){ basicSalaryStatus.textContent = 'Enter an amount 0 or greater.'; return; }
+      saveBasicSalaryOverride_(Number(val));
+    });
+    var revertBtn = container.querySelector('.adj-basic-salary-revert');
+    if(revertBtn) revertBtn.addEventListener('click', function(){ saveBasicSalaryOverride_(null); });
+
+    // ---- Give advance ----
+    var advanceForm = container.querySelector('.adj-give-advance-form');
+    var advanceAmountInput = container.querySelector('.adj-advance-amount');
+    var advanceNoteInput = container.querySelector('.adj-advance-note');
+    var advanceStatus = container.querySelector('.adj-advance-status');
+    container.querySelector('.adj-give-advance').addEventListener('click', function(){
+      advanceForm.hidden = false;
+      advanceAmountInput.focus();
+    });
+    container.querySelector('.adj-advance-cancel').addEventListener('click', function(){
+      advanceForm.hidden = true;
+      advanceAmountInput.value = ''; advanceNoteInput.value = ''; advanceStatus.textContent = '';
+    });
+    container.querySelector('.adj-advance-confirm').addEventListener('click', function(){
+      var amount = Number(advanceAmountInput.value);
+      if(!amount || amount<=0){ advanceStatus.textContent = 'Enter an amount greater than 0.'; return; }
+      var note = advanceNoteInput.value.trim();
+      advanceStatus.textContent = 'Recording…';
+      apiRead('giveAdvance', { employeeId:e.id, amount:amount, note:note, month:payrollMonth }).then(function(res){
+        if(res && res.ok){
+          payrollAdjustmentsData = res.payrollAdjustments;
+          renderPayrollAdjustments();
+        } else {
+          advanceStatus.textContent = (res && res.error) || 'Could not record advance.';
+        }
       });
     });
   }
