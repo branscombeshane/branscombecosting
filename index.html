@@ -1710,7 +1710,7 @@
     var statusChip = !e.active
       ? '<span class="chip warn">Discharged</span>'
       : (e.status==='finalized' ? '<span class="chip good">Finalized</span>' : (e.status==='in_progress' ? '<span class="chip">Saved</span>' : '<span class="chip warn">Not started</span>'));
-    var rateStr = e.days ? (e.days+' d/wk · '+money(e.dayRate)+'/day') : 'Salaried';
+    var rateStr = e.days ? (e.days+' d/wk · '+money(e.dayRate)+'/day · '+money(e.hourRate)+'/hr') : 'Salaried';
     return '<tr class="roster-row" data-id="'+e.id+'">' +
       '<td>'+esc(e.name)+(e.etiEligible?' <span class="chip good" title="Eligible for the Employment Tax Incentive this month">ETI</span>':'')+'</td>' +
       '<td>'+esc(e.department||'—')+'</td>' +
