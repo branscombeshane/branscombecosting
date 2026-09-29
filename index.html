@@ -46,6 +46,12 @@
   }
 
   *{box-sizing:border-box;}
+  /* The `hidden` attribute is only display:none by default in the browser's own
+     stylesheet, which is lower-priority than any of our own display:flex/grid rules
+     (.field-row, .field, etc.) — so an element that's both `class="field-row"` and
+     `hidden` would otherwise still render. This makes `hidden` win unconditionally,
+     everywhere it's used with `el.hidden = true/false` in the JS below. */
+  [hidden]{ display:none !important; }
   html,body{ height:100%; }
   body{
     margin:0; background:var(--paper); color:var(--ink);
