@@ -2040,14 +2040,14 @@
     ) : '';
 
     body.innerHTML =
+      advHtml +
       '<div class="panel">' +
         '<h2 style="margin:0 0 10px;">Pay adjustments — '+esc(payrollMonth)+'</h2>' +
         '<div class="sub" style="margin-bottom:14px;">Click an employee to add commission, bonus, overtime, deductions or advances, then Finalize once they\'re done for the month — Run Payroll refuses to run until every active employee is finalized.</div>' +
         '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Department</th><th>This month</th><th>Status</th><th></th></tr></thead><tbody>' +
         (rowsHtml || '<tr><td colspan="5" class="empty">No active employees.</td></tr>') +
         '</tbody></table></div>' +
-      '</div>' +
-      advHtml;
+      '</div>';
 
     Array.prototype.forEach.call(document.querySelectorAll('.adj-emp-row'), function(tr){
       tr.addEventListener('click', function(){
