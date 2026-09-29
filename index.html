@@ -136,6 +136,9 @@
   }
   .btn:hover{ background:var(--accent-soft); }
   .btn:disabled{ opacity:.45; cursor:default; }
+  /* A busy button is still "doing something", not just unavailable — keep it more
+     visible than a plain disabled button and show a wait cursor. See withBusy_. */
+  .btn.is-busy:disabled{ opacity:.75; cursor:wait; }
   .btn.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
   .btn.primary:hover{ opacity:.9; background:var(--accent); }
   .btn.ghost{ border-color:transparent; background:none; padding:6px 8px; font-size:12px; }
@@ -499,6 +502,33 @@
     if(e && e.message==='not_configured') return 'This copy isn\'t connected to a backend yet. Set API_URL near the top of index.html to your Apps Script Web App URL — see SETUP.md.';
     if(e && e.message==='timeout') return 'The backend took too long to respond. Check the Apps Script is deployed and reachable, then try again.';
     return 'Couldn\'t reach the backend. Check that API_URL points at a deployed, published Web App.';
+  }
+
+  // Puts a button into a disabled "working" state (swapping its label, e.g. to
+  // "Saving…") for as long as `promise` is pending, then restores it — so a click
+  // that has to wait on a real apiRead() round trip (up to 25s, see the timeout
+  // above) always gives visible feedback instead of just sitting there looking
+  // unresponsive. Only meaningful for apiRead()-backed actions: apiWrite() is a
+  // fire-and-forget hidden-iframe POST that resolves immediately (see its own
+  // comment above), so there's no real wait to show for those.
+  //
+  // Safe to call even when the button will be removed by a re-render on success —
+  // restore() checks the button is still attached before touching it.
+  function withBusy_(btn, promise, busyLabel){
+    if(!btn) return promise;
+    var originalText = btn.textContent;
+    var originalDisabled = !!btn.disabled;
+    btn.disabled = true;
+    btn.textContent = busyLabel || 'Saving…';
+    btn.classList.add('is-busy');
+    function restore(){
+      if(!document.body.contains(btn)) return; // already replaced by a re-render
+      btn.disabled = originalDisabled;
+      btn.textContent = originalText;
+      btn.classList.remove('is-busy');
+    }
+    promise.then(restore, restore);
+    return promise;
   }
 
   // ================= LOGIN GATE =================
@@ -929,7 +959,7 @@
         var row = btn.closest('.dept-row'); var oldName = row.dataset.name;
         var newName = row.querySelector('.dept-rename-input').value.trim();
         if(!newName || newName===oldName) return;
-        apiRead('renameDepartment', { oldName:oldName, newName:newName }).then(function(res){
+        withBusy_(btn, apiRead('renameDepartment', { oldName:oldName, newName:newName })).then(function(res){
           if(res && res.ok){ settings.payrollDepartments = res.departments; renderDepartmentManager(); }
         });
       });
@@ -938,7 +968,7 @@
       btn.addEventListener('click', function(){
         var row = btn.closest('.dept-row'); var name = row.dataset.name;
         if(!confirm('Delete "'+name+'"? Employees in it will show as Unassigned instead — they won\'t be removed.')) return;
-        apiRead('deleteDepartment', { name:name }).then(function(res){
+        withBusy_(btn, apiRead('deleteDepartment', { name:name }), 'Deleting…').then(function(res){
           if(res && res.ok){ settings.payrollDepartments = res.departments; renderDepartmentManager(); }
         });
       });
@@ -949,7 +979,7 @@
     var name = input.value.trim();
     if(!name){ input.focus(); return; }
     if((settings.payrollDepartments||[]).indexOf(name)!==-1){ input.value=''; return; }
-    apiRead('addDepartment', { name:name }).then(function(res){
+    withBusy_(this, apiRead('addDepartment', { name:name }), 'Adding…').then(function(res){
       if(res && res.ok){ settings.payrollDepartments = res.departments; input.value=''; renderDepartmentManager(); }
     });
   });
@@ -971,7 +1001,7 @@
       sdlNumber: document.getElementById('co-sdl').value.trim(),
       address: document.getElementById('co-address').value.trim()
     };
-    apiRead('saveCompanyInfo', info).then(function(res){
+    withBusy_(this, apiRead('saveCompanyInfo', info)).then(function(res){
       settings.companyInfo = (res && res.companyInfo) || info;
       var msg = document.getElementById('company-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
@@ -1906,7 +1936,7 @@
       rec.month = payrollMonth;
       var action = (e && e.id) ? 'updateEmployee' : 'addEmployee';
       if(e && e.id) rec.id = e.id;
-      apiRead(action, rec).then(function(res){
+      withBusy_(saveBtn, apiRead(action, rec)).then(function(res){
         if(res && res.ok){
           if(typeof onSaved==='function') onSaved(res.payroll);
         } else if(errSpan){
@@ -1957,7 +1987,7 @@
       var date = container.querySelector('.emp-discharge-date').value;
       var reason = container.querySelector('.emp-discharge-reason').value.trim();
       if(!date){ showErr('Pick a discharge date.'); return; }
-      apiRead('dischargeEmployee', { id:e.id, dateDischarged:date, reason:reason, month:payrollMonth }).then(function(res){
+      withBusy_(dischargeConfirm, apiRead('dischargeEmployee', { id:e.id, dateDischarged:date, reason:reason, month:payrollMonth })).then(function(res){
         if(res && res.ok){ payrollData = res.payroll; renderPayrollRoster(); }
         else showErr((res&&res.error)||'Could not discharge this employee.');
       });
@@ -1966,7 +1996,7 @@
     if(rehireConfirm) rehireConfirm.addEventListener('click', function(){
       var date = container.querySelector('.emp-rehire-date').value;
       if(!date){ showErr('Pick a rehire date.'); return; }
-      apiRead('rehireEmployee', { id:e.id, dateEmployed:date, month:payrollMonth }).then(function(res){
+      withBusy_(rehireConfirm, apiRead('rehireEmployee', { id:e.id, dateEmployed:date, month:payrollMonth })).then(function(res){
         if(res && res.ok){ payrollData = res.payroll; renderPayrollRoster(); }
         else showErr((res&&res.error)||'Could not rehire this employee.');
       });
@@ -2147,13 +2177,14 @@
     Array.prototype.forEach.call(container.querySelectorAll('.adj-item-del'), function(btn){
       btn.addEventListener('click', function(){
         var id = btn.closest('tr').dataset.id;
-        apiRead('deleteAdjustment', { id:id, month:payrollMonth }).then(function(res){
+        withBusy_(btn, apiRead('deleteAdjustment', { id:id, month:payrollMonth }), 'Deleting…').then(function(res){
           if(res && res.ok) loadPayrollAdjustments();
         });
       });
     });
 
     container.querySelector('.adj-add').addEventListener('click', function(){
+      var addBtn = this;
       var type = typeSel.value;
       var amount = Number(amountInput.value)||0;
       var hours = Number(hoursInput.value)||0;
@@ -2163,7 +2194,7 @@
       if(type==='Overtime' && (!hours||hours<=0)){ errBox.textContent='Enter the number of overtime hours.'; return; }
       if(type!=='Overtime' && (!amount||amount<=0)){ errBox.textContent='Amount must be a positive number.'; return; }
 
-      apiRead('addAdjustment', { employeeId:e.id, month:payrollMonth, type:type, amount:amount, hours:hours, note:note }).then(function(res){
+      withBusy_(addBtn, apiRead('addAdjustment', { employeeId:e.id, month:payrollMonth, type:type, amount:amount, hours:hours, note:note }), 'Adding…').then(function(res){
         if(res && res.ok) loadPayrollAdjustments();
         else errBox.textContent = (res && res.error) || 'Could not add this adjustment.';
       });
@@ -2171,7 +2202,8 @@
 
     Array.prototype.forEach.call(container.querySelectorAll('.adj-save-status'), function(btn){
       btn.addEventListener('click', function(){
-        apiRead('setPayrollAdjustmentStatus', { month:payrollMonth, id:e.id, status:btn.dataset.status }).then(function(res){
+        var busyLabel = btn.dataset.status==='finalized' ? 'Finalizing…' : 'Saving…';
+        withBusy_(btn, apiRead('setPayrollAdjustmentStatus', { month:payrollMonth, id:e.id, status:btn.dataset.status }), busyLabel).then(function(res){
           if(res && res.ok){
             payrollData = res.payroll;
             payrollAdjustmentsData = res.payrollAdjustments;
@@ -2194,9 +2226,9 @@
       basicSalaryEditForm.hidden = true;
       basicSalaryStatus.textContent = '';
     });
-    function saveBasicSalaryOverride_(amountOrNull){
-      basicSalaryStatus.textContent = 'Saving…';
-      apiRead('setBaseAmountOverride', { employeeId:e.id, month:payrollMonth, amount:(amountOrNull===null ? '' : amountOrNull) }).then(function(res){
+    function saveBasicSalaryOverride_(amountOrNull, btn){
+      basicSalaryStatus.textContent = '';
+      withBusy_(btn, apiRead('setBaseAmountOverride', { employeeId:e.id, month:payrollMonth, amount:(amountOrNull===null ? '' : amountOrNull) }), amountOrNull===null ? 'Reverting…' : 'Saving…').then(function(res){
         if(res && res.ok){
           payrollData = res.payroll;
           renderPayrollAdjustments();
@@ -2208,10 +2240,10 @@
     container.querySelector('.adj-basic-salary-save').addEventListener('click', function(){
       var val = basicSalaryInput.value;
       if(val==='' || Number(val)<0){ basicSalaryStatus.textContent = 'Enter an amount 0 or greater.'; return; }
-      saveBasicSalaryOverride_(Number(val));
+      saveBasicSalaryOverride_(Number(val), this);
     });
     var revertBtn = container.querySelector('.adj-basic-salary-revert');
-    if(revertBtn) revertBtn.addEventListener('click', function(){ saveBasicSalaryOverride_(null); });
+    if(revertBtn) revertBtn.addEventListener('click', function(){ saveBasicSalaryOverride_(null, this); });
 
     // ---- Give advance ----
     var advanceForm = container.querySelector('.adj-give-advance-form');
@@ -2230,8 +2262,8 @@
       var amount = Number(advanceAmountInput.value);
       if(!amount || amount<=0){ advanceStatus.textContent = 'Enter an amount greater than 0.'; return; }
       var note = advanceNoteInput.value.trim();
-      advanceStatus.textContent = 'Recording…';
-      apiRead('giveAdvance', { employeeId:e.id, amount:amount, note:note, month:payrollMonth }).then(function(res){
+      advanceStatus.textContent = '';
+      withBusy_(this, apiRead('giveAdvance', { employeeId:e.id, amount:amount, note:note, month:payrollMonth }), 'Recording…').then(function(res){
         if(res && res.ok){
           payrollAdjustmentsData = res.payrollAdjustments;
           renderPayrollAdjustments();
@@ -2286,7 +2318,7 @@
     document.getElementById('btn-run-payroll').addEventListener('click', function(){
       var errBox = document.getElementById('run-payroll-error');
       errBox.innerHTML = '';
-      apiRead('runPayroll', { month: payrollMonth }).then(function(res){
+      withBusy_(this, apiRead('runPayroll', { month: payrollMonth }), 'Running payroll…').then(function(res){
         if(res && res.ok){ payrollRunData = res.payrollRun; renderPayrollRun(); }
         else errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not run payroll.')+'</div>';
       });
