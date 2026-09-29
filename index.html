@@ -1734,7 +1734,10 @@
   var payrollRunData = null;            // {month, hasRun, payslips[], emp201}
   var expandedEmployeeId = null;        // Roster tab: which employee's edit form is open
   var expandedAdjEmployeeId = null;     // Pay Adjustments tab: which employee's panel is open
-  var ADJ_NET_SUBTRACT_TYPES = ['Deduction','AdvanceRepayment'];
+  // Display-only helper for the +/- prefix in the Pay Adjustments "This month" summary
+  // column — spans both pre-tax (Absent, reduces Gross) and post-tax (Deduction,
+  // AdvanceRepayment, reduce Net) subtraction types; it isn't used for any tax math.
+  var ADJ_NET_SUBTRACT_TYPES = ['Absent','Deduction','AdvanceRepayment'];
 
   function defaultPayrollMonth_(){
     var d = new Date(); var m = d.getMonth()+1;
@@ -2108,13 +2111,14 @@
     var itemsHtml = items.length ? (
       '<table><thead><tr><th>Type</th><th class="num">Amount</th><th>Note</th><th></th></tr></thead><tbody>' +
       items.map(function(it){
-        return '<tr data-id="'+it.id+'"><td>'+esc(it.type)+(it.type==='Overtime'&&it.hours?' ('+it.hours+'h)':'')+'</td><td class="num">'+money(it.amount)+'</td><td>'+esc(it.note||'')+'</td><td><button class="btn small danger adj-item-del">Delete</button></td></tr>';
+        var qtySuffix = it.type==='Overtime' && it.hours ? ' ('+it.hours+'h)' : (it.type==='Absent' && it.hours ? ' ('+it.hours+'d)' : '');
+        return '<tr data-id="'+it.id+'"><td>'+esc(it.type)+qtySuffix+'</td><td class="num">'+money(it.amount)+'</td><td>'+esc(it.note||'')+'</td><td><button class="btn small danger adj-item-del">Delete</button></td></tr>';
       }).join('') + '</tbody></table>'
     ) : '<div class="empty">No adjustments yet this month.</div>';
 
     // AdvanceGiven isn't offered here — a cash advance is recorded any time through
     // the separate "Give advance" button below, not as a month-scoped adjustment.
-    var typeOptions = ['Commission','Bonus','Overtime','Other','Deduction','AdvanceRepayment'].map(function(t){
+    var typeOptions = ['Commission','Bonus','Overtime','Absent','Deduction','AdvanceRepayment'].map(function(t){
       return '<option value="'+t+'">'+t+'</option>';
     }).join('');
 
@@ -2141,7 +2145,7 @@
       '<div class="field-row" style="align-items:flex-end;">' +
         '<div class="field" style="min-width:140px;"><span class="label">Type</span><select class="adj-type">'+typeOptions+'</select></div>' +
         '<div class="field adj-amount-field"><span class="label">Amount</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-amount" step="0.01" min="0"></div></div>' +
-        '<div class="field adj-hours-field" hidden><span class="label">Hours</span><input type="number" class="num adj-hours" step="0.25" min="0"></div>' +
+        '<div class="field adj-hours-field" hidden><span class="label adj-hours-label">Hours</span><input type="number" class="num adj-hours" step="0.25" min="0"></div>' +
         '<div class="field" style="min-width:160px;"><span class="label">Note (optional)</span><input type="text" class="adj-note"></div>' +
         '<button class="btn primary adj-add">Add</button>' +
       '</div>' +
@@ -2166,14 +2170,21 @@
 
     var typeSel = container.querySelector('.adj-type');
     var hoursField = container.querySelector('.adj-hours-field');
+    var hoursLabel = container.querySelector('.adj-hours-label');
     var amountField = container.querySelector('.adj-amount-field');
     var amountInput = container.querySelector('.adj-amount');
     var hoursInput = container.querySelector('.adj-hours');
     function syncOvertimeFields(){
       var isOt = typeSel.value==='Overtime';
-      hoursField.hidden = !isOt;
+      var isAbsent = typeSel.value==='Absent';
+      hoursField.hidden = !(isOt || isAbsent);
       if(isOt){
+        hoursLabel.textContent = 'Hours';
         amountInput.value = (hoursInput.value && e.hourRate) ? round2Js_(Number(hoursInput.value)*e.hourRate) : '';
+        amountInput.readOnly = true; amountField.style.opacity = .7;
+      } else if(isAbsent){
+        hoursLabel.textContent = 'Days absent';
+        amountInput.value = (hoursInput.value && e.dayRate) ? round2Js_(Number(hoursInput.value)*e.dayRate) : '';
         amountInput.readOnly = true; amountField.style.opacity = .7;
       } else {
         amountInput.readOnly = false; amountField.style.opacity = 1;
@@ -2201,7 +2212,8 @@
       var errBox = container.querySelector('.adj-err');
       errBox.textContent = '';
       if(type==='Overtime' && (!hours||hours<=0)){ errBox.textContent='Enter the number of overtime hours.'; return; }
-      if(type!=='Overtime' && (!amount||amount<=0)){ errBox.textContent='Amount must be a positive number.'; return; }
+      if(type==='Absent' && (!hours||hours<=0)){ errBox.textContent='Enter the number of days absent.'; return; }
+      if(type!=='Overtime' && type!=='Absent' && (!amount||amount<=0)){ errBox.textContent='Amount must be a positive number.'; return; }
 
       withBusy_(addBtn, apiRead('addAdjustment', { employeeId:e.id, month:payrollMonth, type:type, amount:amount, hours:hours, note:note }), 'Adding…').then(function(res){
         if(res && res.ok) loadPayrollAdjustments();
@@ -2216,6 +2228,7 @@
           if(res && res.ok){
             payrollData = res.payroll;
             payrollAdjustmentsData = res.payrollAdjustments;
+            if(btn.dataset.status==='finalized') expandedAdjEmployeeId = null;
             renderPayrollAdjustments();
           }
         });
@@ -2353,7 +2366,7 @@
     var co = ps.company || {};
     var e = ps.employee;
     var c = ps.calc;
-    var taxableLabels = { Commission:'Commission', Bonus:'Bonus', Overtime:'Overtime', Other:'Other allowance' };
+    var taxableLabels = { Commission:'Commission', Bonus:'Bonus', Overtime:'Overtime' };
     var earningsRows = '<tr><td>Basic salary</td><td class="num">'+money(c.baseAmount)+'</td></tr>';
     Object.keys(taxableLabels).forEach(function(t){
       var amt = c.adjustments[t];
@@ -2363,6 +2376,10 @@
         earningsRows += '<tr><td>'+esc(label)+'</td><td class="num">'+money(amt)+'</td></tr>';
       }
     });
+    if(c.adjustments.Absent){
+      var absentLabel = 'Absent' + (c.absentDays ? ' ('+c.absentDays+' day'+(c.absentDays===1?'':'s')+')' : '');
+      earningsRows += '<tr><td>'+esc(absentLabel)+'</td><td class="num">-'+money(c.adjustments.Absent)+'</td></tr>';
+    }
     if(c.adjustments.AdvanceGiven) earningsRows += '<tr><td>Advance paid out</td><td class="num">'+money(c.adjustments.AdvanceGiven)+'</td></tr>';
 
     var deductionRows =
@@ -2372,6 +2389,16 @@
       (c.medicalContribution ? '<tr><td>Medical aid</td><td class="num">'+money(c.medicalContribution)+'</td></tr>' : '') +
       (c.adjustments.Deduction ? '<tr><td>Deduction</td><td class="num">'+money(c.adjustments.Deduction)+'</td></tr>' : '') +
       (c.adjustments.AdvanceRepayment ? '<tr><td>Advance repayment</td><td class="num">'+money(c.adjustments.AdvanceRepayment)+'</td></tr>' : '');
+
+    var notesHtml = '';
+    if(ps.adjustmentNotes && ps.adjustmentNotes.length){
+      notesHtml = '<div class="label section-label">Notes</div><table>' +
+        ps.adjustmentNotes.map(function(n){
+          var qty = n.type==='Overtime' ? (n.hours ? ' ('+n.hours+'h)' : '') : (n.type==='Absent' ? (n.hours ? ' ('+n.hours+'d)' : '') : '');
+          return '<tr><td style="white-space:nowrap;">'+esc(n.type)+qty+'</td><td>'+esc(n.note)+'</td></tr>';
+        }).join('') +
+        '</table>';
+    }
 
     return '<div class="payslip-box">' +
       '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
@@ -2388,6 +2415,7 @@
       '</div>' +
       '<div class="label section-label">Earnings</div><table>'+earningsRows+'</table>' +
       '<div class="label section-label">Deductions</div><table>'+deductionRows+'</table>' +
+      notesHtml +
       '<div class="field-row" style="justify-content:space-between;margin-top:14px;padding-top:10px;border-top:1px solid var(--line-strong);">' +
         '<strong>Net pay</strong><strong class="num">'+money(c.net)+'</strong>' +
       '</div>' +
