@@ -68,7 +68,15 @@
   }
   .wordmark small{ display:block; font-family:"IBM Plex Sans",sans-serif; letter-spacing:0; text-transform:none;
     font-size:10px; color:var(--ink-soft); font-weight:400; margin-top:10px; margin-right:.32em; }
+  .mode-switch{ display:flex; border:1px solid var(--line-strong); }
+  .mode-btn{ flex:1; background:none; border:none; padding:9px 6px; font-family:"Barlow Condensed","Arial Narrow",sans-serif;
+    font-size:13px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); cursor:pointer; }
+  .mode-btn:first-child{ border-right:1px solid var(--line-strong); }
+  .mode-btn:hover{ color:var(--ink); }
+  .mode-btn.active{ background:var(--accent); color:#fff; }
   nav{ display:flex; flex-direction:column; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
+  .nav-group[hidden]{ display:none; }
+  .nav-group .navbtn:last-child{ border-bottom:none; }
   .navbtn{
     text-align:left; background:none; border:none; border-bottom:1px solid var(--line);
     padding:11px 8px; font-size:14px; letter-spacing:.06em; text-transform:uppercase;
@@ -225,14 +233,26 @@
 
 <div class="sidebar">
   <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
+  <div class="mode-switch" id="mode-switch">
+    <button class="mode-btn" data-mode="costing">Costing</button>
+    <button class="mode-btn" data-mode="payroll">Payroll</button>
+  </div>
   <nav id="nav">
-    <button class="navbtn" data-view="new">New Quote</button>
-    <button class="navbtn" data-view="quotes">Quotes</button>
-    <button class="navbtn" data-view="rates">Rate Card</button>
-    <button class="navbtn" data-view="payroll">Payroll</button>
-    <button class="navbtn" data-view="settings">Settings</button>
+    <div class="nav-group" data-mode-group="costing">
+      <button class="navbtn" data-view="new">New Quote</button>
+      <button class="navbtn" data-view="quotes">Quotes</button>
+      <button class="navbtn" data-view="rates">Rate Card</button>
+      <button class="navbtn" data-view="settings">Settings</button>
+    </div>
+    <div class="nav-group" data-mode-group="payroll" hidden>
+      <button class="navbtn" data-tab="roster">Roster</button>
+      <button class="navbtn" data-tab="adjustments">Pay Adjustments</button>
+      <button class="navbtn" data-tab="run">Run Payroll</button>
+      <button class="navbtn" data-tab="irp5">IRP5 / IT3(a)</button>
+      <button class="navbtn" data-view="payroll-settings">Settings</button>
+    </div>
   </nav>
-  <footer>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
+  <footer id="sidebar-footer">Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
     <button type="button" class="logout-link" id="btn-logout">Log out</button>
   </footer>
 </div>
@@ -299,14 +319,8 @@
       <div class="sub" id="payroll-sub">Salaries, PAYE/UIF/SDL and payslips for Natalie Branscombe (Pty) Ltd's staff</div>
     </div>
 
-    <div class="field-row" style="align-items:flex-end; justify-content:space-between;">
+    <div class="field-row" style="align-items:flex-end;">
       <div class="field" style="min-width:170px;"><span class="label">Payroll month</span><input type="month" id="payroll-month"></div>
-      <div id="payroll-subnav" style="display:flex; gap:6px; flex-wrap:wrap;">
-        <button class="btn small py-tab" data-tab="roster">Roster</button>
-        <button class="btn small py-tab" data-tab="adjustments">Pay Adjustments</button>
-        <button class="btn small py-tab" data-tab="run">Run Payroll</button>
-        <button class="btn small py-tab" data-tab="irp5">IRP5 / IT3(a)</button>
-      </div>
     </div>
 
     <div id="payroll-stats" class="stats" style="margin-top:16px;"></div>
@@ -337,10 +351,17 @@
         <button class="btn primary" id="btn-add-subcategory" style="align-self:flex-end;">Add</button>
       </div>
     </div>
+  </section>
+
+  <section class="view" id="view-payroll-settings" hidden>
+    <div class="sheet-head">
+      <h1>Payroll Settings</h1>
+      <div class="sub">Departments, company letterhead details, and a one-off import of payroll from before this app was used</div>
+    </div>
 
     <div class="panel" style="max-width:440px;">
-      <h2 style="margin:0 0 4px;">Payroll — Departments</h2>
-      <div class="sub" style="margin-bottom:14px;">Groups the Payroll roster (Management, Production, Admin…). Renaming one updates every employee in it; deleting one leaves those employees Unassigned rather than losing them.</div>
+      <h2 style="margin:0 0 4px;">Departments</h2>
+      <div class="sub" style="margin-bottom:14px;">Groups the roster (Management, Production, Admin…). Renaming one updates every employee in it; deleting one leaves those employees Unassigned rather than losing them.</div>
       <div id="department-list-mgr"></div>
       <div class="field-row" style="margin-top:16px;">
         <div class="field"><span class="label">New department</span><input type="text" id="dept-new-name" placeholder="e.g. Warehouse"></div>
@@ -349,7 +370,7 @@
     </div>
 
     <div class="panel" style="max-width:440px;">
-      <h2 style="margin:0 0 4px;">Payroll — Company details</h2>
+      <h2 style="margin:0 0 4px;">Company details</h2>
       <div class="sub" style="margin-bottom:14px;">Printed on every payslip's letterhead and used for EMP201/IRP5 reference — this is a single-company payroll, so there's just the one record.</div>
       <div class="field-row">
         <div class="field" style="min-width:220px;"><span class="label">Company name</span><input type="text" id="co-name"></div>
@@ -364,6 +385,16 @@
       </div>
       <div class="field-row"><button class="btn primary" id="btn-save-company">Save company details</button></div>
       <div id="company-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
+    </div>
+
+    <div class="panel" style="max-width:640px;">
+      <h2 style="margin:0 0 4px;">Import previous payrolls</h2>
+      <div class="sub" style="margin-bottom:10px;">One-off backfill for months from before this app was used — e.g. this tax year's earlier months from an old spreadsheet. Paste one line per employee per month, 27 comma-separated columns each (see SETUP.md for the exact column order and a worked example). An employee is matched by Employee # only, never by name — if no employee has that number yet, one is created for you to check over on the Roster afterwards. Importing the same employee/month twice overwrites rather than duplicating.</div>
+      <textarea id="import-payroll-lines" rows="6" placeholder="2026-04,101,Jane Smith,Production,8001015800081,1995-05-20,1234567890,Cabinet Maker,1 Furniture Way,18000,18000,1245,180,180,180,0,0,0,0,0,0,0,0,0,0,16215,Backfilled from old spreadsheet"></textarea>
+      <div class="field-row" style="margin-top:12px;">
+        <button class="btn primary" id="btn-import-payroll-history">Import</button>
+      </div>
+      <div id="import-payroll-status" style="margin-top:14px;"></div>
     </div>
   </section>
 
@@ -526,22 +557,48 @@
     location.reload();
   });
 
+  // Costing and Payroll are two separate jobs sharing one app — the mode switch at
+  // the top of the sidebar swaps which nav group is visible below it, so the two
+  // never sit mixed together in one flat list. Payroll's own sub-screens (Roster,
+  // Pay Adjustments, Run Payroll, IRP5) are now real sidebar nav buttons rather than
+  // an in-page tab strip — each just sets payrollTab and shows the one 'payroll' view.
+  var appMode = 'costing';
+  function setAppMode(mode){
+    appMode = mode;
+    Array.prototype.forEach.call(document.querySelectorAll('.mode-btn'), function(b){
+      b.classList.toggle('active', b.dataset.mode===mode);
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.nav-group'), function(g){
+      g.hidden = (g.dataset.modeGroup !== mode);
+    });
+    if(mode==='payroll') showView('payroll');
+    else showView('new');
+  }
+  document.getElementById('mode-switch').addEventListener('click', function(e){
+    var b = e.target.closest('.mode-btn'); if(!b) return;
+    setAppMode(b.dataset.mode);
+  });
+  document.querySelector('.mode-btn[data-mode="costing"]').classList.add('active');
+
   document.getElementById('nav').addEventListener('click', function(e){
     var b = e.target.closest('.navbtn'); if(!b) return;
+    if(b.dataset.tab){ payrollTab = b.dataset.tab; showView('payroll'); return; }
     showView(b.dataset.view);
   });
   function showView(v){
     view = v;
-    ['new','quotes','rates','payroll','settings'].forEach(function(name){
+    ['new','quotes','rates','payroll','payroll-settings','settings'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
-      b.classList.toggle('active', b.dataset.view===v);
+      var active = b.dataset.tab ? (v==='payroll' && b.dataset.tab===payrollTab) : (b.dataset.view===v);
+      b.classList.toggle('active', active);
     });
     if(v==='quotes') loadQuotes();
     if(v==='rates') renderRatesTables();
     if(v==='payroll') initPayrollView();
     if(v==='settings') fillSettingsForm();
+    if(v==='payroll-settings') fillPayrollSettingsForm();
   }
 
   // ================= RATE CARD =================
@@ -751,12 +808,19 @@
     });
   }
 
-  // ================= SETTINGS =================
+  // ================= SETTINGS (Costing) =================
   function fillSettingsForm(){
     document.getElementById('set-markup').value = settings.markupPct;
     document.getElementById('set-labour').value = settings.labourRate;
     document.getElementById('set-waste').value = settings.defaultWastePct||0;
     renderSubcategoryManager();
+  }
+
+  // ================= SETTINGS (Payroll) =================
+  // A separate Settings screen, reachable only from the Payroll side of the sidebar —
+  // kept apart from the Costing settings above so the two jobs never sit mixed
+  // together in one long list (see the mode switch at the top of the sidebar).
+  function fillPayrollSettingsForm(){
     renderDepartmentManager();
     fillCompanyForm();
   }
@@ -899,6 +963,69 @@
       settings.companyInfo = (res && res.companyInfo) || info;
       var msg = document.getElementById('company-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
+    });
+  });
+
+  // ================= SETTINGS — IMPORT PREVIOUS PAYROLLS =================
+  // A CSV paste can be large enough that pushing it through as a GET query string
+  // (like every other Payroll action) risks hitting a URL length limit, so this one
+  // goes out the same POST-then-poll way as drawing extraction and login instead:
+  // apiWrite posts the pasted lines to doPost, which stashes the result under a
+  // token, and this polls getImportPayrollHistoryResult via JSONP for the answer.
+  function pollImportPayrollResult_(token){
+    var attempts = 0, maxAttempts = 40; // ~16s at 400ms each — an import can touch many rows
+    return new Promise(function(resolve, reject){
+      function tick(){
+        attempts++;
+        apiRead('getImportPayrollHistoryResult', { token: token }).then(function(res){
+          if(res && res.status==='done'){ resolve(res.result); }
+          else if(attempts>=maxAttempts){ resolve({ ok:false, error:'The import is taking longer than expected — check the PayrollRuns tab directly, or try again with fewer lines at once.' }); }
+          else setTimeout(tick, 400);
+        }).catch(function(e){
+          if(attempts>=maxAttempts) reject(e); else setTimeout(tick, 400);
+        });
+      }
+      tick();
+    });
+  }
+
+  function renderImportPayrollResult_(result){
+    var statusEl = document.getElementById('import-payroll-status');
+    if(!result || !result.ok){
+      statusEl.innerHTML = '<div class="status-msg error">'+esc((result&&result.error)||'Import failed.')+'</div>';
+      return;
+    }
+    var html = '<div class="status-msg">Imported '+result.imported+' payroll run'+(result.imported===1?'':'s')+'.</div>';
+    if(result.employeesCreated && result.employeesCreated.length){
+      html += '<div class="flag">New employees created — check their department, pay rate and banking details on the Roster: '+result.employeesCreated.map(esc).join(', ')+'</div>';
+    }
+    if(result.warnings && result.warnings.length) html += result.warnings.map(function(w){ return '<div class="flag">'+esc(w)+'</div>'; }).join('');
+    if(result.errors && result.errors.length) html += result.errors.map(function(err){ return '<div class="status-msg error">'+esc(err)+'</div>'; }).join('');
+    statusEl.innerHTML = html;
+    // Whatever's cached from the Payroll tabs may now be stale (new employees, new
+    // PayrollRuns rows) — clear it so the next visit to Roster/Run Payroll/IRP5
+    // refetches instead of showing pre-import figures.
+    payrollData = null; payrollAdjustmentsData = null; payrollRunData = null;
+  }
+
+  document.getElementById('btn-import-payroll-history').addEventListener('click', function(){
+    var textarea = document.getElementById('import-payroll-lines');
+    var lines = textarea.value.trim();
+    var statusEl = document.getElementById('import-payroll-status');
+    var btn = document.getElementById('btn-import-payroll-history');
+    if(!lines){ statusEl.innerHTML = '<div class="status-msg error">Paste in at least one line first.</div>'; return; }
+    var token = uid();
+    btn.disabled = true;
+    statusEl.innerHTML = '<div class="status-msg thinking">Importing…</div>';
+    apiWrite('importPayrollHistory', { token: token, lines: lines }).then(function(){
+      return pollImportPayrollResult_(token);
+    }).then(function(result){
+      btn.disabled = false;
+      renderImportPayrollResult_(result);
+      if(result && result.ok) textarea.value = '';
+    }).catch(function(e){
+      btn.disabled = false;
+      statusEl.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
     });
   });
 
@@ -1539,25 +1666,14 @@
     expandedEmployeeId = null; expandedAdjEmployeeId = null;
     loadPayrollForTab();
   });
-  document.getElementById('payroll-subnav').addEventListener('click', function(e){
-    var b = e.target.closest('.py-tab'); if(!b) return;
-    payrollTab = b.dataset.tab;
-    expandedEmployeeId = null; expandedAdjEmployeeId = null;
-    renderPayrollSubnav();
-    loadPayrollForTab();
-  });
 
-  function renderPayrollSubnav(){
-    Array.prototype.forEach.call(document.querySelectorAll('.py-tab'), function(b){
-      b.classList.toggle('primary', b.dataset.tab===payrollTab);
-    });
-  }
-
+  // Which Payroll sub-screen is showing is now driven entirely by the sidebar (see
+  // showView/setAppMode) — this just makes sure the month is set and loads whichever
+  // tab the sidebar click already switched payrollTab to.
   function initPayrollView(){
     if(!payrollMonth) payrollMonth = defaultPayrollMonth_();
     var monthInput = document.getElementById('payroll-month');
     if(monthInput.value !== payrollMonth) monthInput.value = payrollMonth;
-    renderPayrollSubnav();
     loadPayrollForTab();
   }
 
