@@ -1927,6 +1927,7 @@
       '</div>' +
       '<div class="field-row">' +
         '<div class="field"><span class="label">ID/passport country (only if not an RSA ID)</span><input type="text" class="emp-idCountry" placeholder="e.g. ZWE" value="'+esc(e.idCountry||'')+'"></div>' +
+        '<div class="field"><span class="label">Contact number *</span><input type="text" class="emp-contactNumber" required value="'+esc(e.contactNumber||'')+'"></div>' +
       '</div>' +
       '<div class="field-row">' +
         '<div class="field"><span class="label">Medical members</span><input type="number" class="num emp-medicalMembers" step="1" min="0" value="'+(e.medicalMembers!=null?e.medicalMembers:0)+'"></div>' +
@@ -1960,6 +1961,7 @@
       idNumber: container.querySelector('.emp-idNumber').value.trim(),
       taxNumber: container.querySelector('.emp-taxNumber').value.trim(),
       idCountry: container.querySelector('.emp-idCountry').value.trim().toUpperCase(),
+      contactNumber: container.querySelector('.emp-contactNumber').value.trim(),
       uifExempt: container.querySelector('.emp-uifExempt').checked,
       medicalMembers: Number(container.querySelector('.emp-medicalMembers').value)||0,
       medicalContribution: Number(container.querySelector('.emp-medicalContribution').value)||0,
@@ -1979,6 +1981,10 @@
       var errSpan = container.querySelector('.save-confirm');
       if(!rec.name || !rec.department){
         if(errSpan) errSpan.textContent = 'Name and department are required.';
+        return;
+      }
+      if(!rec.contactNumber){
+        if(errSpan) errSpan.textContent = 'Contact number is required.';
         return;
       }
       rec.uifExempt = String(rec.uifExempt);
@@ -3143,7 +3149,7 @@
       fields.push(['3080', yyyymmdd_(e.dateOfBirth), false]);
       fields.push(['3100', e.taxNumber||'0000000000', false]);
       fields.push(['3263', RECON_SIC7_CODE, true]);
-      fields.push(['3136', '', true]);
+      fields.push(['3136', e.contactNumber||'', true]);
       fields.push(['3144', '', true]);
       fields.push(['3145', '', true]);
       fields.push(['3146', companyAddr.unit, true]);
