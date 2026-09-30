@@ -1926,6 +1926,9 @@
         '<div class="field"><label class="label" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" class="emp-uifExempt" style="width:auto;"'+(e.uifExempt?' checked':'')+'>UIF exempt</label></div>' +
       '</div>' +
       '<div class="field-row">' +
+        '<div class="field"><span class="label">ID/passport country (only if not an RSA ID)</span><input type="text" class="emp-idCountry" placeholder="e.g. ZWE" value="'+esc(e.idCountry||'')+'"></div>' +
+      '</div>' +
+      '<div class="field-row">' +
         '<div class="field"><span class="label">Medical members</span><input type="number" class="num emp-medicalMembers" step="1" min="0" value="'+(e.medicalMembers!=null?e.medicalMembers:0)+'"></div>' +
         '<div class="field"><span class="label">Medical contribution (deduction)</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num emp-medicalContribution" step="0.01" min="0" value="'+(e.medicalContribution!=null?e.medicalContribution:0)+'"></div></div>' +
         '<div class="field"><span class="label">Retirement contribution</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num emp-retirementContribution" step="0.01" min="0" value="'+(e.retirementContribution!=null?e.retirementContribution:0)+'"></div></div>' +
@@ -1956,6 +1959,7 @@
       payMethod: container.querySelector('.emp-payMethod').value.trim(),
       idNumber: container.querySelector('.emp-idNumber').value.trim(),
       taxNumber: container.querySelector('.emp-taxNumber').value.trim(),
+      idCountry: container.querySelector('.emp-idCountry').value.trim().toUpperCase(),
       uifExempt: container.querySelector('.emp-uifExempt').checked,
       medicalMembers: Number(container.querySelector('.emp-medicalMembers').value)||0,
       medicalContribution: Number(container.querySelector('.emp-medicalContribution').value)||0,
@@ -2967,12 +2971,256 @@
     stats.innerHTML = '';
     body.innerHTML =
       '<div class="panel" id="reports-emp201-panel"><div class="empty">Loading…</div></div>' +
+      '<div class="panel" id="reports-recon-panel"></div>' +
       '<div class="panel" id="reports-payslips-panel"><div class="empty">Loading…</div></div>' +
       '<div class="panel" id="reports-irp5-panel"><div class="empty">Loading…</div></div>';
     loadReportsEmp201_();
+    renderReportsRecon_();
     loadReportsPayslips_();
     loadReportsIrp5_();
   }
+
+  // ---- Employer Reconciliation (e@syFile IRP5/IT3(a) bulk CSV) ----
+  // SARS wants this twice a year — an Interim recon (1 Mar - 31 Aug) and the Final
+  // recon for the whole tax year (1 Mar - end Feb) — each with an IRP5/IT3(a) bulk
+  // import file for e@syFile. Kept independent of the shared Payroll month selector
+  // above (the Final recon due now is usually for the tax year that just ended, not
+  // the one the month selector happens to be sitting on).
+  var reconTaxYearStart = saTaxYearForMonth_(payrollMonth).startYear;
+  var reconPeriod = 'final';
+
+  function saTaxYearForMonth_(monthStr){
+    var parts = String(monthStr||'').split('-');
+    var y = Number(parts[0]), m = Number(parts[1]);
+    if(!y || !m){ var now = new Date(); y = now.getFullYear(); m = now.getMonth()+1; }
+    return { startYear: (m>=3) ? y : y-1 };
+  }
+
+  function renderReportsRecon_(){
+    var panel = document.getElementById('reports-recon-panel');
+    if(!panel) return;
+    var years = [reconTaxYearStart-1, reconTaxYearStart, reconTaxYearStart+1];
+    var yearOptions = years.map(function(y){
+      return '<option value="'+y+'"'+(y===reconTaxYearStart?' selected':'')+'>'+y+'/'+(y+1)+'</option>';
+    }).join('');
+    panel.innerHTML =
+      '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
+        '<h2 style="margin:0;">Employer Reconciliation (e@syFile)</h2>' +
+      '</div>' +
+      '<div class="sub" style="margin:6px 0 14px;">The IRP5/IT3(a) bulk CSV you import into SARS e@syFile for the Interim (1 Mar – 31 Aug) or Final (1 Mar – end Feb) Employer Reconciliation. Figures only — this app does not submit anything to SARS; import the file into e@syFile yourself and check it for any warnings before you file.</div>' +
+      '<div class="field-row" style="align-items:flex-end;">' +
+        '<div class="field"><span class="label">Tax year</span><select id="recon-taxyear">'+yearOptions+'</select></div>' +
+        '<div class="field"><span class="label">Period</span><select id="recon-period">' +
+          '<option value="interim"'+(reconPeriod==='interim'?' selected':'')+'>Interim (1 Mar – 31 Aug)</option>' +
+          '<option value="final"'+(reconPeriod==='final'?' selected':'')+'>Final (1 Mar – end Feb)</option>' +
+        '</select></div>' +
+        '<div class="field"><button class="btn primary" id="btn-download-recon">Download recon CSV</button></div>' +
+      '</div>' +
+      '<div id="reports-recon-error"></div>';
+
+    document.getElementById('recon-taxyear').addEventListener('change', function(e){ reconTaxYearStart = Number(e.target.value); });
+    document.getElementById('recon-period').addEventListener('change', function(e){ reconPeriod = e.target.value; });
+    document.getElementById('btn-download-recon').addEventListener('click', downloadEmployerRecon_);
+  }
+
+  function downloadEmployerRecon_(){
+    var errBox = document.getElementById('reports-recon-error');
+    var btn = document.getElementById('btn-download-recon');
+    errBox.innerHTML = '';
+    btn.disabled = true;
+    apiRead('getEmployerRecon', { taxYearStart: reconTaxYearStart, period: reconPeriod }).then(function(res){
+      btn.disabled = false;
+      if(!res || !res.ok){ errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not build the recon file.')+'</div>'; return; }
+      if(!res.employees.length){ errBox.innerHTML = '<div class="status-msg error">No payroll runs found for that period.</div>'; return; }
+      var csv = buildEmployerReconCsv_(res);
+      var blob = new Blob([csv], {type:'text/csv'});
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'EmployerRecon_'+res.taxYearStart+'-'+res.transactionYear+'_'+(res.period==='interim'?'Interim':'Final')+'.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    }).catch(function(e){
+      btn.disabled = false;
+      errBox.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
+
+  // Best-effort split of this app's single free-text Address field into the
+  // street/suburb/city/postal-code pieces SARS's structured address format wants —
+  // South African addresses are consistently written "<number> <street>, <suburb>,
+  // <city>, <postal code>" in this app's Roster, so a comma split handles them, with a
+  // graceful (not garbled) fallback for anything shorter than that.
+  function splitReconAddress_(addr){
+    var parts = String(addr||'').split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+    var streetLine = parts[0] || '', suburb = '', city = '', postal = '';
+    if(parts.length >= 4){ streetLine = parts[0]; suburb = parts[1]; city = parts[2]; postal = parts[3]; }
+    else if(parts.length === 3){ streetLine = parts[0]; city = parts[1]; postal = parts[2]; }
+    else if(parts.length === 2){ streetLine = parts[0]; postal = parts[1]; }
+    var m = /^(\d+[A-Za-z]?)\s+(.*)$/.exec(streetLine);
+    var unit = m ? m[1] : '', street = m ? m[2] : streetLine;
+    return { unit: unit, street: street, suburb: suburb, city: city, postal: postal };
+  }
+
+  function yyyymmdd_(dateStr){
+    return String(dateStr||'').replace(/-/g,'');
+  }
+
+  // Builds the actual SARS-format IRP5/IT3(a) bulk CSV text from apiGetEmployerRecon_'s
+  // data. Field codes (2010, 3010, 6010, ...) are SARS's own numbering from the PAYE
+  // Employer Reconciliation BRS — see the long comment on apiGetEmployerRecon_ in
+  // Code.gs for exactly what's a confirmed match to a real reference file versus an
+  // educated best-effort (the 6020 control total, mainly).
+  function buildEmployerReconCsv_(data){
+    var company = data.company || {};
+    var companyAddr = splitReconAddress_(company.address);
+    var lines = [];
+    var totalFieldsWritten = 0; // for the 6020 control total: sum of every field CODE NUMBER written, header + employee records
+    var amountTotal = 0; // for the 6030 control total: sum of every Rand amount code written
+
+    function rec(fields){
+      // fields: [[code, value, quoted], ...]
+      var out = [];
+      fields.forEach(function(f){
+        var code = f[0], val = f[1], quoted = f[2];
+        totalFieldsWritten += Number(code);
+        out.push(code);
+        out.push(quoted ? ('"'+String(val==null?'':val).replace(/"/g,'""')+'"') : String(val==null?'':val));
+      });
+      out.push('9999');
+      return out.join(',');
+    }
+
+    // ---- Header record (employer demographics) ----
+    lines.push(rec([
+      ['2010', company.name||'', true],
+      ['2015', 'Live', true],
+      ['2020', company.payeNumber||'', false],
+      ['2022', company.sdlNumber||'', true],
+      ['2024', company.uifNumber||'', true],
+      ['2025', '', true],
+      ['2036', '', true],
+      ['2026', '', true],
+      ['2027', '', true],
+      ['2028', 'Batten', true],
+      ['2029', 'Batten Payroll', true],
+      ['2030', data.transactionYear, false],
+      ['2031', data.periodYYYYMM, false],
+      ['2037', 'N', true],
+      ['2063', companyAddr.unit, true],
+      ['2064', companyAddr.street, true],
+      ['2065', companyAddr.suburb, true],
+      ['2066', companyAddr.city, true],
+      ['2080', companyAddr.postal, false],
+      ['2081', 'ZA', false],
+      ['2082', RECON_SIC7_CODE, true]
+    ]));
+
+    // ---- One record per employee certificate ----
+    data.employees.forEach(function(e, idx){
+      var nameParts = String(e.name||'').trim().split(/\s+/);
+      var surname = nameParts.length>1 ? nameParts[nameParts.length-1] : nameParts[0];
+      var firstNames = nameParts.length>1 ? nameParts.slice(0,-1).join(' ') : nameParts[0];
+      var initials = ((firstNames[0]||'')+(surname[0]||'')).toUpperCase();
+      var isRsaId = /^\d{13}$/.test(e.idNumber||'');
+      var residentialAddr = (e.address||'').trim() ? splitReconAddress_(e.address) : companyAddr;
+      var isIrp5 = e.certificateType === 'IRP5';
+      var certNumber = (company.payeNumber||'') + data.periodYYYYMM + 'BATN' + ('00000000'+(idx+1)).slice(-8);
+
+      var fields = [
+        ['3010', certNumber, true],
+        ['3020', 'A', true],
+        ['3025', data.transactionYear, false],
+        ['3026', 'N', true],
+        ['3030', surname, true],
+        ['3040', firstNames, true],
+        ['3050', initials, true]
+      ];
+      if(isRsaId){
+        fields.push(['3060', e.idNumber, false]);
+      } else {
+        fields.push(['3070', e.idNumber||'', true]);
+        fields.push(['3075', e.idCountry||'', true]);
+      }
+      fields.push(['3080', yyyymmdd_(e.dateOfBirth), false]);
+      fields.push(['3100', e.taxNumber||'0000000000', false]);
+      fields.push(['3263', RECON_SIC7_CODE, true]);
+      fields.push(['3136', '', true]);
+      fields.push(['3144', '', true]);
+      fields.push(['3145', '', true]);
+      fields.push(['3146', companyAddr.unit, true]);
+      fields.push(['3147', companyAddr.street, true]);
+      fields.push(['3148', companyAddr.suburb, true]);
+      fields.push(['3149', companyAddr.city, true]);
+      fields.push(['3150', companyAddr.postal, true]);
+      fields.push(['3151', 'ZA', true]);
+      fields.push(['3160', e.employeeNumber||'', true]);
+      fields.push(['3170', yyyymmdd_(e.periodFrom), false]);
+      fields.push(['3180', yyyymmdd_(e.periodTo), false]);
+      fields.push(['3195', 'N', true]);
+      fields.push(['3200', '12.0000', false]);
+      fields.push(['3210', e.periodsWorked.toFixed(4), false]);
+      fields.push(['3220', 'N', true]);
+      fields.push(['3279', 'N', true]);
+      fields.push(['3288', '1', false]);
+      // Residential address: unit/complex are always blank (nobody's on file living in
+      // a flat), then street number, street name, suburb, city, postal code, country —
+      // same shape as the work address above, just under SARS's 3211-3217 codes.
+      fields.push(['3211', '', true]);
+      fields.push(['3212', '', true]);
+      fields.push(['3213', residentialAddr.unit, true]);
+      fields.push(['3214', residentialAddr.street, true]);
+      fields.push(['3215', residentialAddr.suburb, true]);
+      fields.push(['3216', residentialAddr.city, true]);
+      fields.push(['3217', residentialAddr.postal, true]);
+      fields.push(['3285', 'ZA', true]);
+      fields.push(['3015', e.certificateType, true]);
+      if(!isIrp5) fields.push(['4150', '02', false]);
+      fields.push(['3240', '0', false]);
+      // SARS's rule for these "income" codes is cents dropped/rounded DOWN, not to the
+      // nearest rand — Math.floor, not Math.round (only the codes below that keep cents
+      // — 4102/4141/4142/4149 — round to the nearest cent as normal).
+      var grossWhole = Math.floor(e.grossIncome_3601);
+      fields.push(['3601', grossWhole, false]);
+      fields.push(['3696', '0', false]);
+      fields.push(['3699', grossWhole, false]);
+      if(isIrp5) fields.push(['4102', e.payeDeducted_4102.toFixed(2), false]);
+      var retirementWhole = Math.floor(e.retirementContribution_4001);
+      var medicalWhole = Math.floor(e.medicalContribution_4005);
+      if(retirementWhole > 0) fields.push(['4001', retirementWhole, false]);
+      if(medicalWhole > 0) fields.push(['4005', medicalWhole, false]);
+      fields.push(['4497', retirementWhole + medicalWhole, false]);
+      fields.push(['4141', e.uifContribution_4141.toFixed(2), false]);
+      fields.push(['4142', e.sdlContribution_4142.toFixed(2), false]);
+      var payeForCert = isIrp5 ? e.payeDeducted_4102 : 0;
+      fields.push(['4149', (payeForCert + e.uifContribution_4141 + e.sdlContribution_4142).toFixed(2), false]);
+
+      // Running total for the 6030 control total: the Rand value of every amount-type
+      // code actually written for this certificate (matches a real reference file to
+      // within a few cents).
+      fields.forEach(function(f){
+        if(AMOUNT_CODES_FOR_RECON_CONTROL_TOTAL.indexOf(f[0]) !== -1) amountTotal += Number(f[1]) || 0;
+      });
+
+      lines.push(rec(fields));
+    });
+
+    // ---- Trailer / control record ----
+    // 6010 = total record count excluding the trailer itself (header + every employee
+    // record) — confirmed against a real reference file. 6030 = sum of every Rand
+    // amount code in the file (checked to within a few cents of a real reference file).
+    // 6020 is SARS's own "sum of the value of all codes" field, reproduced here as the
+    // sum of every field CODE NUMBER written above — an educated best-effort, not
+    // independently confirmed. See the long comment on apiGetEmployerRecon_ in Code.gs.
+    var trailerFieldCount = 1 + data.employees.length;
+    lines.push(['6010', trailerFieldCount, '6020', totalFieldsWritten, '6030', amountTotal.toFixed(2), '9999'].join(','));
+
+    return lines.join('\r\n');
+  }
+  var AMOUNT_CODES_FOR_RECON_CONTROL_TOTAL = ['3601','3605','3607','3696','3699','4001','4005','4102','4141','4142','4149','4497'];
+
+  // Furniture-manufacturing SIC7 industry classification code for Natalie Branscombe
+  // Pty Ltd — static for this business, matches its own e@syFile registration. Update
+  // if the company's registered classification ever changes.
+  var RECON_SIC7_CODE = '31000';
 
   function loadReportsIrp5_(){
     apiRead('getIrp5', { month: payrollMonth }).then(function(res){
