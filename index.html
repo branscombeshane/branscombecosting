@@ -263,7 +263,7 @@
       <button class="navbtn" data-tab="roster">Roster</button>
       <button class="navbtn" data-tab="adjustments">Pay Adjustments</button>
       <button class="navbtn" data-tab="run">Run Payroll</button>
-      <button class="navbtn" data-tab="irp5">IRP5 / IT3(a)</button>
+      <button class="navbtn" data-tab="reports">Reports</button>
       <button class="navbtn" data-view="payroll-settings">Settings</button>
     </div>
   </nav>
@@ -632,7 +632,7 @@
   // Costing and Payroll are two separate jobs sharing one app — the mode switch at
   // the top of the sidebar swaps which nav group is visible below it, so the two
   // never sit mixed together in one flat list. Payroll's own sub-screens (Roster,
-  // Pay Adjustments, Run Payroll, IRP5) are now real sidebar nav buttons rather than
+  // Pay Adjustments, Run Payroll, Reports) are now real sidebar nav buttons rather than
   // an in-page tab strip — each just sets payrollTab and shows the one 'payroll' view.
   var appMode = 'costing';
   function setAppMode(mode){
@@ -1075,9 +1075,9 @@
     if(result.errors && result.errors.length) html += result.errors.map(function(err){ return '<div class="status-msg error">'+esc(err)+'</div>'; }).join('');
     statusEl.innerHTML = html;
     // Whatever's cached from the Payroll tabs may now be stale (new employees, new
-    // PayrollRuns rows) — clear it so the next visit to Roster/Run Payroll/IRP5
+    // PayrollRuns rows) — clear it so the next visit to Roster/Run Payroll/Reports
     // refetches instead of showing pre-import figures.
-    payrollData = null; payrollAdjustmentsData = null; payrollRunData = null;
+    payrollData = null; payrollAdjustmentsData = null; payrollRunData = null; reportsPayslipsData = null;
   }
 
   // Drag-and-drop (or Choose file) for a CSV of import lines — reads the file as
@@ -1758,14 +1758,14 @@
   // calc engine and the full set of actions. Every Payroll call goes through apiRead
   // (JSONP), never apiWrite — see the note at the top of Code.gs for why.
   var payrollMonth = null;              // 'yyyy-MM', set to the current month on first visit
-  var payrollTab = 'roster';            // roster | adjustments | run | irp5
+  var payrollTab = 'roster';            // roster | adjustments | run | reports
   var payrollData = null;               // {month, employees[], departments[], headcount, totalMonthlyCost, processedCount}
   var payrollAdjustmentsData = null;    // {month, items[], advanceBalances[]}
   var payrollRunData = null;            // {month, hasRun, payslips[], emp201}
   var expandedEmployeeId = null;        // Roster tab: which employee's edit form is open
   var expandedAdjEmployeeId = null;     // Pay Adjustments tab: which employee's panel is open
   var expandedPayslipEmployeeId = null; // Run tab: which employee's payslip is open under the Payslips table
-  var selectedPayslipIds = {};          // Run tab: employeeId -> true for the "Download selected" checkboxes
+  var reportsSelectedPayslipIds = {};   // Reports tab: employeeId -> true for the "Download selected" checkboxes
   // Display-only helper for the +/- prefix in the Pay Adjustments "This month" summary
   // column — spans both pre-tax (Absent, reduces Gross) and post-tax (Deduction,
   // AdvanceRepayment, reduce Net) subtraction types; it isn't used for any tax math.
@@ -1780,7 +1780,7 @@
   document.getElementById('payroll-month').addEventListener('change', function(){
     payrollMonth = this.value || defaultPayrollMonth_();
     expandedEmployeeId = null; expandedAdjEmployeeId = null;
-    expandedPayslipEmployeeId = null; selectedPayslipIds = {};
+    expandedPayslipEmployeeId = null; reportsSelectedPayslipIds = {};
     loadPayrollForTab();
   });
 
@@ -1800,7 +1800,7 @@
     if(payrollTab==='roster') loadPayrollRoster();
     else if(payrollTab==='adjustments') loadPayrollAdjustments();
     else if(payrollTab==='run') loadPayrollRun();
-    else if(payrollTab==='irp5') loadIrp5();
+    else if(payrollTab==='reports') loadReports();
   }
 
   // -------- Roster --------
@@ -2354,21 +2354,17 @@
     var payslipRows = payrollRunData.payslips.map(function(ps){
       var isOpen = expandedPayslipEmployeeId === ps.employeeId;
       return '<tr data-id="'+ps.employeeId+'">' +
-        '<td><input type="checkbox" class="payslip-select" data-id="'+ps.employeeId+'" '+(selectedPayslipIds[ps.employeeId]?'checked':'')+'></td>' +
         '<td>'+esc(ps.name)+'</td><td>'+esc(ps.department||'')+'</td>' +
         '<td class="num">'+money(ps.gross)+'</td><td class="num">'+money(ps.paye)+'</td><td class="num">'+money(ps.net)+'</td>' +
         '<td><button class="btn small view-payslip">'+(isOpen?'Close':'Payslip')+'</button></td></tr>' +
-        (isOpen ? '<tr><td colspan="7"><div class="job-detail" id="payslip-detail-'+ps.employeeId+'"></div></td></tr>' : '');
+        (isOpen ? '<tr><td colspan="6"><div class="job-detail" id="payslip-detail-'+ps.employeeId+'"></div></td></tr>' : '');
     }).join('');
 
     body.innerHTML =
       '<div class="panel">' +
         '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
           '<h2 style="margin:0;">EMP201 — '+esc(payrollMonth)+'</h2>' +
-          '<div class="field-row" style="width:auto;margin-top:0;gap:10px;">' +
-            (payrollRunData.hasRun ? '<button class="btn" id="btn-download-emp201">Download EMP201</button>' : '') +
-            '<button class="btn primary" id="btn-run-payroll">'+(payrollRunData.hasRun?'Re-run payroll for this month':'Run payroll for this month')+'</button>' +
-          '</div>' +
+          '<button class="btn primary" id="btn-run-payroll">'+(payrollRunData.hasRun?'Re-run payroll for this month':'Run payroll for this month')+'</button>' +
         '</div>' +
         (payrollRunData.hasRun ? '' : '<div class="empty" style="margin-top:10px;">Payroll hasn\'t been run for this month yet — run it once every active employee is Finalized in Pay Adjustments.</div>') +
         '<div id="run-payroll-error"></div>' +
@@ -2379,11 +2375,10 @@
             '<h2 style="margin:0;">Payslips</h2>' +
             '<div class="field-row" style="width:auto;margin-top:0;gap:10px;">' +
               '<button class="btn" id="btn-download-payments-report">Payments report</button>' +
-              '<button class="btn primary" id="btn-download-selected-payslips">Download selected</button>' +
             '</div>' +
           '</div>' +
-          '<div id="download-selected-error"></div>' +
-          '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th></th><th>Name</th><th>Department</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th></th></tr></thead><tbody>' +
+          '<div class="sub" style="margin:2px 0 0;">EMP201 filing and bulk payslip downloads for any month have moved to Reports.</div>' +
+          '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Name</th><th>Department</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th></th></tr></thead><tbody>' +
           payslipRows + '</tbody></table></div>' +
         '</div>'
       ) : '');
@@ -2397,47 +2392,12 @@
       });
     });
 
-    var emp201Btn = document.getElementById('btn-download-emp201');
-    if(emp201Btn) emp201Btn.addEventListener('click', function(){
-      var doc = newPdfDoc_();
-      if(!doc) return;
-      buildEmp201Pdf_(doc, payrollRunData);
-      doc.save('EMP201_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
-    });
-
     var paymentsBtn = document.getElementById('btn-download-payments-report');
     if(paymentsBtn) paymentsBtn.addEventListener('click', function(){
       var doc = newPdfDoc_();
       if(!doc) return;
       buildPaymentsReportPdf_(doc, payrollRunData);
       doc.save('Payments_report_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
-    });
-
-    Array.prototype.forEach.call(document.querySelectorAll('.payslip-select'), function(cb){
-      cb.addEventListener('change', function(){
-        if(cb.checked) selectedPayslipIds[cb.dataset.id] = true;
-        else delete selectedPayslipIds[cb.dataset.id];
-      });
-    });
-
-    var selectedBtn = document.getElementById('btn-download-selected-payslips');
-    if(selectedBtn) selectedBtn.addEventListener('click', function(){
-      var errBox = document.getElementById('download-selected-error');
-      errBox.innerHTML = '';
-      var ids = Object.keys(selectedPayslipIds).filter(function(id){ return selectedPayslipIds[id]; });
-      if(!ids.length){ errBox.innerHTML = '<div class="status-msg error">Tick at least one employee first.</div>'; return; }
-      withBusy_(selectedBtn, apiRead('getAllPayslips', { month: payrollMonth }), 'Preparing…').then(function(res){
-        if(!res || !res.ok){ errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load payslips.')+'</div>'; return; }
-        var chosen = res.payslips.filter(function(ps){ return ids.indexOf(String(ps.employee.id)) !== -1; });
-        if(!chosen.length){ errBox.innerHTML = '<div class="status-msg error">Could not find the selected employees.</div>'; return; }
-        var doc = newPdfDoc_();
-        if(!doc) return;
-        chosen.forEach(function(ps, i){ buildPayslipPdfPage_(doc, ps, i===0); });
-        var filename = chosen.length===1
-          ? 'Payslip_'+pdfFilenameSafe_(chosen[0].employee.name)+'_'+pdfFilenameSafe_(payrollMonth)+'.pdf'
-          : 'Payslips_selected_'+pdfFilenameSafe_(payrollMonth)+'.pdf';
-        doc.save(filename);
-      });
     });
 
     Array.prototype.forEach.call(document.querySelectorAll('.view-payslip'), function(btn){
@@ -2473,68 +2433,81 @@
     }).catch(function(e){ container.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
   }
 
-  // "Download EMP201" — a printable version of the same summary + per-employee PAYE/
-  // SDL/UIF breakdown shown on screen, laid out to match what SARS/most payroll software
-  // calls an EMP201 reconciliation, for filing or for checking against another system.
-  // "Download EMP201" — a real PDF file (jsPDF + autoTable), matching the summary +
-  // per-employee PAYE/SDL/UIF breakdown shown on screen, for filing or for checking
-  // against another system.
-  function buildEmp201Pdf_(doc, run){
-    var M = 14;
+  // "Download EMP201" (Reports tab) — laid out to match the previous payroll system's
+  // "EMP201 PAYE, SDL and UIF Return": per-employee Current Period + Year To Date PAYE/
+  // SDL/UIF, then the Balance of Remuneration/Leviable Amount and Amount Payable boxes
+  // SARS's own EMP201 form shows, plus the SDL/UIF/PAYE employee-count line. `data` is
+  // apiGetEmp201Detail_'s response.
+  function buildEmp201Pdf_(doc, data){
+    var M = 10;
     var pageWidth = doc.internal.pageSize.getWidth();
-    var co = run.company || {};
-    var emp201 = run.emp201;
+    var co = data.company || {};
     var y = M;
 
     doc.setFont('helvetica','bold'); doc.setFontSize(15);
-    doc.text(co.name || '(Company details not set)', pageWidth/2, y, {align:'center'});
+    doc.text('EMP201 PAYE, SDL and UIF Return', M, y);
+    y += 6;
+    doc.setFont('helvetica','italic'); doc.setFontSize(10);
+    doc.text('For payment period '+pdfMonthLabel_(data.month), M, y);
     y += 5.5;
-    if(co.address){ doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.text(co.address, pageWidth/2, y, {align:'center'}); y += 4.2; }
-    doc.setFont('helvetica','bold'); doc.setFontSize(12);
-    doc.text('EMP201 — for payment period '+pdfMonthLabel_(run.month), pageWidth/2, y, {align:'center'});
-    y += 5;
-    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(110);
-    doc.text('PAYE '+(co.payeNumber||'—')+'   ·   UIF '+(co.uifNumber||'—')+'   ·   SDL '+(co.sdlNumber||'—'), pageWidth/2, y, {align:'center'});
-    doc.setTextColor(0);
-    y += 8;
+    doc.setFont('helvetica','bold');
+    doc.text(co.name || '(Company details not set)', M, y);
+    y += 6;
 
-    doc.autoTable({
-      startY:y, margin:{left:M,right:M}, theme:'grid',
-      body:[
-        ['Gross payroll', money(emp201.grossPayroll)],
-        ['PAYE', money(emp201.paye)],
-        ['UIF — employee', money(emp201.uifEmployee)],
-        ['UIF — employer', money(emp201.uifEmployer)],
-        ['UIF — total', money(emp201.uifTotal)],
-        ['SDL', money(emp201.sdl)],
-        ['ETI credit', '-'+money(emp201.eti)],
-        [{content:'Net due to SARS', styles:{fontStyle:'bold'}}, {content:money(emp201.netToSars), styles:{fontStyle:'bold'}}]
-      ],
-      styles:{fontSize:9, cellPadding:1.6, lineColor:[210,210,210]},
-      columnStyles:{0:{cellWidth:100},1:{halign:'right'}}
-    });
-    y = doc.lastAutoTable.finalY + 6;
-
-    var rows = (run.payslips||[]).map(function(ps){
-      var uifTotal = (Number(ps.uifEmployee)||0) + (Number(ps.uifEmployer)||0);
-      return [ps.employeeNumber||'—', ps.name, money(ps.gross), money(ps.paye), money(ps.sdlEmployer), money(uifTotal)];
+    var rows = data.employees.map(function(e){
+      return [
+        e.employeeNumber||'—', e.name,
+        e.hasCurrent?money(e.curPaye):'', e.hasCurrent?money(e.curSdl):'', e.hasCurrent?money(e.curUif):'',
+        money(e.ytdPaye), money(e.ytdSdl), money(e.ytdUif)
+      ];
     });
     rows.push([
       {content:'Total', colSpan:2, styles:{fontStyle:'bold'}},
-      {content:money(emp201.grossPayroll), styles:{fontStyle:'bold'}},
-      {content:money(emp201.paye), styles:{fontStyle:'bold'}},
-      {content:money(emp201.sdl), styles:{fontStyle:'bold'}},
-      {content:money(emp201.uifTotal), styles:{fontStyle:'bold'}}
+      {content:money(data.totals.paye), styles:{fontStyle:'bold'}},
+      {content:money(data.totals.sdl), styles:{fontStyle:'bold'}},
+      {content:money(data.totals.uif), styles:{fontStyle:'bold'}},
+      {content:money(data.ytdTotals.paye), styles:{fontStyle:'bold'}},
+      {content:money(data.ytdTotals.sdl), styles:{fontStyle:'bold'}},
+      {content:money(data.ytdTotals.uif), styles:{fontStyle:'bold'}}
     ]);
 
     doc.autoTable({
       startY:y, margin:{left:M,right:M}, theme:'grid',
-      head:[['Emp #','Name','Gross','PAYE','SDL','UIF']],
+      head:[
+        [{content:'',colSpan:2},{content:'Current Period',colSpan:3},{content:'Year To Date',colSpan:3}],
+        ['Emp No','Employee Name','PAYE','SDL','UIF','PAYE','SDL','UIF']
+      ],
       body: rows,
-      styles:{fontSize:8, cellPadding:1.4, lineColor:[210,210,210]},
-      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
-      columnStyles:{2:{halign:'right'},3:{halign:'right'},4:{halign:'right'},5:{halign:'right'}}
+      styles:{fontSize:7.5, cellPadding:1.2, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold', halign:'center'},
+      columnStyles:{2:{halign:'right'},3:{halign:'right'},4:{halign:'right'},5:{halign:'right'},6:{halign:'right'},7:{halign:'right'}}
     });
+    y = doc.lastAutoTable.finalY + 6;
+
+    var lev = data.leviable;
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid', tableWidth: pageWidth - M*2,
+      head:[['','PAYE','SDL','UIF']],
+      body:[
+        ['Balance of Remuneration / Leviable Amount', money(lev.payeRemuneration), money(lev.sdlLeviable), money(lev.uifRemunerationCapped)],
+        [{content:'Amount Payable',styles:{fontStyle:'bold'}}, {content:money(data.totals.paye),styles:{fontStyle:'bold'}}, {content:money(data.totals.sdl),styles:{fontStyle:'bold'}}, {content:money(data.totals.uif),styles:{fontStyle:'bold'}}],
+        [{content:'Control Total (PAYE + SDL + UIF)',styles:{fontStyle:'bold'},colSpan:3},{content:money(data.controlTotal),styles:{fontStyle:'bold'}}]
+      ],
+      styles:{fontSize:9, cellPadding:2, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold', halign:'right'},
+      columnStyles:{0:{cellWidth:80},1:{halign:'right'},2:{halign:'right'},3:{halign:'right'}}
+    });
+    y = doc.lastAutoTable.finalY + 4;
+
+    var counts = data.employeeCounts;
+    doc.setFont('helvetica','normal'); doc.setFontSize(8.5);
+    doc.text('Number of Perm/Non-Perm employees paid this period: '+counts.currentPeriod+' / '+counts.nonPermanent, M, y);
+    y += 4.5;
+    doc.text('Number of contributing employees — SDL: '+counts.sdlContributing+'   ·   UIF: '+counts.uifContributing, M, y);
+    y += 6;
+    doc.setFontSize(7.5); doc.setTextColor(150);
+    doc.text('Figures only — this app does not submit anything to SARS. Use these to complete the EMP201 declaration yourself.', M, y);
+    doc.setTextColor(0);
   }
 
   // "Payments report" — who gets paid what, for handing to whoever runs the actual bank
@@ -2571,6 +2544,111 @@
       headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
       columnStyles:{3:{halign:'right'}}
     });
+  }
+
+  // Per-employee IRP5/IT3(a) certificate (Reports tab) — laid out to follow the sections
+  // of SARS's own "Employee Income Tax Certificate" form (Employee Information, Address,
+  // Banking details, Employer reference numbers, Pay Periods, then the Income Received /
+  // Tax Credits source-code table) using the fields this app actually tracks. It isn't a
+  // byte-for-byte reproduction of the government form (this app has one address field,
+  // not separate residential/postal/work addresses, and doesn't track a bank account
+  // type or SARS directive numbers) — it's a readable certificate carrying the same
+  // figures and source codes, for the employee's own records or for e@syFile capture.
+  function buildIrp5Pdf_(doc, cert, taxYearLabel, company){
+    var M = 14;
+    var pageWidth = doc.internal.pageSize.getWidth();
+    var co = company || {};
+    var yearParts = String(taxYearLabel||'').split('/');
+    var yearOfAssessment = yearParts[1] || yearParts[0] || '';
+    var y = M;
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(14);
+    doc.text('Employee Income Tax Certificate', M, y);
+    doc.setFontSize(11);
+    doc.text(cert.certificateType||'IRP5', pageWidth-M, y, {align:'right'});
+    y += 5;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
+    doc.text('Year of assessment '+yearOfAssessment+'   ·   Tax year '+String(taxYearLabel||''), M, y);
+    doc.setTextColor(0);
+    y += 7;
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      head:[[{content:'Employee Information',colSpan:2},{content:'Banking details',colSpan:2}]],
+      body:[
+        ['Employee No.', cert.employeeNumber||'—', 'Bank Name', cert.bankName||'—'],
+        ['Name', cert.name||'—', 'Branch Code', cert.branchCode||'—'],
+        ['ID No.', cert.idNumber||'—', 'Account No.', cert.accountNumber||'—'],
+        ['Income Tax Ref No.', cert.taxNumber||'—', 'Pay Method', cert.payMethod||'—'],
+        ['Date of Birth', cert.dateOfBirth||'—', 'Job Title', cert.jobTitle||'—'],
+        ['Date Engaged', cert.dateEmployed||'—', 'Department', cert.department||'—']
+      ],
+      styles:{fontSize:8.5, cellPadding:1.6, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{0:{fontStyle:'bold', cellWidth:38},1:{cellWidth:53},2:{fontStyle:'bold', cellWidth:38},3:{cellWidth:53}}
+    });
+    y = doc.lastAutoTable.finalY + 4;
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      head:[['Address']],
+      body:[[cert.address||'—']],
+      styles:{fontSize:8.5, cellPadding:1.6, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'}
+    });
+    y = doc.lastAutoTable.finalY + 4;
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      head:[[{content:'Tax Certificate Information',colSpan:4}]],
+      body:[
+        ['Trading / Other Name', co.name||'—', 'PAYE Ref. No.', co.payeNumber||'—'],
+        ['SDL Ref. No.', co.sdlNumber||'—', 'UIF Ref. No.', co.uifNumber||'—'],
+        ['Periods in Year of Assessment', '12', 'No. of Periods Worked', String(cert.monthsPaid||0)],
+        ['Period Employed From', cert.periodFrom||'—', 'Period Employed To', cert.periodTo||'—']
+      ],
+      styles:{fontSize:8.5, cellPadding:1.6, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{0:{fontStyle:'bold', cellWidth:52},1:{cellWidth:39},2:{fontStyle:'bold', cellWidth:52},3:{cellWidth:39}}
+    });
+    y = doc.lastAutoTable.finalY + 5;
+
+    var deductionRows = [];
+    if(cert.retirementContribution_4001) deductionRows.push(['Retirement Annuity Fund Contributions', '4001', money(cert.retirementContribution_4001)]);
+    if(cert.medicalContribution_4005) deductionRows.push(['Medical Aid Contributions', '4005', money(cert.medicalContribution_4005)]);
+    var totalDeductions = (cert.retirementContribution_4001||0) + (cert.medicalContribution_4005||0);
+    if(deductionRows.length) deductionRows.push([{content:'Total Deductions/Contributions',styles:{fontStyle:'bold'}}, {content:'4497',styles:{fontStyle:'bold'}}, {content:money(totalDeductions),styles:{fontStyle:'bold'}}]);
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      head:[['Income Received / Deductions','Source Code','Amount']],
+      body:[
+        ['Income (Basic Salary and other taxable pay)', '3601', money(cert.grossIncome_3601)],
+        [{content:'Gross Taxable Income',styles:{fontStyle:'bold'}}, {content:'3699',styles:{fontStyle:'bold'}}, {content:money(cert.grossIncome_3601),styles:{fontStyle:'bold'}}]
+      ].concat(deductionRows),
+      styles:{fontSize:8.5, cellPadding:1.8, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{1:{halign:'center', cellWidth:28},2:{halign:'right', cellWidth:38}}
+    });
+    y = doc.lastAutoTable.finalY + 4;
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      head:[['Tax Credits / Employer Contributions','Source Code','Amount']],
+      body:[
+        ['PAYE', '4102', money(cert.payeDeducted_4102)],
+        ['SDL', '4142', money(cert.sdlContribution_4142)],
+        ['UIF', '4141', money(cert.uifContribution_4141)]
+      ],
+      styles:{fontSize:8.5, cellPadding:1.8, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{1:{halign:'center', cellWidth:28},2:{halign:'right', cellWidth:38}}
+    });
+    y = doc.lastAutoTable.finalY + 6;
+
+    doc.setFontSize(7.5); doc.setTextColor(150);
+    doc.text('Figures only — this app does not submit anything to SARS. Use these to complete e@syFile / EMP501 yourself.', M, y);
+    doc.setTextColor(0);
   }
 
   // The actual downloadable payslip — a real PDF (jsPDF + autoTable), laid out to match
@@ -2884,40 +2962,68 @@
       '</div>';
   }
 
-  // -------- IRP5 / IT3(a) --------
-  function loadIrp5(){
-    apiRead('getIrp5', { month: payrollMonth }).then(function(res){
-      if(!res || !res.ok){ document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load IRP5 data.')+'</div>'; return; }
-      renderIrp5_(res);
-    }).catch(function(e){ document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  // -------- Reports (IRP5, EMP201, payslip downloads) --------
+  // One-stop hub for the documents Shane actually files or hands off, for whichever
+  // month/tax-year the shared Payroll month selector is on — separate from Run Payroll,
+  // which is about running the month and sanity-checking its own payslips inline.
+  var reportsPayslipsData = null; // cached getAllPayslips result for the current payrollMonth
+
+  function loadReports(){
+    var stats = document.getElementById('payroll-stats');
+    var body = document.getElementById('payroll-body');
+    stats.innerHTML = '';
+    body.innerHTML =
+      '<div class="panel" id="reports-irp5-panel"><div class="empty">Loading…</div></div>' +
+      '<div class="panel" id="reports-emp201-panel"><div class="empty">Loading…</div></div>' +
+      '<div class="panel" id="reports-payslips-panel"><div class="empty">Loading…</div></div>';
+    loadReportsIrp5_();
+    loadReportsEmp201_();
+    loadReportsPayslips_();
   }
 
-  function renderIrp5_(res){
-    var stats = document.getElementById('payroll-stats');
-    stats.innerHTML = '<div class="stat total"><span class="label">Tax year</span><span class="value">'+esc(res.taxYear)+'</span></div>' +
-      '<div class="stat"><span class="label">Certificates</span><span class="value num">'+res.certificates.length+'</span></div>';
+  function loadReportsIrp5_(){
+    apiRead('getIrp5', { month: payrollMonth }).then(function(res){
+      var panel = document.getElementById('reports-irp5-panel');
+      if(!panel) return;
+      if(!res || !res.ok){ panel.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load IRP5 data.')+'</div>'; return; }
+      renderReportsIrp5_(panel, res);
+    }).catch(function(e){
+      var panel = document.getElementById('reports-irp5-panel');
+      if(panel) panel.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
 
+  function renderReportsIrp5_(panel, res){
     var rows = res.certificates.map(function(c){
-      return '<tr><td>'+esc(c.name)+'</td><td>'+esc(c.certificateType)+'</td><td class="num">'+c.monthsPaid+'</td>' +
+      return '<tr data-id="'+c.employeeId+'"><td>'+esc(c.name)+'</td><td>'+esc(c.certificateType)+'</td><td class="num">'+c.monthsPaid+'</td>' +
         '<td class="num">'+money(c.grossIncome_3601)+'</td><td class="num">'+money(c.payeDeducted_4102)+'</td>' +
         '<td class="num">'+money(c.uifContribution_4141)+'</td><td class="num">'+money(c.sdlContribution_4142)+'</td>' +
-        '<td class="num">'+money(c.retirementContribution_4001)+'</td><td class="num">'+money(c.medicalContribution_4005)+'</td></tr>';
+        '<td class="num">'+money(c.retirementContribution_4001)+'</td><td class="num">'+money(c.medicalContribution_4005)+'</td>' +
+        '<td><button class="btn small irp5-pdf">PDF</button></td></tr>';
     }).join('');
 
-    var body = document.getElementById('payroll-body');
-    body.innerHTML =
-      '<div class="panel">' +
-        '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
-          '<h2 style="margin:0;">IRP5 / IT3(a) figures — tax year '+esc(res.taxYear)+'</h2>' +
-          '<button class="btn" id="btn-export-irp5">Export CSV</button>' +
-        '</div>' +
-        '<div class="sub" style="margin:6px 0 14px;">These are the FIGURES for each certificate, summed from every payroll run in this tax year — use them to complete SARS\'s e@syFile / EMP501 process yourself; this app doesn\'t submit anything to SARS.</div>' +
-        '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th class="num">Months paid</th><th class="num">Gross (3601)</th><th class="num">PAYE (4102)</th><th class="num">UIF (4141)</th><th class="num">SDL (4142)</th><th class="num">Retirement (4001)</th><th class="num">Medical (4005)</th></tr></thead><tbody>' +
-        (rows || '<tr><td colspan="9" class="empty">No payroll runs yet this tax year.</td></tr>') +
-        '</tbody></table></div>' +
-      '</div>';
+    panel.innerHTML =
+      '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
+        '<h2 style="margin:0;">IRP5 / IT3(a) — tax year '+esc(res.taxYear)+'</h2>' +
+        '<button class="btn" id="btn-export-irp5">Export CSV</button>' +
+      '</div>' +
+      '<div class="sub" style="margin:6px 0 14px;">Figures summed from every payroll run in this tax year. "PDF" downloads a certificate for that one employee — use these to complete SARS\'s e@syFile / EMP501 process yourself; this app doesn\'t submit anything to SARS.</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th class="num">Months paid</th><th class="num">Gross (3601)</th><th class="num">PAYE (4102)</th><th class="num">UIF (4141)</th><th class="num">SDL (4142)</th><th class="num">Retirement (4001)</th><th class="num">Medical (4005)</th><th></th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="10" class="empty">No payroll runs yet this tax year.</td></tr>') +
+      '</tbody></table></div>';
 
     document.getElementById('btn-export-irp5').addEventListener('click', function(){ exportIrp5Csv_(res); });
+    Array.prototype.forEach.call(panel.querySelectorAll('.irp5-pdf'), function(btn){
+      btn.addEventListener('click', function(){
+        var id = btn.closest('tr').dataset.id;
+        var cert = res.certificates.filter(function(c){ return String(c.employeeId)===id; })[0];
+        if(!cert) return;
+        var doc = newPdfDoc_();
+        if(!doc) return;
+        buildIrp5Pdf_(doc, cert, res.taxYear, res.company);
+        doc.save('IRP5_'+pdfFilenameSafe_(cert.name)+'_'+pdfFilenameSafe_(res.taxYear)+'.pdf');
+      });
+    });
   }
 
   function exportIrp5Csv_(res){
@@ -2932,6 +3038,98 @@
     a.href = URL.createObjectURL(blob);
     a.download = 'irp5-'+res.taxYear.replace('/','-')+'.csv';
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+
+  function loadReportsEmp201_(){
+    apiRead('getEmp201Detail', { month: payrollMonth }).then(function(res){
+      var panel = document.getElementById('reports-emp201-panel');
+      if(!panel) return;
+      if(!res || !res.ok){ panel.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load EMP201 data.')+'</div>'; return; }
+      renderReportsEmp201_(panel, res);
+    }).catch(function(e){
+      var panel = document.getElementById('reports-emp201-panel');
+      if(panel) panel.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
+
+  function renderReportsEmp201_(panel, res){
+    panel.innerHTML =
+      '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
+        '<h2 style="margin:0;">EMP201 — '+esc(pdfMonthLabel_(payrollMonth))+'</h2>' +
+        '<button class="btn primary" id="btn-download-emp201">Download EMP201</button>' +
+      '</div>' +
+      '<div class="stats" style="margin-top:12px;">' +
+        '<div class="stat"><span class="label">PAYE payable</span><span class="value num">'+money(res.totals.paye)+'</span></div>' +
+        '<div class="stat"><span class="label">SDL payable</span><span class="value num">'+money(res.totals.sdl)+'</span></div>' +
+        '<div class="stat"><span class="label">UIF payable</span><span class="value num">'+money(res.totals.uif)+'</span></div>' +
+        '<div class="stat total"><span class="label">Control total</span><span class="value num">'+money(res.controlTotal)+'</span></div>' +
+      '</div>' +
+      (res.employees.length ? '' : '<div class="empty" style="margin-top:10px;">No payroll runs yet this tax year.</div>');
+
+    var btn = document.getElementById('btn-download-emp201');
+    if(btn) btn.addEventListener('click', function(){
+      var doc = newPdfDoc_();
+      if(!doc) return;
+      buildEmp201Pdf_(doc, res);
+      doc.save('EMP201_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
+    });
+  }
+
+  function loadReportsPayslips_(){
+    apiRead('getAllPayslips', { month: payrollMonth }).then(function(res){
+      var panel = document.getElementById('reports-payslips-panel');
+      if(!panel) return;
+      if(!res || !res.ok){ panel.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load payslips.')+'</div>'; return; }
+      reportsPayslipsData = res.payslips;
+      renderReportsPayslips_(panel);
+    }).catch(function(e){
+      var panel = document.getElementById('reports-payslips-panel');
+      if(panel) panel.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
+
+  function renderReportsPayslips_(panel){
+    var list = reportsPayslipsData || [];
+    var rows = list.map(function(ps){
+      var id = String(ps.employee.id);
+      return '<tr data-id="'+id+'">' +
+        '<td><input type="checkbox" class="reports-payslip-select" data-id="'+id+'" '+(reportsSelectedPayslipIds[id]?'checked':'')+'></td>' +
+        '<td>'+esc(ps.employee.name)+'</td><td>'+esc(ps.employee.department||'')+'</td>' +
+        '<td class="num">'+money(ps.calc.gross)+'</td><td class="num">'+money(ps.calc.net)+'</td></tr>';
+    }).join('');
+
+    panel.innerHTML =
+      '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
+        '<h2 style="margin:0;">Payslips — '+esc(pdfMonthLabel_(payrollMonth))+'</h2>' +
+        '<button class="btn primary" id="btn-reports-download-selected">Download selected</button>' +
+      '</div>' +
+      '<div class="sub" style="margin:6px 0 0;">Tick employees and download their payslips for this month as one PDF.</div>' +
+      '<div id="reports-payslips-error"></div>' +
+      '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th></th><th>Name</th><th>Department</th><th class="num">Gross</th><th class="num">Net pay</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="5" class="empty">No active employees.</td></tr>') + '</tbody></table></div>';
+
+    Array.prototype.forEach.call(panel.querySelectorAll('.reports-payslip-select'), function(cb){
+      cb.addEventListener('change', function(){
+        if(cb.checked) reportsSelectedPayslipIds[cb.dataset.id] = true;
+        else delete reportsSelectedPayslipIds[cb.dataset.id];
+      });
+    });
+
+    document.getElementById('btn-reports-download-selected').addEventListener('click', function(){
+      var errBox = document.getElementById('reports-payslips-error');
+      errBox.innerHTML = '';
+      var ids = Object.keys(reportsSelectedPayslipIds).filter(function(id){ return reportsSelectedPayslipIds[id]; });
+      if(!ids.length){ errBox.innerHTML = '<div class="status-msg error">Tick at least one employee first.</div>'; return; }
+      var chosen = (reportsPayslipsData||[]).filter(function(ps){ return ids.indexOf(String(ps.employee.id)) !== -1; });
+      if(!chosen.length){ errBox.innerHTML = '<div class="status-msg error">Could not find the selected employees.</div>'; return; }
+      var doc = newPdfDoc_();
+      if(!doc) return;
+      chosen.forEach(function(ps, i){ buildPayslipPdfPage_(doc, ps, i===0); });
+      var filename = chosen.length===1
+        ? 'Payslip_'+pdfFilenameSafe_(chosen[0].employee.name)+'_'+pdfFilenameSafe_(payrollMonth)+'.pdf'
+        : 'Payslips_selected_'+pdfFilenameSafe_(payrollMonth)+'.pdf';
+      doc.save(filename);
+    });
   }
 
   // ================= BOOT =================
