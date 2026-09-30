@@ -208,13 +208,21 @@
   tr.roster-row, tr.adj-emp-row{ cursor:pointer; }
   tr.roster-row:hover td, tr.adj-emp-row:hover td{ background:var(--accent-soft); }
   .py-tab.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
-  /* On-screen quick-look preview only now — actual downloads are real PDFs built with
-     jsPDF/autoTable (see buildPayslipPdfPage_ etc.), not this markup or window.print(). */
-  .payslip-box{ border:1px solid var(--line-strong); background:var(--paper-raised); padding:22px 26px; max-width:640px; }
-  .payslip-box h2{ font-size:18px; margin:0 0 2px; text-transform:none; }
-  .payslip-box .payslip-grid{ display:grid; grid-template-columns:1fr 1fr; gap:2px 18px; font-size:12.5px; margin:14px 0; }
-  .payslip-box table{ margin-top:6px; }
-  .payslip-box .section-label{ margin-top:16px; }
+  /* On-screen payslip preview — mirrors the section layout of the downloaded PDF
+     (buildPayslipPdfPage_) so what you see under the row is what you get in the file. */
+  .payslip-detail{ padding:14px 2px 4px; }
+  .payslip-detail .ps-header{ text-align:center; margin-bottom:14px; }
+  .payslip-detail .ps-header h3{ margin:0 0 3px; font-size:17px; }
+  .payslip-detail .ps-header .sub{ margin:0; }
+  .payslip-detail .ps-name{ font-weight:700; font-size:14px; margin:0 0 8px; }
+  .payslip-detail table{ width:100%; border-collapse:collapse; font-size:12.5px; margin-bottom:14px; }
+  .payslip-detail table th, .payslip-detail table td{ border:1px solid var(--line); padding:5px 8px; text-align:left; }
+  .payslip-detail table th.num, .payslip-detail table td.num{ text-align:right; }
+  .payslip-detail table thead th{ background:var(--paper); font-weight:700; }
+  .payslip-detail table tfoot td{ font-weight:700; }
+  .payslip-detail .ps-netpay{ display:flex; justify-content:space-between; align-items:center; background:var(--paper); border:1px solid var(--line); padding:10px 14px; font-weight:700; font-size:14px; margin-bottom:14px; }
+  .payslip-detail .ps-cols{ display:grid; grid-template-columns:1fr 1fr; gap:16px; align-items:start; }
+  .payslip-detail .ps-cols table{ margin-bottom:10px; }
 
   .empty{ color:var(--ink-soft); font-style:italic; padding:10px 2px; }
   .status-msg{ padding:12px 14px; border:1px solid var(--line); background:var(--paper); font-size:13px; margin-bottom:14px; }
@@ -1756,6 +1764,8 @@
   var payrollRunData = null;            // {month, hasRun, payslips[], emp201}
   var expandedEmployeeId = null;        // Roster tab: which employee's edit form is open
   var expandedAdjEmployeeId = null;     // Pay Adjustments tab: which employee's panel is open
+  var expandedPayslipEmployeeId = null; // Run tab: which employee's payslip is open under the Payslips table
+  var selectedPayslipIds = {};          // Run tab: employeeId -> true for the "Download selected" checkboxes
   // Display-only helper for the +/- prefix in the Pay Adjustments "This month" summary
   // column — spans both pre-tax (Absent, reduces Gross) and post-tax (Deduction,
   // AdvanceRepayment, reduce Net) subtraction types; it isn't used for any tax math.
@@ -1770,6 +1780,7 @@
   document.getElementById('payroll-month').addEventListener('change', function(){
     payrollMonth = this.value || defaultPayrollMonth_();
     expandedEmployeeId = null; expandedAdjEmployeeId = null;
+    expandedPayslipEmployeeId = null; selectedPayslipIds = {};
     loadPayrollForTab();
   });
 
@@ -2341,9 +2352,13 @@
       '<div class="stat total"><span class="label">Net due to SARS</span><span class="value num">'+money(emp201.netToSars)+'</span></div>';
 
     var payslipRows = payrollRunData.payslips.map(function(ps){
-      return '<tr data-id="'+ps.employeeId+'"><td>'+esc(ps.name)+'</td><td>'+esc(ps.department||'')+'</td>' +
+      var isOpen = expandedPayslipEmployeeId === ps.employeeId;
+      return '<tr data-id="'+ps.employeeId+'">' +
+        '<td><input type="checkbox" class="payslip-select" data-id="'+ps.employeeId+'" '+(selectedPayslipIds[ps.employeeId]?'checked':'')+'></td>' +
+        '<td>'+esc(ps.name)+'</td><td>'+esc(ps.department||'')+'</td>' +
         '<td class="num">'+money(ps.gross)+'</td><td class="num">'+money(ps.paye)+'</td><td class="num">'+money(ps.net)+'</td>' +
-        '<td><button class="btn small view-payslip">Payslip</button></td></tr>';
+        '<td><button class="btn small view-payslip">'+(isOpen?'Close':'Payslip')+'</button></td></tr>' +
+        (isOpen ? '<tr><td colspan="7"><div class="job-detail" id="payslip-detail-'+ps.employeeId+'"></div></td></tr>' : '');
     }).join('');
 
     body.innerHTML =
@@ -2364,19 +2379,20 @@
             '<h2 style="margin:0;">Payslips</h2>' +
             '<div class="field-row" style="width:auto;margin-top:0;gap:10px;">' +
               '<button class="btn" id="btn-download-payments-report">Payments report</button>' +
-              '<button class="btn" id="btn-download-all-payslips">Download all payslips</button>' +
+              '<button class="btn primary" id="btn-download-selected-payslips">Download selected</button>' +
             '</div>' +
           '</div>' +
-          '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Name</th><th>Department</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th></th></tr></thead><tbody>' +
+          '<div id="download-selected-error"></div>' +
+          '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th></th><th>Name</th><th>Department</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">Net pay</th><th></th></tr></thead><tbody>' +
           payslipRows + '</tbody></table></div>' +
-        '</div><div id="payslip-view"></div>'
+        '</div>'
       ) : '');
 
     document.getElementById('btn-run-payroll').addEventListener('click', function(){
       var errBox = document.getElementById('run-payroll-error');
       errBox.innerHTML = '';
       withBusy_(this, apiRead('runPayroll', { month: payrollMonth }), 'Running payroll…').then(function(res){
-        if(res && res.ok){ payrollRunData = res.payrollRun; renderPayrollRun(); }
+        if(res && res.ok){ payrollRunData = res.payrollRun; expandedPayslipEmployeeId = null; renderPayrollRun(); }
         else errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not run payroll.')+'</div>';
       });
     });
@@ -2397,36 +2413,64 @@
       doc.save('Payments_report_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
     });
 
-    var allPayslipsBtn = document.getElementById('btn-download-all-payslips');
-    if(allPayslipsBtn) allPayslipsBtn.addEventListener('click', function(){
-      withBusy_(allPayslipsBtn, apiRead('getAllPayslips', { month: payrollMonth }), 'Preparing…').then(function(res){
-        if(!res || !res.ok){ alert((res && res.error) || 'Could not load payslips.'); return; }
+    Array.prototype.forEach.call(document.querySelectorAll('.payslip-select'), function(cb){
+      cb.addEventListener('change', function(){
+        if(cb.checked) selectedPayslipIds[cb.dataset.id] = true;
+        else delete selectedPayslipIds[cb.dataset.id];
+      });
+    });
+
+    var selectedBtn = document.getElementById('btn-download-selected-payslips');
+    if(selectedBtn) selectedBtn.addEventListener('click', function(){
+      var errBox = document.getElementById('download-selected-error');
+      errBox.innerHTML = '';
+      var ids = Object.keys(selectedPayslipIds).filter(function(id){ return selectedPayslipIds[id]; });
+      if(!ids.length){ errBox.innerHTML = '<div class="status-msg error">Tick at least one employee first.</div>'; return; }
+      withBusy_(selectedBtn, apiRead('getAllPayslips', { month: payrollMonth }), 'Preparing…').then(function(res){
+        if(!res || !res.ok){ errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load payslips.')+'</div>'; return; }
+        var chosen = res.payslips.filter(function(ps){ return ids.indexOf(String(ps.employee.id)) !== -1; });
+        if(!chosen.length){ errBox.innerHTML = '<div class="status-msg error">Could not find the selected employees.</div>'; return; }
         var doc = newPdfDoc_();
         if(!doc) return;
-        res.payslips.forEach(function(ps, i){ buildPayslipPdfPage_(doc, ps, i===0); });
-        doc.save('Payslips_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
+        chosen.forEach(function(ps, i){ buildPayslipPdfPage_(doc, ps, i===0); });
+        var filename = chosen.length===1
+          ? 'Payslip_'+pdfFilenameSafe_(chosen[0].employee.name)+'_'+pdfFilenameSafe_(payrollMonth)+'.pdf'
+          : 'Payslips_selected_'+pdfFilenameSafe_(payrollMonth)+'.pdf';
+        doc.save(filename);
       });
     });
 
     Array.prototype.forEach.call(document.querySelectorAll('.view-payslip'), function(btn){
-      btn.addEventListener('click', function(){ loadPayslip_(btn.closest('tr').dataset.id); });
+      btn.addEventListener('click', function(){
+        var id = btn.closest('tr').dataset.id;
+        expandedPayslipEmployeeId = (expandedPayslipEmployeeId===id) ? null : id;
+        renderPayrollRun();
+      });
     });
+
+    if(expandedPayslipEmployeeId){
+      var container = document.getElementById('payslip-detail-'+expandedPayslipEmployeeId);
+      if(container) loadPayslipDetail_(container, expandedPayslipEmployeeId);
+      else expandedPayslipEmployeeId = null;
+    }
   }
 
-  function loadPayslip_(employeeId){
-    var box = document.getElementById('payslip-view');
-    box.innerHTML = '<div class="empty">Loading payslip…</div>';
+  // Fills the expand-in-place row under a Payslips-table employee (see renderPayrollRun)
+  // with an on-screen preview that mirrors buildPayslipPdfPage_'s section layout, so what
+  // you see under the row is what you get in the downloaded PDF.
+  function loadPayslipDetail_(container, employeeId){
+    container.innerHTML = '<div class="empty">Loading payslip…</div>';
     apiRead('getPayslip', { month: payrollMonth, employeeId: employeeId }).then(function(res){
-      if(!res || !res.ok){ box.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load payslip.')+'</div>'; return; }
-      box.innerHTML = payslipHtml_(res);
-      var printBtn = box.querySelector('.btn-print-payslip');
+      if(!res || !res.ok){ container.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load payslip.')+'</div>'; return; }
+      container.innerHTML = payslipDetailHtml_(res);
+      var printBtn = container.querySelector('.btn-print-payslip');
       if(printBtn) printBtn.addEventListener('click', function(){
         var doc = newPdfDoc_();
         if(!doc) return;
         buildPayslipPdfPage_(doc, res, true);
         doc.save('Payslip_'+pdfFilenameSafe_(res.employee.name)+'_'+pdfFilenameSafe_(res.month)+'.pdf');
       });
-    });
+    }).catch(function(e){ container.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
   }
 
   // "Download EMP201" — a printable version of the same summary + per-employee PAYE/
@@ -2721,72 +2765,122 @@
     doc.setTextColor(0);
   }
 
-  // On-screen quick-look only — the actual downloadable payslip is built separately by
-  // buildPayslipPdfPage_ as a real PDF, laid out to match the previous payroll system.
-  function payslipHtml_(ps){
+  // On-screen preview under the expanded Payslips-table row — mirrors the exact section
+  // layout of buildPayslipPdfPage_ (same tables, same order) so what's shown here matches
+  // the downloaded PDF, just as HTML instead of jsPDF/autoTable calls.
+  function payslipDetailHtml_(ps){
     var co = ps.company || {};
-    var e = ps.employee;
-    var c = ps.calc;
-    var taxableLabels = { Commission:'Commission', Bonus:'Bonus', Overtime:'Overtime' };
-    var earningsRows = '<tr><td>Basic salary</td><td class="num">'+money(c.baseAmount)+'</td></tr>';
-    Object.keys(taxableLabels).forEach(function(t){
-      var amt = c.adjustments[t];
-      if(amt){
-        var label = taxableLabels[t];
-        if(t==='Overtime' && c.overtimeHours) label += ' ('+c.overtimeHours+' hrs)';
-        earningsRows += '<tr><td>'+esc(label)+'</td><td class="num">'+money(amt)+'</td></tr>';
-      }
-    });
-    if(c.adjustments.Absent){
-      var absentLabel = 'Absent' + (c.absentDays ? ' ('+c.absentDays+' day'+(c.absentDays===1?'':'s')+')' : '');
-      earningsRows += '<tr><td>'+esc(absentLabel)+'</td><td class="num">-'+money(c.adjustments.Absent)+'</td></tr>';
-    }
-    if(c.adjustments.AdvanceGiven) earningsRows += '<tr><td>Advance paid out</td><td class="num">'+money(c.adjustments.AdvanceGiven)+'</td></tr>';
+    var e = ps.employee || {};
+    var c = ps.calc || {};
+    var adj = c.adjustments || {};
 
-    var deductionRows =
-      '<tr><td>PAYE</td><td class="num">'+money(c.paye)+'</td></tr>' +
-      '<tr><td>UIF</td><td class="num">'+money(c.uifEmployee)+'</td></tr>' +
-      (c.retirementDeduction ? '<tr><td>Retirement fund</td><td class="num">'+money(c.retirementDeduction)+'</td></tr>' : '') +
-      (c.medicalContribution ? '<tr><td>Medical aid</td><td class="num">'+money(c.medicalContribution)+'</td></tr>' : '') +
-      (c.adjustments.Deduction ? '<tr><td>Deduction</td><td class="num">'+money(c.adjustments.Deduction)+'</td></tr>' : '') +
-      (c.adjustments.AdvanceRepayment ? '<tr><td>Advance repayment</td><td class="num">'+money(c.adjustments.AdvanceRepayment)+'</td></tr>' : '');
+    var infoLeft = [
+      ['Emp No.', e.employeeNumber||'—'],
+      ['Job Title', e.jobTitle||'—'],
+      ['Date Engaged', e.dateEmployed||'—'],
+      ['ID No.', e.idNumber||'—'],
+      ['DOB', e.dateOfBirth||'—'],
+      ['Tax Ref No.', e.taxNumber||'—'],
+      ['Address', e.address||'—']
+    ];
+    var infoRight = [
+      ['Bank Name', e.bankName||'—'],
+      ['Branch Code', e.branchCode||'—'],
+      ['Account No.', e.accountNumber||'—'],
+      ['Pay Method', e.payMethod||'—'],
+      ['Pay Date', ps.payDate||'—'],
+      ['Payrun Period', (ps.payrunPeriod ? ps.payrunPeriod.from+' to '+ps.payrunPeriod.to : '—')],
+      ['Working Hrs/week', ps.workingHoursPerWeek!=null ? String(ps.workingHoursPerWeek) : '—'],
+      ['Annual Salary Package', money(ps.annualSalaryPackage)]
+    ];
+    var infoRowCount = Math.max(infoLeft.length, infoRight.length);
+    var infoRowsHtml = '';
+    for(var i=0;i<infoRowCount;i++){
+      var il = infoLeft[i]||['',''], ir = infoRight[i]||['',''];
+      infoRowsHtml += '<tr><td><strong>'+esc(il[0])+'</strong></td><td>'+esc(il[1])+'</td><td><strong>'+esc(ir[0])+'</strong></td><td>'+esc(ir[1])+'</td></tr>';
+    }
+
+    var earnings = [];
+    earnings.push(['Basic Salary', money(c.baseAmount)]);
+    if(adj.Commission) earnings.push(['Commission', money(adj.Commission)]);
+    if(adj.Bonus) earnings.push(['Bonus', money(adj.Bonus)]);
+    if(adj.Overtime) earnings.push(['Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''), money(adj.Overtime)]);
+    if(adj.Absent) earnings.push(['Absent'+(c.absentDays?' ('+c.absentDays+' days)':''), '-'+money(adj.Absent)]);
+    var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0);
+
+    var deductions = [];
+    deductions.push(['Paye As You Earn (PAYE)', money(c.paye)]);
+    deductions.push(['Unemployment Insurance Fund (UIF)', money(c.uifEmployee)]);
+    if(c.retirementDeduction) deductions.push(['Retirement fund', money(c.retirementDeduction)]);
+    if(c.medicalContribution) deductions.push(['Medical aid', money(c.medicalContribution)]);
+    if(adj.Deduction) deductions.push(['Deduction', money(adj.Deduction)]);
+    if(adj.AdvanceRepayment) deductions.push(['Advance repayment', money(adj.AdvanceRepayment)]);
+    var deductionsTotal = (c.paye||0) + (c.uifEmployee||0) + (c.retirementDeduction||0) + (c.medicalContribution||0) + (adj.Deduction||0) + (adj.AdvanceRepayment||0);
+
+    var remRowCount = Math.max(earnings.length, deductions.length);
+    var remRowsHtml = '';
+    for(var j=0;j<remRowCount;j++){
+      var el = earnings[j]||['',''], dl = deductions[j]||['',''];
+      remRowsHtml += '<tr><td>'+esc(el[0])+'</td><td class="num">'+esc(el[1])+'</td><td>'+esc(dl[0])+'</td><td class="num">'+esc(dl[1])+'</td></tr>';
+    }
+    remRowsHtml += '<tr><td><strong>Total</strong></td><td class="num"><strong>'+money(earningsTotal)+'</strong></td><td><strong>Total</strong></td><td class="num"><strong>'+money(deductionsTotal)+'</strong></td></tr>';
 
     var notesHtml = '';
     if(ps.adjustmentNotes && ps.adjustmentNotes.length){
-      notesHtml = '<div class="label section-label">Notes</div><table>' +
+      notesHtml = '<table><thead><tr><th>Notes</th><th></th></tr></thead><tbody>' +
         ps.adjustmentNotes.map(function(n){
           var qty = n.type==='Overtime' ? (n.hours ? ' ('+n.hours+'h)' : '') : (n.type==='Absent' ? (n.hours ? ' ('+n.hours+'d)' : '') : '');
-          return '<tr><td style="white-space:nowrap;">'+esc(n.type)+qty+'</td><td>'+esc(n.note)+'</td></tr>';
+          return '<tr><td><strong>'+esc(n.type)+qty+'</strong></td><td>'+esc(n.note)+'</td></tr>';
         }).join('') +
-        '</table>';
+        '</tbody></table>';
     }
 
-    return '<div class="payslip-box">' +
-      '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
-      '<div class="sub">'+esc(co.address||'')+'</div>' +
-      '<div class="sub">PAYE '+esc(co.payeNumber||'—')+' · UIF '+esc(co.uifNumber||'—')+' · SDL '+esc(co.sdlNumber||'—')+'</div>' +
-      '<div class="label section-label">Payslip'+(ps.isFinal?'':' (preview — payroll not yet run for this month)')+'</div>' +
-      '<div class="payslip-grid">' +
-        '<div><strong>'+esc(e.name)+'</strong></div><div></div>' +
-        '<div>Employee #: '+esc(e.employeeNumber||'—')+'</div><div>Job title: '+esc(e.jobTitle||'—')+'</div>' +
-        '<div>ID number: '+esc(e.idNumber||'—')+'</div><div>Tax number: '+esc(e.taxNumber||'—')+'</div>' +
-        '<div>Department: '+esc(e.department||'—')+'</div><div>Pay date: '+esc(ps.payDate||'—')+'</div>' +
-        '<div>Pay period: '+esc(ps.payrunPeriod.from)+' to '+esc(ps.payrunPeriod.to)+'</div><div>Tax year: '+esc(ps.taxYear)+'</div>' +
-        '<div>Bank: '+esc(e.bankName||'—')+'</div><div>Acc: '+esc(e.accountNumber||'—')+' ('+esc(e.branchCode||'—')+')</div>' +
+    var contrib = [['Skills Development Levy (SDL)', money(c.sdlEmployer)], ['Unemployment Insurance Fund (UIF)', money(c.uifEmployer)]];
+    var contribTotal = (c.sdlEmployer||0) + (c.uifEmployer||0);
+    var contribRowsHtml = contrib.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td class="num">'+esc(r[1])+'</td></tr>'; }).join('') +
+      '<tr><td><strong>Total</strong></td><td class="num"><strong>'+money(contribTotal)+'</strong></td></tr>';
+
+    var ytd = ps.ytdTotals || {};
+    var ytdRows = [];
+    ytdRows.push(['Basic Salary','3601', money(ytd.basicSalary)]);
+    if(ytd.commission) ytdRows.push(['Commission','3615', money(ytd.commission)]);
+    if(ytd.bonus) ytdRows.push(['Bonus','3605', money(ytd.bonus)]);
+    if(ytd.overtime) ytdRows.push(['Overtime','3607', money(ytd.overtime)]);
+    ytdRows.push(['Gross Employment Income (Taxable)','3699', money(ytd.grossTaxable)]);
+    ytdRows.push(['Paye As You Earn (PAYE)','4102', money(ytd.paye)]);
+    ytdRows.push(['Skills Development Levy (SDL)','4142', money(ytd.sdl)]);
+    ytdRows.push(['Unemployment Insurance Fund (UIF)','4141', money(ytd.uif)]);
+    var ytdRowsHtml = ytdRows.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td style="text-align:center;">'+esc(r[1])+'</td><td class="num">'+esc(r[2])+'</td></tr>'; }).join('');
+
+    var additions = [];
+    if(adj.AdvanceGiven) additions.push(['Advance paid out', money(adj.AdvanceGiven)]);
+    var additionsRowsHtml = additions.length
+      ? additions.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td class="num">'+esc(r[1])+'</td></tr>'; }).join('')
+      : '<tr><td>—</td><td class="num">—</td></tr>';
+
+    return '<div class="payslip-detail">' +
+      '<div class="ps-header">' +
+        '<h3>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h3>' +
+        (co.address ? '<p class="sub">'+esc(co.address)+'</p>' : '') +
+        '<p style="font-weight:700;margin:4px 0 2px;">Payslip'+(ps.isFinal?'':' (preview — payroll not yet run for this month)')+'</p>' +
+        '<p class="sub" style="margin:0 0 2px;">'+esc(pdfMonthLabel_(ps.month))+'</p>' +
+        '<p class="sub" style="font-size:11px;">PAYE '+esc(co.payeNumber||'—')+' · UIF '+esc(co.uifNumber||'—')+' · SDL '+esc(co.sdlNumber||'—')+'</p>' +
       '</div>' +
-      '<div class="label section-label">Earnings</div><table>'+earningsRows+'</table>' +
-      '<div class="label section-label">Deductions</div><table>'+deductionRows+'</table>' +
+      '<p class="ps-name">'+esc(e.name||'')+'</p>' +
+      '<table><thead><tr><th colspan="2">Employee Info</th><th colspan="2">Banking details</th></tr></thead><tbody>'+infoRowsHtml+'</tbody></table>' +
+      '<table><thead><tr><th colspan="2">Remuneration</th><th colspan="2">Deductions</th></tr><tr><th>Earnings</th><th class="num">Amount</th><th>Description</th><th class="num">Amount</th></tr></thead><tbody>'+remRowsHtml+'</tbody></table>' +
       notesHtml +
-      '<div class="field-row" style="justify-content:space-between;margin-top:14px;padding-top:10px;border-top:1px solid var(--line-strong);">' +
-        '<strong>Net pay</strong><strong class="num">'+money(c.net)+'</strong>' +
+      '<div class="ps-netpay"><span>Net Pay</span><span>'+money(c.net)+'</span></div>' +
+      '<div class="ps-cols">' +
+        '<div>' +
+          '<table><thead><tr><th>Company Contributions</th><th class="num">Amount</th></tr></thead><tbody>'+contribRowsHtml+'</tbody></table>' +
+          '<table><thead><tr><th>Addition Payments / Contributions</th><th class="num">Amount</th></tr></thead><tbody>'+additionsRowsHtml+'</tbody></table>' +
+        '</div>' +
+        '<div>' +
+          '<table><thead><tr><th>Description</th><th>Sars Code</th><th class="num">Amount</th></tr></thead><tbody>'+ytdRowsHtml+'</tbody></table>' +
+        '</div>' +
       '</div>' +
-      '<div class="label section-label">Year to date ('+esc(ps.taxYear)+')</div>' +
-      '<div class="payslip-grid">' +
-        '<div>Basic salary: '+money(ps.ytdTotals.basicSalary)+'</div><div>Overtime: '+money(ps.ytdTotals.overtime)+'</div>' +
-        '<div>Gross taxable: '+money(ps.ytdTotals.grossTaxable)+'</div><div>UIF: '+money(ps.ytdTotals.uif)+'</div>' +
-        '<div>SDL: '+money(ps.ytdTotals.sdl)+'</div><div></div>' +
-      '</div>' +
-      '<div class="field-row" style="margin-top:16px;"><button class="btn btn-print-payslip">Download PDF</button></div>' +
+      '<div class="field-row" style="margin-top:4px;"><button class="btn btn-print-payslip">Download PDF</button></div>' +
       '</div>';
   }
 
