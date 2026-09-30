@@ -2973,12 +2973,12 @@
     var body = document.getElementById('payroll-body');
     stats.innerHTML = '';
     body.innerHTML =
-      '<div class="panel" id="reports-irp5-panel"><div class="empty">Loading…</div></div>' +
       '<div class="panel" id="reports-emp201-panel"><div class="empty">Loading…</div></div>' +
-      '<div class="panel" id="reports-payslips-panel"><div class="empty">Loading…</div></div>';
-    loadReportsIrp5_();
+      '<div class="panel" id="reports-payslips-panel"><div class="empty">Loading…</div></div>' +
+      '<div class="panel" id="reports-irp5-panel"><div class="empty">Loading…</div></div>';
     loadReportsEmp201_();
     loadReportsPayslips_();
+    loadReportsIrp5_();
   }
 
   function loadReportsIrp5_(){
