@@ -2725,13 +2725,23 @@
     });
     y = doc.lastAutoTable.finalY + 4;
 
+    // Adjustment notes are shown inline next to the line they belong to ("Deduction -
+    // Uniform") rather than in a separate table, so it's obvious at a glance what each
+    // amount was for — collapsed here into one string per type (joined if more than one
+    // note landed on the same type in the same month).
+    var notesByType = {};
+    (ps.adjustmentNotes||[]).forEach(function(n){
+      notesByType[n.type] = notesByType[n.type] ? notesByType[n.type]+'; '+n.note : n.note;
+    });
+    function withNote_(label, type){ return notesByType[type] ? label+' - '+notesByType[type] : label; }
+
     var adj = c.adjustments || {};
     var earnings = [];
     earnings.push(['Basic Salary', money(c.baseAmount)]);
-    if(adj.Commission) earnings.push(['Commission', money(adj.Commission)]);
-    if(adj.Bonus) earnings.push(['Bonus', money(adj.Bonus)]);
-    if(adj.Overtime) earnings.push(['Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''), money(adj.Overtime)]);
-    if(adj.Absent) earnings.push(['Absent'+(c.absentDays?' ('+c.absentDays+' days)':''), '-'+money(adj.Absent)]);
+    if(adj.Commission) earnings.push([withNote_('Commission','Commission'), money(adj.Commission)]);
+    if(adj.Bonus) earnings.push([withNote_('Bonus','Bonus'), money(adj.Bonus)]);
+    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''),'Overtime'), money(adj.Overtime)]);
+    if(adj.Absent) earnings.push([withNote_('Absent'+(c.absentDays?' ('+c.absentDays+' days)':''),'Absent'), '-'+money(adj.Absent)]);
     var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0);
 
     var deductions = [];
@@ -2739,8 +2749,8 @@
     deductions.push(['Unemployment Insurance Fund (UIF)', money(c.uifEmployee)]);
     if(c.retirementDeduction) deductions.push(['Retirement fund', money(c.retirementDeduction)]);
     if(c.medicalContribution) deductions.push(['Medical aid', money(c.medicalContribution)]);
-    if(adj.Deduction) deductions.push(['Deduction', money(adj.Deduction)]);
-    if(adj.AdvanceRepayment) deductions.push(['Advance repayment', money(adj.AdvanceRepayment)]);
+    if(adj.Deduction) deductions.push([withNote_('Deduction','Deduction'), money(adj.Deduction)]);
+    if(adj.AdvanceRepayment) deductions.push([withNote_('Advance repayment','AdvanceRepayment'), money(adj.AdvanceRepayment)]);
     var deductionsTotal = (c.paye||0) + (c.uifEmployee||0) + (c.retirementDeduction||0) + (c.medicalContribution||0) + (adj.Deduction||0) + (adj.AdvanceRepayment||0);
 
     var remRowCount = Math.max(earnings.length, deductions.length);
@@ -2765,21 +2775,6 @@
       columnStyles:{0:{cellWidth:52},1:{cellWidth:39,halign:'right'},2:{cellWidth:52},3:{cellWidth:39,halign:'right'}}
     });
     y = doc.lastAutoTable.finalY + 3;
-
-    if(ps.adjustmentNotes && ps.adjustmentNotes.length){
-      doc.autoTable({
-        startY:y, margin:{left:M,right:M}, theme:'grid',
-        head:[['Notes','']],
-        body: ps.adjustmentNotes.map(function(n){
-          var qty = n.type==='Overtime'&&n.hours ? ' ('+n.hours+'h)' : (n.type==='Absent'&&n.hours ? ' ('+n.hours+'d)' : '');
-          return [n.type+qty, n.note];
-        }),
-        styles:{fontSize:8, cellPadding:1.3, lineColor:[210,210,210]},
-        headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
-        columnStyles:{0:{cellWidth:45,fontStyle:'bold'}}
-      });
-      y = doc.lastAutoTable.finalY + 3;
-    }
 
     doc.autoTable({
       startY:y, margin:{left:M,right:M}, theme:'grid',
@@ -2827,7 +2822,7 @@
     });
 
     var additions = [];
-    if(adj.AdvanceGiven) additions.push(['Advance paid out', money(adj.AdvanceGiven)]);
+    if(adj.AdvanceGiven) additions.push([withNote_('Advance paid out','AdvanceGiven'), money(adj.AdvanceGiven)]);
     doc.autoTable({
       startY:leftFinalY+2, margin:{left:leftX}, tableWidth:halfWidth, theme:'grid',
       head:[['Addition Payments / Contributions','Amount']],
@@ -2878,12 +2873,21 @@
       infoRowsHtml += '<tr><td><strong>'+esc(il[0])+'</strong></td><td>'+esc(il[1])+'</td><td><strong>'+esc(ir[0])+'</strong></td><td>'+esc(ir[1])+'</td></tr>';
     }
 
+    // Adjustment notes shown inline next to the line they belong to ("Deduction -
+    // Uniform") rather than in a separate table — collapsed here into one string per
+    // type (joined if more than one note landed on the same type in the same month).
+    var notesByType = {};
+    (ps.adjustmentNotes||[]).forEach(function(n){
+      notesByType[n.type] = notesByType[n.type] ? notesByType[n.type]+'; '+n.note : n.note;
+    });
+    function withNote_(label, type){ return notesByType[type] ? label+' - '+notesByType[type] : label; }
+
     var earnings = [];
     earnings.push(['Basic Salary', money(c.baseAmount)]);
-    if(adj.Commission) earnings.push(['Commission', money(adj.Commission)]);
-    if(adj.Bonus) earnings.push(['Bonus', money(adj.Bonus)]);
-    if(adj.Overtime) earnings.push(['Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''), money(adj.Overtime)]);
-    if(adj.Absent) earnings.push(['Absent'+(c.absentDays?' ('+c.absentDays+' days)':''), '-'+money(adj.Absent)]);
+    if(adj.Commission) earnings.push([withNote_('Commission','Commission'), money(adj.Commission)]);
+    if(adj.Bonus) earnings.push([withNote_('Bonus','Bonus'), money(adj.Bonus)]);
+    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''),'Overtime'), money(adj.Overtime)]);
+    if(adj.Absent) earnings.push([withNote_('Absent'+(c.absentDays?' ('+c.absentDays+' days)':''),'Absent'), '-'+money(adj.Absent)]);
     var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0);
 
     var deductions = [];
@@ -2891,8 +2895,8 @@
     deductions.push(['Unemployment Insurance Fund (UIF)', money(c.uifEmployee)]);
     if(c.retirementDeduction) deductions.push(['Retirement fund', money(c.retirementDeduction)]);
     if(c.medicalContribution) deductions.push(['Medical aid', money(c.medicalContribution)]);
-    if(adj.Deduction) deductions.push(['Deduction', money(adj.Deduction)]);
-    if(adj.AdvanceRepayment) deductions.push(['Advance repayment', money(adj.AdvanceRepayment)]);
+    if(adj.Deduction) deductions.push([withNote_('Deduction','Deduction'), money(adj.Deduction)]);
+    if(adj.AdvanceRepayment) deductions.push([withNote_('Advance repayment','AdvanceRepayment'), money(adj.AdvanceRepayment)]);
     var deductionsTotal = (c.paye||0) + (c.uifEmployee||0) + (c.retirementDeduction||0) + (c.medicalContribution||0) + (adj.Deduction||0) + (adj.AdvanceRepayment||0);
 
     var remRowCount = Math.max(earnings.length, deductions.length);
@@ -2902,16 +2906,6 @@
       remRowsHtml += '<tr><td>'+esc(el[0])+'</td><td class="num">'+esc(el[1])+'</td><td>'+esc(dl[0])+'</td><td class="num">'+esc(dl[1])+'</td></tr>';
     }
     remRowsHtml += '<tr><td><strong>Total</strong></td><td class="num"><strong>'+money(earningsTotal)+'</strong></td><td><strong>Total</strong></td><td class="num"><strong>'+money(deductionsTotal)+'</strong></td></tr>';
-
-    var notesHtml = '';
-    if(ps.adjustmentNotes && ps.adjustmentNotes.length){
-      notesHtml = '<table><thead><tr><th>Notes</th><th></th></tr></thead><tbody>' +
-        ps.adjustmentNotes.map(function(n){
-          var qty = n.type==='Overtime' ? (n.hours ? ' ('+n.hours+'h)' : '') : (n.type==='Absent' ? (n.hours ? ' ('+n.hours+'d)' : '') : '');
-          return '<tr><td><strong>'+esc(n.type)+qty+'</strong></td><td>'+esc(n.note)+'</td></tr>';
-        }).join('') +
-        '</tbody></table>';
-    }
 
     var contrib = [['Skills Development Levy (SDL)', money(c.sdlEmployer)], ['Unemployment Insurance Fund (UIF)', money(c.uifEmployer)]];
     var contribTotal = (c.sdlEmployer||0) + (c.uifEmployer||0);
@@ -2931,7 +2925,7 @@
     var ytdRowsHtml = ytdRows.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td style="text-align:center;">'+esc(r[1])+'</td><td class="num">'+esc(r[2])+'</td></tr>'; }).join('');
 
     var additions = [];
-    if(adj.AdvanceGiven) additions.push(['Advance paid out', money(adj.AdvanceGiven)]);
+    if(adj.AdvanceGiven) additions.push([withNote_('Advance paid out','AdvanceGiven'), money(adj.AdvanceGiven)]);
     var additionsRowsHtml = additions.length
       ? additions.map(function(r){ return '<tr><td>'+esc(r[0])+'</td><td class="num">'+esc(r[1])+'</td></tr>'; }).join('')
       : '<tr><td>—</td><td class="num">—</td></tr>';
@@ -2947,7 +2941,6 @@
       '<p class="ps-name">'+esc(e.name||'')+'</p>' +
       '<table><thead><tr><th colspan="2">Employee Info</th><th colspan="2">Banking details</th></tr></thead><tbody>'+infoRowsHtml+'</tbody></table>' +
       '<table><thead><tr><th colspan="2">Remuneration</th><th colspan="2">Deductions</th></tr><tr><th>Earnings</th><th class="num">Amount</th><th>Description</th><th class="num">Amount</th></tr></thead><tbody>'+remRowsHtml+'</tbody></table>' +
-      notesHtml +
       '<div class="ps-netpay"><span>Net Pay</span><span>'+money(c.net)+'</span></div>' +
       '<div class="ps-cols">' +
         '<div>' +
