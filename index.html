@@ -208,34 +208,13 @@
   tr.roster-row, tr.adj-emp-row{ cursor:pointer; }
   tr.roster-row:hover td, tr.adj-emp-row:hover td{ background:var(--accent-soft); }
   .py-tab.primary{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  /* On-screen quick-look preview only now — actual downloads are real PDFs built with
+     jsPDF/autoTable (see buildPayslipPdfPage_ etc.), not this markup or window.print(). */
   .payslip-box{ border:1px solid var(--line-strong); background:var(--paper-raised); padding:22px 26px; max-width:640px; }
   .payslip-box h2{ font-size:18px; margin:0 0 2px; text-transform:none; }
   .payslip-box .payslip-grid{ display:grid; grid-template-columns:1fr 1fr; gap:2px 18px; font-size:12.5px; margin:14px 0; }
   .payslip-box table{ margin-top:6px; }
   .payslip-box .section-label{ margin-top:16px; }
-
-  /* Generic printable-report styling, reused by the EMP201 report and the payments
-     report (the payslip keeps its own .payslip-box look above). */
-  .report-box{ border:1px solid var(--line-strong); background:var(--paper-raised); padding:22px 26px; }
-  .report-box h2{ font-size:18px; margin:0 0 2px; text-transform:none; }
-  .report-box .section-label{ margin-top:16px; }
-  .report-box table{ width:100%; margin-top:6px; border-collapse:collapse; }
-  .report-box table th, .report-box table td{ padding:4px 6px; }
-  .report-box table tfoot td{ font-weight:700; border-top:1px solid var(--line-strong); }
-
-  /* One payslip per printed page when downloading several at once. */
-  .payslip-page-break{ page-break-after:always; break-after:page; }
-  .payslip-page-break:last-child{ page-break-after:auto; break-after:auto; }
-
-  /* .print-area marks whichever block should be the entire printed page — the payslip
-     view, the EMP201 report, the payments report, or a multi-payslip run of them — so
-     everything else on screen (sidebar, tabs, buttons) disappears from the printout/PDF. */
-  @media print{
-    body *{ visibility:hidden; }
-    .print-area, .print-area *{ visibility:visible; }
-    .print-area{ position:absolute; top:0; left:0; border:none; }
-    .no-print{ display:none !important; }
-  }
 
   .empty{ color:var(--ink-soft); font-style:italic; padding:10px 2px; }
   .status-msg{ padding:12px 14px; border:1px solid var(--line); background:var(--paper); font-size:13px; margin-bottom:14px; }
@@ -353,7 +332,6 @@
 
     <div id="payroll-stats" class="stats" style="margin-top:16px;"></div>
     <div id="payroll-body" style="margin-top:20px;"></div>
-    <div id="bulk-print-view" style="display:none;"></div>
   </section>
 
   <section class="view" id="view-settings" hidden>
@@ -435,6 +413,8 @@
 </main>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -550,26 +530,27 @@
     return promise;
   }
 
-  // Puts `html` into the hidden #bulk-print-view container and prints it — used for the
-  // EMP201 report, the payments report, and "download all payslips", all of which build
-  // their own printable HTML then hand it here rather than each reimplementing the
-  // print/cleanup dance. window.print() blocks script execution until the dialog closes
-  // in most browsers, so the reset below runs right away there; 'afterprint' covers the
-  // rest, and calling reset() twice is harmless.
-  function printBulk_(html){
-    var box = document.getElementById('bulk-print-view');
-    box.innerHTML = html;
-    box.classList.add('print-area');
-    box.style.display = 'block';
-    function reset(){
-      box.style.display = 'none';
-      box.classList.remove('print-area');
-      box.innerHTML = '';
-      window.removeEventListener('afterprint', reset);
+  // All PDF downloads (payslip, EMP201, payments report) are built with jsPDF + the
+  // autoTable plugin (loaded via <script> tags above) and saved directly as a file —
+  // no print dialog involved. newPdfDoc_ centralizes the "is the library even loaded"
+  // check, since these load from a CDN and a flaky connection could leave them missing.
+  function newPdfDoc_(){
+    if(!window.jspdf || !window.jspdf.jsPDF){
+      alert('The PDF library hasn\'t finished loading (or couldn\'t load) — check your internet connection and try again in a moment.');
+      return null;
     }
-    window.addEventListener('afterprint', reset);
-    window.print();
-    reset();
+    return new window.jspdf.jsPDF({ unit:'mm', format:'a4' });
+  }
+
+  function pdfFilenameSafe_(s){
+    return String(s||'').replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '') || 'file';
+  }
+
+  function pdfMonthLabel_(monthStr){
+    var names = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+    var parts = String(monthStr||'').split('-');
+    var y = Number(parts[0]), m = Number(parts[1]);
+    return (y && m) ? (names[m-1]+' '+y) : String(monthStr||'');
   }
 
   // ================= LOGIN GATE =================
@@ -2401,19 +2382,29 @@
     });
 
     var emp201Btn = document.getElementById('btn-download-emp201');
-    if(emp201Btn) emp201Btn.addEventListener('click', function(){ printBulk_(emp201ReportHtml_(payrollRunData)); });
+    if(emp201Btn) emp201Btn.addEventListener('click', function(){
+      var doc = newPdfDoc_();
+      if(!doc) return;
+      buildEmp201Pdf_(doc, payrollRunData);
+      doc.save('EMP201_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
+    });
 
     var paymentsBtn = document.getElementById('btn-download-payments-report');
-    if(paymentsBtn) paymentsBtn.addEventListener('click', function(){ printBulk_(paymentsReportHtml_(payrollRunData)); });
+    if(paymentsBtn) paymentsBtn.addEventListener('click', function(){
+      var doc = newPdfDoc_();
+      if(!doc) return;
+      buildPaymentsReportPdf_(doc, payrollRunData);
+      doc.save('Payments_report_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
+    });
 
     var allPayslipsBtn = document.getElementById('btn-download-all-payslips');
     if(allPayslipsBtn) allPayslipsBtn.addEventListener('click', function(){
       withBusy_(allPayslipsBtn, apiRead('getAllPayslips', { month: payrollMonth }), 'Preparing…').then(function(res){
         if(!res || !res.ok){ alert((res && res.error) || 'Could not load payslips.'); return; }
-        var html = res.payslips.map(function(ps){
-          return '<div class="payslip-page-break">'+payslipHtml_(ps, {embed:true})+'</div>';
-        }).join('');
-        printBulk_(html);
+        var doc = newPdfDoc_();
+        if(!doc) return;
+        res.payslips.forEach(function(ps, i){ buildPayslipPdfPage_(doc, ps, i===0); });
+        doc.save('Payslips_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
       });
     });
 
@@ -2429,72 +2420,310 @@
       if(!res || !res.ok){ box.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not load payslip.')+'</div>'; return; }
       box.innerHTML = payslipHtml_(res);
       var printBtn = box.querySelector('.btn-print-payslip');
-      if(printBtn) printBtn.addEventListener('click', function(){ window.print(); });
+      if(printBtn) printBtn.addEventListener('click', function(){
+        var doc = newPdfDoc_();
+        if(!doc) return;
+        buildPayslipPdfPage_(doc, res, true);
+        doc.save('Payslip_'+pdfFilenameSafe_(res.employee.name)+'_'+pdfFilenameSafe_(res.month)+'.pdf');
+      });
     });
   }
 
   // "Download EMP201" — a printable version of the same summary + per-employee PAYE/
   // SDL/UIF breakdown shown on screen, laid out to match what SARS/most payroll software
   // calls an EMP201 reconciliation, for filing or for checking against another system.
-  function emp201ReportHtml_(run){
+  // "Download EMP201" — a real PDF file (jsPDF + autoTable), matching the summary +
+  // per-employee PAYE/SDL/UIF breakdown shown on screen, for filing or for checking
+  // against another system.
+  function buildEmp201Pdf_(doc, run){
+    var M = 14;
+    var pageWidth = doc.internal.pageSize.getWidth();
     var co = run.company || {};
     var emp201 = run.emp201;
-    var rows = run.payslips.map(function(ps){
-      var uifTotal = round2Js_((Number(ps.uifEmployee)||0) + (Number(ps.uifEmployer)||0));
-      return '<tr><td>'+esc(ps.employeeNumber||'—')+'</td><td>'+esc(ps.name)+'</td>' +
-        '<td class="num">'+money(ps.gross)+'</td><td class="num">'+money(ps.paye)+'</td>' +
-        '<td class="num">'+money(ps.sdlEmployer)+'</td><td class="num">'+money(uifTotal)+'</td></tr>';
-    }).join('');
-    return '<div class="report-box">' +
-      '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
-      '<div class="sub">'+esc(co.address||'')+'</div>' +
-      '<div class="sub">PAYE '+esc(co.payeNumber||'—')+' · UIF '+esc(co.uifNumber||'—')+' · SDL '+esc(co.sdlNumber||'—')+'</div>' +
-      '<div class="label section-label">EMP201 — for payment period '+esc(run.month)+'</div>' +
-      '<table><tbody>' +
-        '<tr><td>Gross payroll</td><td class="num">'+money(emp201.grossPayroll)+'</td></tr>' +
-        '<tr><td>PAYE</td><td class="num">'+money(emp201.paye)+'</td></tr>' +
-        '<tr><td>UIF — employee</td><td class="num">'+money(emp201.uifEmployee)+'</td></tr>' +
-        '<tr><td>UIF — employer</td><td class="num">'+money(emp201.uifEmployer)+'</td></tr>' +
-        '<tr><td>UIF — total</td><td class="num">'+money(emp201.uifTotal)+'</td></tr>' +
-        '<tr><td>SDL</td><td class="num">'+money(emp201.sdl)+'</td></tr>' +
-        '<tr><td>ETI credit</td><td class="num">-'+money(emp201.eti)+'</td></tr>' +
-      '</tbody></table>' +
-      '<div class="field-row" style="justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--line-strong);">' +
-        '<strong>Net due to SARS</strong><strong class="num">'+money(emp201.netToSars)+'</strong>' +
-      '</div>' +
-      '<div class="label section-label">By employee</div>' +
-      '<table><thead><tr><th>Emp #</th><th>Name</th><th class="num">Gross</th><th class="num">PAYE</th><th class="num">SDL</th><th class="num">UIF</th></tr></thead>' +
-      '<tbody>'+rows+'</tbody>' +
-      '<tfoot><tr><td colspan="2">Total</td><td class="num">'+money(emp201.grossPayroll)+'</td><td class="num">'+money(emp201.paye)+'</td><td class="num">'+money(emp201.sdl)+'</td><td class="num">'+money(emp201.uifTotal)+'</td></tr></tfoot>' +
-      '</table>' +
-    '</div>';
+    var y = M;
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(15);
+    doc.text(co.name || '(Company details not set)', pageWidth/2, y, {align:'center'});
+    y += 5.5;
+    if(co.address){ doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.text(co.address, pageWidth/2, y, {align:'center'}); y += 4.2; }
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text('EMP201 — for payment period '+pdfMonthLabel_(run.month), pageWidth/2, y, {align:'center'});
+    y += 5;
+    doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(110);
+    doc.text('PAYE '+(co.payeNumber||'—')+'   ·   UIF '+(co.uifNumber||'—')+'   ·   SDL '+(co.sdlNumber||'—'), pageWidth/2, y, {align:'center'});
+    doc.setTextColor(0);
+    y += 8;
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      body:[
+        ['Gross payroll', money(emp201.grossPayroll)],
+        ['PAYE', money(emp201.paye)],
+        ['UIF — employee', money(emp201.uifEmployee)],
+        ['UIF — employer', money(emp201.uifEmployer)],
+        ['UIF — total', money(emp201.uifTotal)],
+        ['SDL', money(emp201.sdl)],
+        ['ETI credit', '-'+money(emp201.eti)],
+        [{content:'Net due to SARS', styles:{fontStyle:'bold'}}, {content:money(emp201.netToSars), styles:{fontStyle:'bold'}}]
+      ],
+      styles:{fontSize:9, cellPadding:1.6, lineColor:[210,210,210]},
+      columnStyles:{0:{cellWidth:100},1:{halign:'right'}}
+    });
+    y = doc.lastAutoTable.finalY + 6;
+
+    var rows = (run.payslips||[]).map(function(ps){
+      var uifTotal = (Number(ps.uifEmployee)||0) + (Number(ps.uifEmployer)||0);
+      return [ps.employeeNumber||'—', ps.name, money(ps.gross), money(ps.paye), money(ps.sdlEmployer), money(uifTotal)];
+    });
+    rows.push([
+      {content:'Total', colSpan:2, styles:{fontStyle:'bold'}},
+      {content:money(emp201.grossPayroll), styles:{fontStyle:'bold'}},
+      {content:money(emp201.paye), styles:{fontStyle:'bold'}},
+      {content:money(emp201.sdl), styles:{fontStyle:'bold'}},
+      {content:money(emp201.uifTotal), styles:{fontStyle:'bold'}}
+    ]);
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      head:[['Emp #','Name','Gross','PAYE','SDL','UIF']],
+      body: rows,
+      styles:{fontSize:8, cellPadding:1.4, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{2:{halign:'right'},3:{halign:'right'},4:{halign:'right'},5:{halign:'right'}}
+    });
   }
 
   // "Payments report" — who gets paid what, for handing to whoever runs the actual bank
   // transfers each month.
-  function paymentsReportHtml_(run){
+  function buildPaymentsReportPdf_(doc, run){
+    var M = 14;
+    var pageWidth = doc.internal.pageSize.getWidth();
     var co = run.company || {};
-    var rows = run.payslips.map(function(ps){
-      return '<tr><td>'+esc(ps.employeeNumber||'—')+'</td><td>'+esc(ps.name)+'</td><td>'+esc(ps.department||'')+'</td><td class="num">'+money(ps.net)+'</td></tr>';
-    }).join('');
-    var total = run.payslips.reduce(function(sum, ps){ return sum + (Number(ps.net)||0); }, 0);
-    return '<div class="report-box">' +
-      '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
-      '<div class="label section-label">Payments report — '+esc(run.month)+'</div>' +
-      '<div class="sub" style="margin-bottom:10px;">Net pay due to each employee for '+esc(run.month)+'.</div>' +
-      '<table><thead><tr><th>Emp #</th><th>Name</th><th>Department</th><th class="num">Net pay</th></tr></thead>' +
-      '<tbody>'+rows+'</tbody>' +
-      '<tfoot><tr><td colspan="3">Total</td><td class="num">'+money(total)+'</td></tr></tfoot>' +
-      '</table>' +
-    '</div>';
+    var y = M;
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(15);
+    doc.text(co.name || '(Company details not set)', pageWidth/2, y, {align:'center'});
+    y += 5.5;
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text('Payments report — '+pdfMonthLabel_(run.month), pageWidth/2, y, {align:'center'});
+    y += 4.5;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(110);
+    doc.text('Net pay due to each employee for '+pdfMonthLabel_(run.month)+'.', pageWidth/2, y, {align:'center'});
+    doc.setTextColor(0);
+    y += 7;
+
+    var total = 0;
+    var rows = (run.payslips||[]).map(function(ps){
+      total += Number(ps.net)||0;
+      return [ps.employeeNumber||'—', ps.name, ps.department||'', money(ps.net)];
+    });
+    rows.push([{content:'Total', colSpan:3, styles:{fontStyle:'bold'}}, {content:money(total), styles:{fontStyle:'bold'}}]);
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      head:[['Emp #','Name','Department','Net pay']],
+      body: rows,
+      styles:{fontSize:9, cellPadding:1.6, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{3:{halign:'right'}}
+    });
   }
 
-  function payslipHtml_(ps, opts){
-    // opts.embed: true when this payslip is one of several being combined for the
-    // "Download all payslips" printout — in that case the OUTER wrapper gets print-area
-    // (so it's the one thing made visible/positioned for print), not every payslip
-    // inside it, or they'd all print stacked on top of each other at position:absolute.
-    var embed = !!(opts && opts.embed);
+  // The actual downloadable payslip — a real PDF (jsPDF + autoTable), laid out to match
+  // the schedule-of-remuneration style of the previous payroll system (Employee Info /
+  // Banking details, Remuneration / Deductions, Net Pay, Company Contributions / Year to
+  // Date Totals with SARS source codes, Addition Payments for a cash advance paid out).
+  // `isFirst` is false when this is being appended to a doc that already has pages, for
+  // the "download all payslips" bundle.
+  function buildPayslipPdfPage_(doc, ps, isFirst){
+    if(!isFirst) doc.addPage();
+    var M = 14;
+    var pageWidth = doc.internal.pageSize.getWidth();
+    var contentWidth = pageWidth - M*2;
+    var co = ps.company || {}, e = ps.employee || {}, c = ps.calc || {};
+    var y = M;
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(15);
+    doc.text(co.name || '(Company details not set)', pageWidth/2, y, {align:'center'});
+    y += 5.5;
+    if(co.address){
+      doc.setFont('helvetica','normal'); doc.setFontSize(9);
+      doc.text(co.address, pageWidth/2, y, {align:'center'});
+      y += 4.2;
+    }
+    doc.setFont('helvetica','bold'); doc.setFontSize(11);
+    doc.text('Payslip', pageWidth/2, y, {align:'center'});
+    y += 4.6;
+    doc.setFont('helvetica','normal'); doc.setFontSize(9);
+    doc.text(pdfMonthLabel_(ps.month), pageWidth/2, y, {align:'center'});
+    y += 4.6;
+    doc.setFontSize(8); doc.setTextColor(110);
+    doc.text('PAYE '+(co.payeNumber||'—')+'   ·   UIF '+(co.uifNumber||'—')+'   ·   SDL '+(co.sdlNumber||'—'), pageWidth/2, y, {align:'center'});
+    doc.setTextColor(0);
+    y += 7.5;
+
+    doc.setFont('helvetica','bold'); doc.setFontSize(12);
+    doc.text(e.name||'', M, y);
+    y += 3;
+
+    var infoLeft = [
+      ['Emp No.', e.employeeNumber||'—'],
+      ['Job Title', e.jobTitle||'—'],
+      ['Date Engaged', e.dateEmployed||'—'],
+      ['ID No.', e.idNumber||'—'],
+      ['DOB', e.dateOfBirth||'—'],
+      ['Tax Ref No.', e.taxNumber||'—'],
+      ['Address', e.address||'—']
+    ];
+    var infoRight = [
+      ['Bank Name', e.bankName||'—'],
+      ['Branch Code', e.branchCode||'—'],
+      ['Account No.', e.accountNumber||'—'],
+      ['Pay Method', e.payMethod||'—'],
+      ['Pay Date', ps.payDate||'—'],
+      ['Payrun Period', (ps.payrunPeriod ? ps.payrunPeriod.from+' to '+ps.payrunPeriod.to : '—')],
+      ['Working Hrs/week', ps.workingHoursPerWeek!=null ? String(ps.workingHoursPerWeek) : '—'],
+      ['Annual Salary Package', money(ps.annualSalaryPackage)]
+    ];
+    var infoRowCount = Math.max(infoLeft.length, infoRight.length);
+    var infoRows = [];
+    for(var i=0;i<infoRowCount;i++){
+      var il = infoLeft[i]||['',''], ir = infoRight[i]||['',''];
+      infoRows.push([il[0],il[1],ir[0],ir[1]]);
+    }
+    doc.autoTable({
+      startY: y,
+      margin: {left:M, right:M},
+      theme: 'grid',
+      head: [[{content:'Employee Info', colSpan:2},{content:'Banking details', colSpan:2}]],
+      body: infoRows,
+      styles: {fontSize:8, cellPadding:1.3, lineColor:[210,210,210]},
+      headStyles: {fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles: {0:{fontStyle:'bold', cellWidth:32},1:{cellWidth:59},2:{fontStyle:'bold', cellWidth:32},3:{cellWidth:59}}
+    });
+    y = doc.lastAutoTable.finalY + 4;
+
+    var adj = c.adjustments || {};
+    var earnings = [];
+    earnings.push(['Basic Salary', money(c.baseAmount)]);
+    if(adj.Commission) earnings.push(['Commission', money(adj.Commission)]);
+    if(adj.Bonus) earnings.push(['Bonus', money(adj.Bonus)]);
+    if(adj.Overtime) earnings.push(['Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''), money(adj.Overtime)]);
+    if(adj.Absent) earnings.push(['Absent'+(c.absentDays?' ('+c.absentDays+' days)':''), '-'+money(adj.Absent)]);
+    var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0);
+
+    var deductions = [];
+    deductions.push(['Paye As You Earn (PAYE)', money(c.paye)]);
+    deductions.push(['Unemployment Insurance Fund (UIF)', money(c.uifEmployee)]);
+    if(c.retirementDeduction) deductions.push(['Retirement fund', money(c.retirementDeduction)]);
+    if(c.medicalContribution) deductions.push(['Medical aid', money(c.medicalContribution)]);
+    if(adj.Deduction) deductions.push(['Deduction', money(adj.Deduction)]);
+    if(adj.AdvanceRepayment) deductions.push(['Advance repayment', money(adj.AdvanceRepayment)]);
+    var deductionsTotal = (c.paye||0) + (c.uifEmployee||0) + (c.retirementDeduction||0) + (c.medicalContribution||0) + (adj.Deduction||0) + (adj.AdvanceRepayment||0);
+
+    var remRowCount = Math.max(earnings.length, deductions.length);
+    var remRows = [];
+    for(var j=0;j<remRowCount;j++){
+      var el = earnings[j]||['',''], dl = deductions[j]||['',''];
+      remRows.push([el[0],el[1],dl[0],dl[1]]);
+    }
+    remRows.push([
+      {content:'Total',styles:{fontStyle:'bold'}}, {content:money(earningsTotal),styles:{fontStyle:'bold'}},
+      {content:'Total',styles:{fontStyle:'bold'}}, {content:money(deductionsTotal),styles:{fontStyle:'bold'}}
+    ]);
+
+    doc.autoTable({
+      startY: y,
+      margin: {left:M,right:M},
+      theme:'grid',
+      head:[[{content:'Remuneration',colSpan:2},{content:'Deductions',colSpan:2}],['Earnings','Amount','Description','Amount']],
+      body: remRows,
+      styles:{fontSize:8, cellPadding:1.3, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{0:{cellWidth:52},1:{cellWidth:39,halign:'right'},2:{cellWidth:52},3:{cellWidth:39,halign:'right'}}
+    });
+    y = doc.lastAutoTable.finalY + 3;
+
+    if(ps.adjustmentNotes && ps.adjustmentNotes.length){
+      doc.autoTable({
+        startY:y, margin:{left:M,right:M}, theme:'grid',
+        head:[['Notes','']],
+        body: ps.adjustmentNotes.map(function(n){
+          var qty = n.type==='Overtime'&&n.hours ? ' ('+n.hours+'h)' : (n.type==='Absent'&&n.hours ? ' ('+n.hours+'d)' : '');
+          return [n.type+qty, n.note];
+        }),
+        styles:{fontSize:8, cellPadding:1.3, lineColor:[210,210,210]},
+        headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+        columnStyles:{0:{cellWidth:45,fontStyle:'bold'}}
+      });
+      y = doc.lastAutoTable.finalY + 3;
+    }
+
+    doc.autoTable({
+      startY:y, margin:{left:M,right:M}, theme:'grid',
+      body:[[{content:'Net Pay',styles:{fontStyle:'bold',fontSize:11}},{content:money(c.net),styles:{fontStyle:'bold',fontSize:11,halign:'right'}}]],
+      styles:{fillColor:[245,245,245], cellPadding:2.4, lineColor:[210,210,210]}
+    });
+    y = doc.lastAutoTable.finalY + 4;
+
+    var gutter = 4;
+    var halfWidth = (contentWidth - gutter) / 2;
+    var leftX = M, rightX = M + halfWidth + gutter;
+
+    var contrib = [['Skills Development Levy (SDL)', money(c.sdlEmployer)], ['Unemployment Insurance Fund (UIF)', money(c.uifEmployer)]];
+    var contribTotal = (c.sdlEmployer||0) + (c.uifEmployer||0);
+    contrib.push([{content:'Total',styles:{fontStyle:'bold'}}, {content:money(contribTotal),styles:{fontStyle:'bold'}}]);
+
+    doc.autoTable({
+      startY:y, margin:{left:leftX}, tableWidth:halfWidth, theme:'grid',
+      head:[['Company Contributions','Amount']],
+      body: contrib,
+      styles:{fontSize:7.5, cellPadding:1.2, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{1:{halign:'right'}}
+    });
+    var leftFinalY = doc.lastAutoTable.finalY;
+
+    var ytd = ps.ytdTotals || {};
+    var ytdRows = [];
+    ytdRows.push(['Basic Salary','3601', money(ytd.basicSalary)]);
+    if(ytd.commission) ytdRows.push(['Commission','3615', money(ytd.commission)]);
+    if(ytd.bonus) ytdRows.push(['Bonus','3605', money(ytd.bonus)]);
+    if(ytd.overtime) ytdRows.push(['Overtime','3607', money(ytd.overtime)]);
+    ytdRows.push(['Gross Employment Income (Taxable)','3699', money(ytd.grossTaxable)]);
+    ytdRows.push(['Paye As You Earn (PAYE)','4102', money(ytd.paye)]);
+    ytdRows.push(['Skills Development Levy (SDL)','4142', money(ytd.sdl)]);
+    ytdRows.push(['Unemployment Insurance Fund (UIF)','4141', money(ytd.uif)]);
+
+    doc.autoTable({
+      startY:y, margin:{left:rightX}, tableWidth:halfWidth, theme:'grid',
+      head:[['Description','Sars Code','Amount']],
+      body: ytdRows,
+      styles:{fontSize:7.5, cellPadding:1.2, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{1:{halign:'center', cellWidth:18},2:{halign:'right'}}
+    });
+
+    var additions = [];
+    if(adj.AdvanceGiven) additions.push(['Advance paid out', money(adj.AdvanceGiven)]);
+    doc.autoTable({
+      startY:leftFinalY+2, margin:{left:leftX}, tableWidth:halfWidth, theme:'grid',
+      head:[['Addition Payments / Contributions','Amount']],
+      body: additions.length ? additions : [['—','—']],
+      styles:{fontSize:7.5, cellPadding:1.2, lineColor:[210,210,210]},
+      headStyles:{fillColor:[235,235,235], textColor:20, fontStyle:'bold'},
+      columnStyles:{1:{halign:'right'}}
+    });
+
+    doc.setFontSize(7.5); doc.setTextColor(150);
+    doc.text('Batten — Costing', M, 290);
+    doc.text((ps.isFinal?'Final':'Preview')+' payslip for '+ps.month, pageWidth-M, 290, {align:'right'});
+    doc.setTextColor(0);
+  }
+
+  // On-screen quick-look only — the actual downloadable payslip is built separately by
+  // buildPayslipPdfPage_ as a real PDF, laid out to match the previous payroll system.
+  function payslipHtml_(ps){
     var co = ps.company || {};
     var e = ps.employee;
     var c = ps.calc;
@@ -2532,7 +2761,7 @@
         '</table>';
     }
 
-    return '<div class="payslip-box'+(embed?'':' print-area')+'">' +
+    return '<div class="payslip-box">' +
       '<h2>'+esc(co.name||'(Company details not set — see Settings > Payroll)')+'</h2>' +
       '<div class="sub">'+esc(co.address||'')+'</div>' +
       '<div class="sub">PAYE '+esc(co.payeNumber||'—')+' · UIF '+esc(co.uifNumber||'—')+' · SDL '+esc(co.sdlNumber||'—')+'</div>' +
@@ -2557,7 +2786,7 @@
         '<div>Gross taxable: '+money(ps.ytdTotals.grossTaxable)+'</div><div>UIF: '+money(ps.ytdTotals.uif)+'</div>' +
         '<div>SDL: '+money(ps.ytdTotals.sdl)+'</div><div></div>' +
       '</div>' +
-      '<div class="field-row no-print" style="margin-top:16px;"><button class="btn btn-print-payslip">Print / save as PDF</button></div>' +
+      '<div class="field-row" style="margin-top:16px;"><button class="btn btn-print-payslip">Download PDF</button></div>' +
       '</div>';
   }
 
