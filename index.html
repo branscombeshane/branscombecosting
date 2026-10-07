@@ -3318,7 +3318,7 @@
       var doc = newPdfDoc_();
       if(!doc) return;
       buildEmp201Pdf_(doc, res);
-      doc.save('EMP201_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
+      doc.save('EMP201_'+pdfFilenameSafe_(res.company && res.company.name)+'_'+pdfFilenameSafe_(payrollMonth)+'.pdf');
     });
   }
 
