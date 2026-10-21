@@ -3049,32 +3049,100 @@
           '<option value="interim"'+(reconPeriod==='interim'?' selected':'')+'>Interim (1 Mar – 31 Aug)</option>' +
           '<option value="final"'+(reconPeriod==='final'?' selected':'')+'>Final (1 Mar – end Feb)</option>' +
         '</select></div>' +
+        '<div class="field"><button class="btn" id="btn-check-recon">Check for issues</button></div>' +
         '<div class="field"><button class="btn primary" id="btn-download-recon">Download recon CSV</button></div>' +
       '</div>' +
+      '<div id="reports-recon-issues"></div>' +
       '<div id="reports-recon-error"></div>';
 
-    document.getElementById('recon-taxyear').addEventListener('change', function(e){ reconTaxYearStart = Number(e.target.value); });
-    document.getElementById('recon-period').addEventListener('change', function(e){ reconPeriod = e.target.value; });
-    document.getElementById('btn-download-recon').addEventListener('click', downloadEmployerRecon_);
+    document.getElementById('recon-taxyear').addEventListener('change', function(e){
+      reconTaxYearStart = Number(e.target.value);
+      document.getElementById('reports-recon-issues').innerHTML = '';
+    });
+    document.getElementById('recon-period').addEventListener('change', function(e){
+      reconPeriod = e.target.value;
+      document.getElementById('reports-recon-issues').innerHTML = '';
+    });
+    document.getElementById('btn-check-recon').addEventListener('click', function(){ checkEmployerRecon_(this); });
+    document.getElementById('btn-download-recon').addEventListener('click', function(){ downloadEmployerRecon_(this); });
   }
 
-  function downloadEmployerRecon_(){
-    var errBox = document.getElementById('reports-recon-error');
-    var btn = document.getElementById('btn-download-recon');
-    errBox.innerHTML = '';
-    btn.disabled = true;
-    apiRead('getEmployerRecon', { taxYearStart: reconTaxYearStart, period: reconPeriod }).then(function(res){
-      btn.disabled = false;
-      if(!res || !res.ok){ errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not build the recon file.')+'</div>'; return; }
-      if(!res.employees.length){ errBox.innerHTML = '<div class="status-msg error">No payroll runs found for that period.</div>'; return; }
-      var co = res.company || {};
-      var missing = [];
-      if(!co.contactFirstName || !co.contactSurname) missing.push('Contact Person name');
-      if(!co.contactBusTel && !co.contactCellNo) missing.push('a Contact Person phone number (business or cell)');
-      if(missing.length){
-        errBox.innerHTML = '<div class="status-msg error">SARS requires these before e@syFile will accept the file — add them under Settings &gt; Payroll &gt; Company, then try again: '+esc(missing.join(', '))+'.</div>';
-        return;
+  // Scans a getEmployerRecon_ response for the data problems that actually got a real
+  // Batten file rejected/flagged by e@syFile (see the Batten/Daily Fruit payroll
+  // handoff this was built from) — surfaced up front here instead of only being found
+  // out about after an e@syFile import, same as Daily Fruit's own recon screen does.
+  // "errors" will get the file rejected outright; "warnings" are worth a second look
+  // but don't block the download.
+  function reconCheckIssues_(res){
+    var errors = [], warnings = [];
+    var co = res.company || {};
+    if(!co.contactFirstName || !co.contactSurname) errors.push('Company: missing Contact Person name (Settings › Payroll › Company).');
+    if(!co.contactBusTel && !co.contactCellNo) errors.push('Company: missing a Contact Person phone number (business or cell) (Settings › Payroll › Company).');
+    if(!co.vatTradeClassification) warnings.push('Company: no VAT403 Trade Classification code set (field 2035) — add one under Settings › Payroll › Company if e@syFile flags it.');
+
+    res.employees.forEach(function(e){
+      var isRsaId = /^\d{13}$/.test(e.idNumber||'');
+      if(!e.idNumber){
+        errors.push(e.name+': no ID number or passport number on file in Roster — SARS requires one.');
+      } else if(!isRsaId){
+        var country = reconCountryCode_(e.idCountry);
+        if(!country){
+          errors.push(e.name+': has a passport/permit number but no ID/passport country set in Roster — SARS requires this.');
+        } else if(!/^[A-Z]{3}$/.test(country)){
+          warnings.push(e.name+': ID/passport country "'+(e.idCountry||'')+'" isn’t recognised — verify the correct 3-letter SARS code in Roster.');
+        }
       }
+      if(e.taxNumber && !/^\d{10}$/.test(e.taxNumber)){
+        warnings.push(e.name+': tax number "'+e.taxNumber+'" is '+e.taxNumber.length+' digits, not 10 — possibly a lost leading zero. Verify against SARS and fix in Roster.');
+      }
+      if(e.certificateType==='IRP5' && !e.taxNumber){
+        warnings.push(e.name+': IRP5 certificate with no income tax number on file in Roster.');
+      }
+    });
+    return { errors: errors, warnings: warnings };
+  }
+
+  function renderReconIssuesHtml_(issues){
+    function list(items){ return '<ul style="margin:6px 0 0 18px;padding:0;">'+items.map(function(m){ return '<li>'+esc(m)+'</li>'; }).join('')+'</ul>'; }
+    var parts = [];
+    if(issues.errors.length) parts.push('<div class="status-msg error"><strong>Must fix before filing:</strong>'+list(issues.errors)+'</div>');
+    if(issues.warnings.length) parts.push('<div class="status-msg"><strong>Worth double-checking:</strong>'+list(issues.warnings)+'</div>');
+    if(!issues.errors.length && !issues.warnings.length) parts.push('<div class="status-msg">No issues found.</div>');
+    return parts.join('');
+  }
+
+  // Shared by the "Check for issues" and "Download recon CSV" buttons so they can
+  // never silently disagree about what counts as a problem.
+  function fetchReconAndIssues_(){
+    return apiRead('getEmployerRecon', { taxYearStart: reconTaxYearStart, period: reconPeriod }).then(function(res){
+      if(!res || !res.ok) return { res: res, issues: null };
+      var issues = reconCheckIssues_(res);
+      if(!res.employees.length) issues.errors.unshift('No payroll runs found for that period.');
+      return { res: res, issues: issues };
+    });
+  }
+
+  function checkEmployerRecon_(btn){
+    var errBox = document.getElementById('reports-recon-error');
+    var issuesBox = document.getElementById('reports-recon-issues');
+    errBox.innerHTML = '';
+    withBusy_(btn, fetchReconAndIssues_(), 'Checking…').then(function(r){
+      if(!r.res || !r.res.ok){ errBox.innerHTML = '<div class="status-msg error">'+esc((r.res&&r.res.error)||'Could not check the recon data.')+'</div>'; return; }
+      issuesBox.innerHTML = renderReconIssuesHtml_(r.issues);
+    }).catch(function(e){
+      errBox.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
+
+  function downloadEmployerRecon_(btn){
+    var errBox = document.getElementById('reports-recon-error');
+    var issuesBox = document.getElementById('reports-recon-issues');
+    errBox.innerHTML = '';
+    withBusy_(btn, fetchReconAndIssues_(), 'Building…').then(function(r){
+      var res = r.res, issues = r.issues;
+      if(!res || !res.ok){ errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not build the recon file.')+'</div>'; return; }
+      issuesBox.innerHTML = issues ? renderReconIssuesHtml_(issues) : '';
+      if(issues && issues.errors.length) return; // blocking — same list explains why
       var csv = buildEmployerReconCsv_(res);
       var blob = new Blob([csv], {type:'text/csv'});
       var a = document.createElement('a');
@@ -3082,7 +3150,6 @@
       a.download = 'EmployerRecon_'+res.taxYearStart+'-'+res.transactionYear+'_'+(res.period==='interim'?'Interim':'Final')+'.csv';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }).catch(function(e){
-      btn.disabled = false;
       errBox.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
     });
   }
