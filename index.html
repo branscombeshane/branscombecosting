@@ -398,6 +398,19 @@
       <div class="field-row">
         <div class="field" style="min-width:260px;"><span class="label">Address</span><textarea id="co-address" rows="2"></textarea></div>
       </div>
+      <div class="sub" style="margin:14px 0 8px;">SARS requires a named contact person with a phone number on every e@syFile Employer Reconciliation (IRP5/IT3(a)) export — these aren't used anywhere else in Batten.</div>
+      <div class="field-row">
+        <div class="field"><span class="label">Contact person — first name</span><input type="text" id="co-contact-first"></div>
+        <div class="field"><span class="label">Contact person — surname</span><input type="text" id="co-contact-surname"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><span class="label">Contact — business phone</span><input type="text" id="co-contact-bustel" placeholder="digits only, e.g. 0123456789"></div>
+        <div class="field"><span class="label">Contact — cell phone</span><input type="text" id="co-contact-cell" placeholder="digits only — at least one phone is required"></div>
+        <div class="field"><span class="label">Contact — email (optional)</span><input type="text" id="co-contact-email"></div>
+      </div>
+      <div class="field-row">
+        <div class="field"><span class="label">VAT403 Trade Classification (optional)</span><input type="text" id="co-vat-trade" placeholder="separate from the SIC7 code below"></div>
+      </div>
       <div class="field-row"><button class="btn primary" id="btn-save-company">Save company details</button></div>
       <div id="company-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
@@ -439,7 +452,7 @@
   var job = null;
   var view = 'new';
   var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
-    payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'' } };
+    payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'', vatTradeClassification:'' } };
   var currentFileName = null;
 
   function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -1022,6 +1035,12 @@
     document.getElementById('co-uif').value = c.uifNumber||'';
     document.getElementById('co-sdl').value = c.sdlNumber||'';
     document.getElementById('co-address').value = c.address||'';
+    document.getElementById('co-contact-first').value = c.contactFirstName||'';
+    document.getElementById('co-contact-surname').value = c.contactSurname||'';
+    document.getElementById('co-contact-bustel').value = c.contactBusTel||'';
+    document.getElementById('co-contact-cell').value = c.contactCellNo||'';
+    document.getElementById('co-contact-email').value = c.contactEmail||'';
+    document.getElementById('co-vat-trade').value = c.vatTradeClassification||'';
   }
   document.getElementById('btn-save-company').addEventListener('click', function(){
     var info = {
@@ -1029,7 +1048,13 @@
       payeNumber: document.getElementById('co-paye').value.trim(),
       uifNumber: document.getElementById('co-uif').value.trim(),
       sdlNumber: document.getElementById('co-sdl').value.trim(),
-      address: document.getElementById('co-address').value.trim()
+      address: document.getElementById('co-address').value.trim(),
+      contactFirstName: document.getElementById('co-contact-first').value.trim(),
+      contactSurname: document.getElementById('co-contact-surname').value.trim(),
+      contactBusTel: document.getElementById('co-contact-bustel').value.trim(),
+      contactCellNo: document.getElementById('co-contact-cell').value.trim(),
+      contactEmail: document.getElementById('co-contact-email').value.trim(),
+      vatTradeClassification: document.getElementById('co-vat-trade').value.trim()
     };
     withBusy_(this, apiRead('saveCompanyInfo', info)).then(function(res){
       settings.companyInfo = (res && res.companyInfo) || info;
@@ -3038,6 +3063,14 @@
       btn.disabled = false;
       if(!res || !res.ok){ errBox.innerHTML = '<div class="status-msg error">'+esc((res&&res.error)||'Could not build the recon file.')+'</div>'; return; }
       if(!res.employees.length){ errBox.innerHTML = '<div class="status-msg error">No payroll runs found for that period.</div>'; return; }
+      var co = res.company || {};
+      var missing = [];
+      if(!co.contactFirstName || !co.contactSurname) missing.push('Contact Person name');
+      if(!co.contactBusTel && !co.contactCellNo) missing.push('a Contact Person phone number (business or cell)');
+      if(missing.length){
+        errBox.innerHTML = '<div class="status-msg error">SARS requires these before e@syFile will accept the file — add them under Settings &gt; Payroll &gt; Company, then try again: '+esc(missing.join(', '))+'.</div>';
+        return;
+      }
       var csv = buildEmployerReconCsv_(res);
       var blob = new Blob([csv], {type:'text/csv'});
       var a = document.createElement('a');
@@ -3070,6 +3103,32 @@
     return String(dateStr||'').replace(/-/g,'');
   }
 
+  // SARS field 3200/3210 format is "N3.4" — 3 integer digits, always 4 decimal places,
+  // e.g. "012.0000" — not the bare "12.0000"/"6.0000" this used to send.
+  function reconPeriods4dp_(n){
+    var parts = (Number(n)||0).toFixed(4).split('.');
+    return ('000'+parts[0]).slice(-3) + '.' + parts[1];
+  }
+
+  // Field 3075 (Country of Issue) must be SARS's 3-letter Appendix A code, not a typed
+  // country name — Batten's Roster field is free text (hinted "e.g. ZWE" but not
+  // enforced), so this normalizes common entries defensively at export time. ZWE and
+  // MWI are confirmed against a real e@syFile rejection; the rest are standard
+  // ISO 3166-1 alpha-3 codes and should be double-checked against SARS's own Appendix A
+  // if a nationality outside this list ever comes up. Anything already a 3-letter code,
+  // or not recognised, passes through unchanged (uppercased) rather than being guessed.
+  var RECON_COUNTRY_CODE_MAP = {
+    'ZIMBABWE':'ZWE', 'ZIMABABWE':'ZWE', 'MALAWI':'MWI', 'MOZAMBIQUE':'MOZ',
+    'LESOTHO':'LSO', 'ESWATINI':'SWZ', 'SWAZILAND':'SWZ', 'BOTSWANA':'BWA',
+    'NAMIBIA':'NAM', 'ZAMBIA':'ZMB', 'NIGERIA':'NGA', 'INDIA':'IND',
+    'UNITED KINGDOM':'GBR', 'UK':'GBR', 'CHINA':'CHN', 'SOUTH AFRICA':'ZAF'
+  };
+  function reconCountryCode_(raw){
+    var v = String(raw||'').trim().toUpperCase();
+    if(!v || /^[A-Z]{3}$/.test(v)) return v;
+    return RECON_COUNTRY_CODE_MAP[v] || v;
+  }
+
   // Builds the actual SARS-format IRP5/IT3(a) bulk CSV text from apiGetEmployerRecon_'s
   // data. Field codes (2010, 3010, 6010, ...) are SARS's own numbering from the PAYE
   // Employer Reconciliation BRS — see the long comment on apiGetEmployerRecon_ in
@@ -3096,29 +3155,41 @@
     }
 
     // ---- Header record (employer demographics) ----
-    lines.push(rec([
+    // Field codes/order/mandatory-status below are from SARS's own PAYE Employer
+    // Reconciliation BRS (v19-4/v25-1, Appendix "Employer record"): 2025/2036 = Contact
+    // Person first name/surname (both mandatory), 2026/2040 = Contact Person business
+    // phone / cell phone (EITHER one is required), 2027 = contact email (optional),
+    // 2035 = VAT403 Trade Classification (mandatory, distinct from the 2082 SIC7 code
+    // already below — not yet captured anywhere in this app, see the Settings field).
+    // Earlier versions of this file sent 2025/2026/2027/2036 blank and never sent 2040
+    // at all, which is exactly why e@syFile rejected/flagged it — "contact person" and
+    // "contact number" are required, not optional.
+    var headerFields = [
       ['2010', company.name||'', true],
-      ['2015', 'Live', true],
+      ['2015', 'LIVE', true],
       ['2020', company.payeNumber||'', false],
       ['2022', company.sdlNumber||'', true],
       ['2024', company.uifNumber||'', true],
-      ['2025', '', true],
-      ['2036', '', true],
-      ['2026', '', true],
-      ['2027', '', true],
+      ['2025', company.contactFirstName||'', true],
+      ['2027', company.contactEmail||'', true],
       ['2028', 'Batten', true],
       ['2029', 'Batten Payroll', true],
       ['2030', data.transactionYear, false],
-      ['2031', data.periodYYYYMM, false],
-      ['2037', 'N', true],
-      ['2063', companyAddr.unit, true],
-      ['2064', companyAddr.street, true],
-      ['2065', companyAddr.suburb, true],
-      ['2066', companyAddr.city, true],
-      ['2080', companyAddr.postal, false],
-      ['2081', 'ZA', false],
-      ['2082', RECON_SIC7_CODE, true]
-    ]));
+      ['2031', data.periodYYYYMM, false]
+    ];
+    if(company.contactBusTel) headerFields.push(['2026', company.contactBusTel, true]);
+    if(company.vatTradeClassification) headerFields.push(['2035', company.vatTradeClassification, false]);
+    headerFields.push(['2036', company.contactSurname||'', true]);
+    headerFields.push(['2037', 'N', true]);
+    if(company.contactCellNo) headerFields.push(['2040', company.contactCellNo, true]);
+    headerFields.push(['2063', companyAddr.unit, true]);
+    headerFields.push(['2064', companyAddr.street, true]);
+    headerFields.push(['2065', companyAddr.suburb, true]);
+    headerFields.push(['2066', companyAddr.city, true]);
+    headerFields.push(['2080', companyAddr.postal, false]);
+    headerFields.push(['2081', 'ZA', false]);
+    headerFields.push(['2082', RECON_SIC7_CODE, true]);
+    lines.push(rec(headerFields));
 
     // ---- One record per employee certificate ----
     data.employees.forEach(function(e, idx){
@@ -3129,7 +3200,15 @@
       var isRsaId = /^\d{13}$/.test(e.idNumber||'');
       var residentialAddr = (e.address||'').trim() ? splitReconAddress_(e.address) : companyAddr;
       var isIrp5 = e.certificateType === 'IRP5';
-      var certNumber = (company.payeNumber||'') + data.periodYYYYMM + 'BATN' + ('00000000'+(idx+1)).slice(-8);
+      // Certificate number (3010) must be EXACTLY 30 chars, structured per the BRS as:
+      // PAYE ref (10) + transaction year (4, must match field 2030) + concluding month
+      // of the period, "02" for Feb/Final or "08" for the Aug Interim (2) + a unique
+      // alphanumeric tail padded to fill the remaining 14 chars. The old version used
+      // the period's own calendar year (wrong for Interim, which ends in the tax year's
+      // first calendar year, not the transaction year) and only reached 28 characters.
+      var certMonth = (data.period === 'interim') ? '08' : '02';
+      var certUnique = 'BATN' + ('0000000000'+(idx+1)).slice(-10);
+      var certNumber = (company.payeNumber||'') + String(data.transactionYear) + certMonth + certUnique;
 
       var fields = [
         ['3010', certNumber, true],
@@ -3144,14 +3223,16 @@
         fields.push(['3060', e.idNumber, false]);
       } else {
         fields.push(['3070', e.idNumber||'', true]);
-        fields.push(['3075', e.idCountry||'', true]);
+        fields.push(['3075', reconCountryCode_(e.idCountry), true]);
       }
       fields.push(['3080', yyyymmdd_(e.dateOfBirth), false]);
-      fields.push(['3100', e.taxNumber||'0000000000', false]);
+      // 3100 (income tax number) must pass a SARS checksum and is only valid as a real
+      // 10-digit number — the old '0000000000' placeholder for employees with none on
+      // file was itself what e@syFile was rejecting, so the field is left out entirely
+      // for those employees instead (18 of 21 records previously).
+      if(/^\d{10}$/.test(e.taxNumber||'')) fields.push(['3100', e.taxNumber, false]);
       fields.push(['3263', RECON_SIC7_CODE, true]);
-      fields.push(['3136', e.contactNumber||'', true]);
-      fields.push(['3144', '', true]);
-      fields.push(['3145', '', true]);
+      if(e.contactNumber) fields.push(['3136', e.contactNumber, true]);
       fields.push(['3146', companyAddr.unit, true]);
       fields.push(['3147', companyAddr.street, true]);
       fields.push(['3148', companyAddr.suburb, true]);
@@ -3161,17 +3242,17 @@
       fields.push(['3160', e.employeeNumber||'', true]);
       fields.push(['3170', yyyymmdd_(e.periodFrom), false]);
       fields.push(['3180', yyyymmdd_(e.periodTo), false]);
-      fields.push(['3195', 'N', true]);
-      fields.push(['3200', '12.0000', false]);
-      fields.push(['3210', e.periodsWorked.toFixed(4), false]);
-      fields.push(['3220', 'N', true]);
+      // 3195 (Voluntary over-deduction) and 3220 (Fixed Rate Taxation Indicator) are
+      // IRP5-only per the BRS — must not be completed on an IT3(a) certificate.
+      if(isIrp5) fields.push(['3195', 'N', true]);
+      fields.push(['3200', reconPeriods4dp_(12), false]);
+      fields.push(['3210', reconPeriods4dp_(e.periodsWorked), false]);
+      if(isIrp5) fields.push(['3220', 'N', true]);
       fields.push(['3279', 'N', true]);
       fields.push(['3288', '1', false]);
-      // Residential address: unit/complex are always blank (nobody's on file living in
-      // a flat), then street number, street name, suburb, city, postal code, country —
-      // same shape as the work address above, just under SARS's 3211-3217 codes.
-      fields.push(['3211', '', true]);
-      fields.push(['3212', '', true]);
+      // Residential address: unit/complex, street name, suburb, city, postal code,
+      // country — under SARS's 3213-3217 codes (3211/3212 dropped: this app has no data
+      // source for them and they were being sent blank on every single record).
       fields.push(['3213', residentialAddr.unit, true]);
       fields.push(['3214', residentialAddr.street, true]);
       fields.push(['3215', residentialAddr.suburb, true]);
@@ -3193,7 +3274,9 @@
       var medicalWhole = Math.floor(e.medicalContribution_4005);
       if(retirementWhole > 0) fields.push(['4001', retirementWhole, false]);
       if(medicalWhole > 0) fields.push(['4005', medicalWhole, false]);
-      fields.push(['4497', retirementWhole + medicalWhole, false]);
+      // 4497 (total deductions/contributions) is only required when a 4001/4005-type
+      // value is actually present — must not be sent as a bare 0 on every record.
+      if(retirementWhole > 0 || medicalWhole > 0) fields.push(['4497', retirementWhole + medicalWhole, false]);
       fields.push(['4141', e.uifContribution_4141.toFixed(2), false]);
       fields.push(['4142', e.sdlContribution_4142.toFixed(2), false]);
       var payeForCert = isIrp5 ? e.payeDeducted_4102 : 0;
