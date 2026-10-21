@@ -3022,7 +3022,7 @@
 
   // Whether the IRP5/IT3(a) table (long — one row per employee) starts collapsed;
   // remembered across re-renders of the Reports tab within this session, not persisted.
-  var irp5Collapsed_ = false;
+  var irp5Collapsed_ = true;
 
   function saTaxYearForMonth_(monthStr){
     var parts = String(monthStr||'').split('-');
