@@ -3002,13 +3002,13 @@
     stats.innerHTML = '';
     body.innerHTML =
       '<div class="panel" id="reports-emp201-panel"><div class="empty">Loading…</div></div>' +
-      '<div class="panel" id="reports-recon-panel"></div>' +
       '<div class="panel" id="reports-payslips-panel"><div class="empty">Loading…</div></div>' +
-      '<div class="panel" id="reports-irp5-panel"><div class="empty">Loading…</div></div>';
+      '<div class="panel" id="reports-irp5-panel"><div class="empty">Loading…</div></div>' +
+      '<div class="panel" id="reports-recon-panel"></div>';
     loadReportsEmp201_();
-    renderReportsRecon_();
     loadReportsPayslips_();
     loadReportsIrp5_();
+    renderReportsRecon_();
   }
 
   // ---- Employer Reconciliation (e@syFile IRP5/IT3(a) bulk CSV) ----
@@ -3019,6 +3019,10 @@
   // the one the month selector happens to be sitting on).
   var reconTaxYearStart = saTaxYearForMonth_(payrollMonth).startYear;
   var reconPeriod = 'final';
+
+  // Whether the IRP5/IT3(a) table (long — one row per employee) starts collapsed;
+  // remembered across re-renders of the Reports tab within this session, not persisted.
+  var irp5Collapsed_ = false;
 
   function saTaxYearForMonth_(monthStr){
     var parts = String(monthStr||'').split('-');
@@ -3334,14 +3338,22 @@
 
     panel.innerHTML =
       '<div class="field-row" style="justify-content:space-between;align-items:center;">' +
-        '<h2 style="margin:0;">IRP5 / IT3(a) — tax year '+esc(res.taxYear)+'</h2>' +
+        '<button class="btn small" id="btn-toggle-irp5" style="margin-right:4px;">'+(irp5Collapsed_?'▸':'▾')+'</button>' +
+        '<h2 style="margin:0;flex:1;">IRP5 / IT3(a) — tax year '+esc(res.taxYear)+'</h2>' +
         '<button class="btn" id="btn-export-irp5">Export CSV</button>' +
       '</div>' +
-      '<div class="sub" style="margin:6px 0 14px;">Figures summed from every payroll run in this tax year. "PDF" downloads a certificate for that one employee — use these to complete SARS\'s e@syFile / EMP501 process yourself; this app doesn\'t submit anything to SARS.</div>' +
-      '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th class="num">Months paid</th><th class="num">Gross (3601)</th><th class="num">PAYE (4102)</th><th class="num">UIF (4141)</th><th class="num">SDL (4142)</th><th class="num">Retirement (4001)</th><th class="num">Medical (4005)</th><th></th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="10" class="empty">No payroll runs yet this tax year.</td></tr>') +
-      '</tbody></table></div>';
+      '<div id="irp5-collapse-body" style="display:'+(irp5Collapsed_?'none':'block')+';">' +
+        '<div class="sub" style="margin:6px 0 14px;">Figures summed from every payroll run in this tax year. "PDF" downloads a certificate for that one employee — use these to complete SARS\'s e@syFile / EMP501 process yourself; this app doesn\'t submit anything to SARS.</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th class="num">Months paid</th><th class="num">Gross (3601)</th><th class="num">PAYE (4102)</th><th class="num">UIF (4141)</th><th class="num">SDL (4142)</th><th class="num">Retirement (4001)</th><th class="num">Medical (4005)</th><th></th></tr></thead><tbody>' +
+        (rows || '<tr><td colspan="10" class="empty">No payroll runs yet this tax year.</td></tr>') +
+        '</tbody></table></div>' +
+      '</div>';
 
+    document.getElementById('btn-toggle-irp5').addEventListener('click', function(){
+      irp5Collapsed_ = !irp5Collapsed_;
+      document.getElementById('irp5-collapse-body').style.display = irp5Collapsed_ ? 'none' : 'block';
+      this.textContent = irp5Collapsed_ ? '▸' : '▾';
+    });
     document.getElementById('btn-export-irp5').addEventListener('click', function(){ exportIrp5Csv_(res); });
     Array.prototype.forEach.call(panel.querySelectorAll('.irp5-pdf'), function(btn){
       btn.addEventListener('click', function(){
