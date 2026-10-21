@@ -3147,7 +3147,7 @@
       var blob = new Blob([csv], {type:'text/csv'});
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'EmployerRecon_'+res.taxYearStart+'-'+res.transactionYear+'_'+(res.period==='interim'?'Interim':'Final')+'.csv';
+      a.download = 'EmployerRecon_'+pdfFilenameSafe_(res.company && res.company.name)+'_'+res.taxYearStart+'-'+res.transactionYear+'_'+(res.period==='interim'?'Interim':'Final')+'.csv';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
     }).catch(function(e){
       errBox.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
