@@ -1785,12 +1785,17 @@
   var payrollMonth = null;              // 'yyyy-MM', set to the current month on first visit
   var payrollTab = 'roster';            // roster | adjustments | run | reports
   var payrollData = null;               // {month, employees[], departments[], headcount, totalMonthlyCost, processedCount}
-  var payrollAdjustmentsData = null;    // {month, items[], advanceBalances[]}
+  var payrollAdjustmentsData = null;    // {month, items[], advanceBalances[], deductionAccounts[]}
   var payrollRunData = null;            // {month, hasRun, payslips[], emp201}
   var expandedEmployeeId = null;        // Roster tab: which employee's edit form is open
   var expandedAdjEmployeeId = null;     // Pay Adjustments tab: which employee's panel is open
   var expandedPayslipEmployeeId = null; // Run tab: which employee's payslip is open under the Payslips table
   var reportsSelectedPayslipIds = {};   // Reports tab: employeeId -> true for the "Download selected" checkboxes
+  // Deduction accounts & advance repayments panel (Pay Adjustments tab): which row is
+  // expanded — either a DeductionAccounts id, or 'unscheduled:<employeeId>' for an
+  // outstanding advance balance that has no repayment schedule yet.
+  var expandedDedAccountId = null;
+  var showSettledDedAccounts = false;   // "Show settled & stopped" toggle on that same panel
   // Display-only helper for the +/- prefix in the Pay Adjustments "This month" summary
   // column — spans both pre-tax (Absent, reduces Gross) and post-tax (Deduction,
   // AdvanceRepayment, reduce Net) subtraction types; it isn't used for any tax math.
@@ -1804,7 +1809,7 @@
 
   document.getElementById('payroll-month').addEventListener('change', function(){
     payrollMonth = this.value || defaultPayrollMonth_();
-    expandedEmployeeId = null; expandedAdjEmployeeId = null;
+    expandedEmployeeId = null; expandedAdjEmployeeId = null; expandedDedAccountId = null;
     expandedPayslipEmployeeId = null; reportsSelectedPayslipIds = {};
     loadPayrollForTab();
   });
@@ -2119,10 +2124,11 @@
     var stats = document.getElementById('payroll-stats');
     if(!payrollData || !payrollAdjustmentsData){ body.innerHTML=''; stats.innerHTML=''; return; }
 
+    var activeDedCount = (payrollAdjustmentsData.deductionAccounts||[]).filter(function(a){ return a.status==='active'; }).length;
     stats.innerHTML =
       '<div class="stat"><span class="label">Active employees</span><span class="value num">'+payrollData.headcount+'</span></div>' +
       '<div class="stat total"><span class="label">Finalized this month</span><span class="value num">'+payrollData.processedCount+' / '+payrollData.headcount+'</span></div>' +
-      '<div class="stat"><span class="label">Outstanding advances</span><span class="value num">'+payrollAdjustmentsData.advanceBalances.length+'</span></div>';
+      '<div class="stat"><span class="label">Deduction/advance accounts</span><span class="value num">'+activeDedCount+'</span></div>';
 
     var active = payrollData.employees.filter(function(e){ return e.active; }).sort(function(a,b){ return (a.name||'').localeCompare(b.name||''); });
     var itemsByEmployee = {};
@@ -2144,14 +2150,10 @@
         (expandedAdjEmployeeId===e.id ? '<tr><td colspan="5"><div class="job-detail" id="adj-detail-'+e.id+'"></div></td></tr>' : '');
     }).join('');
 
-    var advHtml = payrollAdjustmentsData.advanceBalances.length ? (
-      '<div class="panel"><h2>Outstanding advances</h2><table><thead><tr><th>Employee</th><th class="num">Balance owed</th></tr></thead><tbody>' +
-      payrollAdjustmentsData.advanceBalances.map(function(b){ return '<tr><td>'+esc(b.name)+'</td><td class="num">'+money(b.balance)+'</td></tr>'; }).join('') +
-      '</tbody></table></div>'
-    ) : '';
+    var dedHtml = renderDeductionAccountsPanelHtml_();
 
     body.innerHTML =
-      advHtml +
+      dedHtml +
       '<div class="panel">' +
         '<h2 style="margin:0 0 10px;">Pay adjustments — '+esc(payrollMonth)+'</h2>' +
         '<div class="sub" style="margin-bottom:14px;">Click an employee to add commission, bonus, overtime, deductions or advances, then Finalize once they\'re done for the month — Run Payroll refuses to run until every active employee is finalized.</div>' +
@@ -2174,6 +2176,232 @@
       if(container && e) renderAdjEmployeeDetail_(container, e, itemsByEmployee[e.id]||[]);
       else expandedAdjEmployeeId = null;
     }
+
+    wireDeductionAccountsPanel_();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Deduction accounts & advance repayments — see DEDUCTION_ACCOUNTS_HEADERS'
+  // header comment in Code.gs for the overall design. Reuses the same
+  // expand-in-place .job-detail pattern as the employee rows above (and as the
+  // Roster tab) instead of a modal — Batten doesn't have a modal system anywhere.
+  // ---------------------------------------------------------------------------
+
+  // Pure math, kept separate from any DOM/formatting so it's easy to smoke-test:
+  // given a total and a monthly instalment, how many months does it take, and what's
+  // the (possibly smaller) final instalment.
+  function dedSchedule_(total, monthly){
+    total = Number(total)||0; monthly = Number(monthly)||0;
+    if(monthly<=0 || total<=0) return null;
+    var months = Math.ceil((total - 0.004) / monthly);
+    if(months<1) months = 1;
+    var last = round2Js_(total - (months-1)*monthly);
+    if(last<=0) last = monthly;
+    return { months: months, last: last };
+  }
+
+  function dedPreviewText_(total, monthly, startMonth){
+    var sched = dedSchedule_(total, monthly);
+    if(!sched || !startMonth) return '';
+    if(sched.months===1) return '1 payment of '+money(sched.last)+' in '+esc(startMonth)+'.';
+    var lastDiffers = Math.abs(sched.last - monthly) > 0.004;
+    return sched.months+' monthly payments starting '+esc(startMonth)+': '+(sched.months-1)+' of '+money(monthly)+
+      (lastDiffers ? ', then a final one of '+money(sched.last)+'.' : ', plus a final one of '+money(sched.last)+'.');
+  }
+
+  function dedStatusChip_(status){
+    if(status==='active') return '<span class="chip warn">Active</span>';
+    if(status==='settled') return '<span class="chip good">Settled</span>';
+    if(status==='closed') return '<span class="chip">Stopped</span>';
+    return '<span class="chip example">Not scheduled</span>';
+  }
+
+  // DOM ids can't contain ':' safely as a lookup key via getElementById in all
+  // browsers' edge cases — this also doubles as a quick way to tell an
+  // 'unscheduled:<employeeId>' synthetic row apart from a real account id.
+  function dedDomId_(id){ return 'dedacct-detail-'+String(id).replace(/[^a-zA-Z0-9_-]/g,'_'); }
+
+  function renderDeductionAccountsPanelHtml_(){
+    var accounts = (payrollAdjustmentsData.deductionAccounts||[]);
+    var scheduledAdvanceEmployeeIds = {};
+    accounts.forEach(function(a){ if(a.kind==='advance' && a.status==='active') scheduledAdvanceEmployeeIds[a.employeeId]=true; });
+    var unscheduled = (payrollAdjustmentsData.advanceBalances||[]).filter(function(b){ return !scheduledAdvanceEmployeeIds[b.employeeId]; }).map(function(b){
+      return { id:'unscheduled:'+b.employeeId, kind:'advance', employeeId:b.employeeId, name:b.name, employeeActive:true,
+        description:'Advance (not on a repayment schedule)', total:b.balance, monthly:0, startMonth:'', status:'unscheduled',
+        skipMonths:[], note:'', paid:0, balance:b.balance, instalmentsLeft:null, history:[] };
+    });
+
+    var live = accounts.filter(function(a){ return a.status==='active'; }).concat(unscheduled);
+    var hidden = accounts.filter(function(a){ return a.status==='settled' || a.status==='closed'; });
+    var rows = live.concat(showSettledDedAccounts ? hidden : []);
+
+    var rowsHtml = rows.length ? rows.map(function(a){
+      var kindLabel = a.kind==='advance' ? 'Advance' : 'Deduction';
+      return '<tr class="dedacct-row" data-id="'+a.id+'">' +
+        '<td>'+esc(a.name)+'</td>' +
+        '<td>'+kindLabel+'</td>' +
+        '<td>'+esc(a.description||'—')+'</td>' +
+        '<td class="num">'+(a.monthly ? money(a.monthly) : '—')+'</td>' +
+        '<td class="num">'+money(a.balance)+'</td>' +
+        '<td>'+dedStatusChip_(a.status)+'</td>' +
+        '<td><span style="text-decoration:underline;font-size:12px;">'+(expandedDedAccountId===a.id?'close':'open')+'</span></td>' +
+        '</tr>' +
+        (expandedDedAccountId===a.id ? '<tr><td colspan="7"><div class="job-detail" id="'+dedDomId_(a.id)+'"></div></td></tr>' : '');
+    }).join('') : '<tr><td colspan="7" class="empty">No deduction accounts or advances.</td></tr>';
+
+    var toggleHtml = hidden.length ? (
+      '<div class="sub" style="margin-top:8px;"><a href="#" class="dedacct-toggle-settled" style="text-decoration:underline;">' +
+      (showSettledDedAccounts ? 'Hide settled &amp; stopped' : 'Show settled &amp; stopped ('+hidden.length+')') +
+      '</a></div>'
+    ) : '';
+
+    return '<div class="panel">' +
+      '<h2 style="margin:0 0 10px;">Deduction accounts &amp; advance repayments</h2>' +
+      '<div class="sub" style="margin-bottom:14px;">A fixed amount an employee owes (e.g. a broken table), or an advance put on a monthly repayment schedule — both deduct automatically from Net pay each month instead of a manual note. Click a row to manage it.</div>' +
+      '<div class="table-wrap"><table><thead><tr><th>Employee</th><th>Type</th><th>Description</th><th class="num">Monthly</th><th class="num">Balance</th><th>Status</th><th></th></tr></thead><tbody>' +
+      rowsHtml +
+      '</tbody></table></div>' +
+      toggleHtml +
+    '</div>';
+  }
+
+  function wireDeductionAccountsPanel_(){
+    Array.prototype.forEach.call(document.querySelectorAll('.dedacct-row'), function(tr){
+      tr.addEventListener('click', function(){
+        var id = tr.dataset.id;
+        expandedDedAccountId = (expandedDedAccountId===id) ? null : id;
+        renderPayrollAdjustments();
+      });
+    });
+    var toggle = document.querySelector('.dedacct-toggle-settled');
+    if(toggle) toggle.addEventListener('click', function(ev){
+      ev.preventDefault();
+      showSettledDedAccounts = !showSettledDedAccounts;
+      renderPayrollAdjustments();
+    });
+
+    if(expandedDedAccountId){
+      var container = document.getElementById(dedDomId_(expandedDedAccountId));
+      if(!container){ expandedDedAccountId = null; return; }
+      if(String(expandedDedAccountId).indexOf('unscheduled:')===0){
+        var employeeId = String(expandedDedAccountId).slice('unscheduled:'.length);
+        var bal = (payrollAdjustmentsData.advanceBalances||[]).find(function(b){ return b.employeeId===employeeId; });
+        if(bal) renderUnscheduledAdvanceDetail_(container, bal);
+        else expandedDedAccountId = null;
+      } else {
+        var acct = (payrollAdjustmentsData.deductionAccounts||[]).find(function(a){ return a.id===expandedDedAccountId; });
+        if(acct) renderDedAccountDetail_(container, acct);
+        else expandedDedAccountId = null;
+      }
+    }
+  }
+
+  function renderUnscheduledAdvanceDetail_(container, bal){
+    container.innerHTML =
+      '<div class="label" style="margin-bottom:8px;">'+esc(bal.name)+' — outstanding advance: '+money(bal.balance)+'</div>' +
+      '<div class="sub" style="margin-bottom:12px;">This advance has no repayment schedule yet, so it just sits as a running balance. Put it on a monthly schedule to have it deducted from Net pay automatically.</div>' +
+      '<div class="field-row" style="align-items:flex-end;">' +
+        '<div class="field"><span class="label">Monthly repayment</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num ded-sched-monthly" step="0.01" min="0"></div></div>' +
+        '<div class="field"><span class="label">First month</span><input type="month" class="ded-sched-start" value="'+esc(payrollMonth)+'"></div>' +
+        '<button class="btn primary small ded-sched-confirm">Schedule it</button>' +
+      '</div>' +
+      '<div class="sub ded-sched-preview" style="margin-top:8px;"></div>' +
+      '<div class="sub ded-sched-status" style="margin-top:6px;color:var(--warn);"></div>';
+
+    var monthlyInput = container.querySelector('.ded-sched-monthly');
+    var startInput = container.querySelector('.ded-sched-start');
+    var preview = container.querySelector('.ded-sched-preview');
+    var status = container.querySelector('.ded-sched-status');
+    function updatePreview(){
+      preview.textContent = dedPreviewText_(bal.balance, Number(monthlyInput.value), startInput.value);
+    }
+    monthlyInput.addEventListener('input', updatePreview);
+    startInput.addEventListener('change', updatePreview);
+    updatePreview();
+
+    container.querySelector('.ded-sched-confirm').addEventListener('click', function(){
+      var monthly = Number(monthlyInput.value);
+      status.textContent = '';
+      if(!monthly || monthly<=0){ status.textContent = 'Enter a monthly amount greater than 0.'; return; }
+      if(!startInput.value){ status.textContent = 'Choose a first month.'; return; }
+      withBusy_(this, apiRead('scheduleAdvanceRepayments', { employeeId: bal.employeeId, monthly: monthly, startMonth: startInput.value, month: payrollMonth }), 'Scheduling…').then(function(res){
+        if(res && res.ok){
+          payrollAdjustmentsData = res.payrollAdjustments;
+          expandedDedAccountId = null;
+          renderPayrollAdjustments();
+        } else {
+          status.textContent = (res && res.error) || 'Could not schedule repayments.';
+        }
+      });
+    });
+  }
+
+  function renderDedAccountDetail_(container, acct){
+    var historyHtml = acct.history.length ? (
+      '<table><thead><tr><th>Month</th><th class="num">Amount</th></tr></thead><tbody>' +
+      acct.history.map(function(h){ return '<tr><td>'+esc(h.month)+'</td><td class="num">'+money(h.amount)+'</td></tr>'; }).join('') +
+      '</tbody></table>'
+    ) : '<div class="empty">No instalments deducted yet.</div>';
+
+    var skipHtml = acct.skipMonths.length ? (
+      '<div class="sub" style="margin:10px 0 4px;">Skipped months (no instalment was deducted):</div>' +
+      acct.skipMonths.map(function(m){
+        return '<div class="field-row" style="align-items:center;margin-bottom:4px;"><span>'+esc(m)+'</span>' +
+          '<button class="btn small ded-unskip" data-month="'+esc(m)+'">Deduct it after all</button></div>';
+      }).join('')
+    ) : '';
+
+    var manageHtml = acct.status==='active' ? (
+      '<div class="field-row" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line);align-items:flex-end;">' +
+        '<div class="field"><span class="label">Change monthly amount</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num ded-edit-monthly" step="0.01" min="0" value="'+acct.monthly+'"></div></div>' +
+        '<button class="btn small ded-edit-save">Save</button>' +
+        '<button class="btn small danger ded-stop" style="margin-left:auto;">Stop deducting</button>' +
+      '</div>' +
+      '<div class="sub" style="margin-top:6px;">Changing the amount re-schedules every instalment that hasn\'t been paid yet; Stop deducting writes off whatever balance is left.</div>' +
+      '<div class="sub ded-manage-status" style="margin-top:6px;color:var(--warn);"></div>'
+    ) : (acct.status==='closed' ? '<div class="sub" style="margin-top:12px;">Stopped'+(acct.closedNote ? ' — '+esc(acct.closedNote) : '')+'.</div>' : '');
+
+    container.innerHTML =
+      '<div class="label" style="margin-bottom:8px;">'+esc(acct.name)+' — '+esc(acct.description||(acct.kind==='advance'?'Advance':'Deduction'))+'</div>' +
+      '<div class="field-row" style="flex-wrap:wrap;gap:16px;">' +
+        '<div class="sub">Total: <strong>'+money(acct.total)+'</strong></div>' +
+        '<div class="sub">Paid so far: <strong>'+money(acct.paid)+'</strong></div>' +
+        '<div class="sub">Balance: <strong>'+money(acct.balance)+'</strong></div>' +
+        (acct.monthly ? '<div class="sub">Instalments left: <strong>'+(acct.instalmentsLeft==null?'—':acct.instalmentsLeft)+'</strong></div>' : '') +
+      '</div>' +
+      (acct.note ? '<div class="sub" style="margin-top:6px;">Note: '+esc(acct.note)+'</div>' : '') +
+      '<h3 style="margin:16px 0 8px;font-size:13px;color:var(--ink-soft);">Instalment history</h3>' +
+      historyHtml +
+      skipHtml +
+      manageHtml;
+
+    Array.prototype.forEach.call(container.querySelectorAll('.ded-unskip'), function(btn){
+      btn.addEventListener('click', function(){
+        withBusy_(btn, apiRead('updateDeductionAccount', { id: acct.id, op:'unskip', month: btn.dataset.month }), 'Updating…').then(function(res){
+          if(res && res.ok){ payrollAdjustmentsData = res.payrollAdjustments; renderPayrollAdjustments(); }
+        });
+      });
+    });
+
+    var editSave = container.querySelector('.ded-edit-save');
+    if(editSave) editSave.addEventListener('click', function(){
+      var monthlyInput = container.querySelector('.ded-edit-monthly');
+      var manageStatus = container.querySelector('.ded-manage-status');
+      var monthly = Number(monthlyInput.value);
+      manageStatus.textContent = '';
+      if(!monthly || monthly<=0){ manageStatus.textContent = 'Enter a monthly amount greater than 0.'; return; }
+      withBusy_(this, apiRead('updateDeductionAccount', { id: acct.id, op:'update', monthly: monthly, month: payrollMonth }), 'Saving…').then(function(res){
+        if(res && res.ok){ payrollAdjustmentsData = res.payrollAdjustments; renderPayrollAdjustments(); }
+        else manageStatus.textContent = (res && res.error) || 'Could not save.';
+      });
+    });
+
+    var stopBtn = container.querySelector('.ded-stop');
+    if(stopBtn) stopBtn.addEventListener('click', function(){
+      withBusy_(this, apiRead('updateDeductionAccount', { id: acct.id, op:'close', month: payrollMonth }), 'Stopping…').then(function(res){
+        if(res && res.ok){ payrollAdjustmentsData = res.payrollAdjustments; renderPayrollAdjustments(); }
+      });
+    });
   }
 
   function renderAdjEmployeeDetail_(container, e, items){
@@ -2223,16 +2451,36 @@
       '<div class="field-row" style="margin-top:16px;padding-top:12px;border-top:1px solid var(--line);align-items:center;">' +
         '<button class="btn adj-save-status" data-status="in_progress">Save (in progress)</button>' +
         '<button class="btn primary adj-save-status" data-status="finalized">Finalize</button>' +
-        '<button class="btn adj-give-advance" style="margin-left:auto;">Give advance</button>' +
+        '<button class="btn adj-ded-account" style="margin-left:auto;">Deduction account</button>' +
+        '<button class="btn adj-give-advance">Give advance</button>' +
       '</div>' +
-      '<div class="field-row adj-give-advance-form" hidden style="align-items:flex-end;margin-top:10px;">' +
+      '<div class="field-row adj-give-advance-form" hidden style="align-items:flex-end;margin-top:10px;flex-wrap:wrap;">' +
         '<div class="field"><span class="label">Advance amount</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-advance-amount" step="0.01" min="0"></div></div>' +
         '<div class="field" style="min-width:160px;"><span class="label">Note (optional)</span><input type="text" class="adj-advance-note"></div>' +
         '<button class="btn primary small adj-advance-confirm">Confirm</button>' +
         '<button class="btn small adj-advance-cancel">Cancel</button>' +
         '<span class="adj-advance-status sub"></span>' +
       '</div>' +
-      '<div class="sub" style="margin-top:6px;">Give advance records a cash advance whenever it\'s handed over — it\'s not tied to '+esc(payrollMonth)+' and doesn\'t affect Net pay, it only raises the balance shown in Outstanding advances above.</div>' +
+      '<label class="sub adj-advance-schedule-toggle" style="display:none;margin-top:8px;align-items:center;gap:6px;">' +
+        '<input type="checkbox" class="adj-advance-schedule-check"> Put this on a monthly repayment schedule' +
+      '</label>' +
+      '<div class="field-row adj-advance-schedule-fields" hidden style="align-items:flex-end;margin-top:8px;">' +
+        '<div class="field"><span class="label">Monthly repayment</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-advance-monthly" step="0.01" min="0"></div></div>' +
+        '<div class="field"><span class="label">First month</span><input type="month" class="adj-advance-start" value="'+esc(payrollMonth)+'"></div>' +
+      '</div>' +
+      '<div class="sub adj-advance-preview" style="margin-top:4px;"></div>' +
+      '<div class="sub" style="margin-top:6px;">Give advance records a cash advance whenever it\'s handed over — it\'s not tied to '+esc(payrollMonth)+'. Leave the repayment schedule unchecked to just track it as a running balance, or schedule it now so it\'s deducted from Net pay automatically.</div>' +
+
+      '<div class="field-row adj-ded-account-form" hidden style="align-items:flex-end;margin-top:10px;flex-wrap:wrap;">' +
+        '<div class="field" style="min-width:180px;"><span class="label">Description</span><input type="text" class="adj-ded-description" placeholder="e.g. Broken table" maxlength="120"></div>' +
+        '<div class="field"><span class="label">Total owed</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-ded-total" step="0.01" min="0"></div></div>' +
+        '<div class="field"><span class="label">Monthly deduction</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num adj-ded-monthly" step="0.01" min="0"></div></div>' +
+        '<div class="field"><span class="label">First month</span><input type="month" class="adj-ded-start" value="'+esc(payrollMonth)+'"></div>' +
+        '<button class="btn primary small adj-ded-confirm">Confirm</button>' +
+        '<button class="btn small adj-ded-cancel">Cancel</button>' +
+      '</div>' +
+      '<div class="sub adj-ded-preview" style="margin-top:4px;"></div>' +
+      '<div class="sub adj-ded-status" style="margin-top:6px;color:var(--warn);"></div>' +
 
       '<h3 style="margin:20px 0 8px;font-size:13px;color:var(--ink-soft);">This month\'s adjustments</h3>' +
       itemsHtml;
@@ -2336,30 +2584,105 @@
     var revertBtn = container.querySelector('.adj-basic-salary-revert');
     if(revertBtn) revertBtn.addEventListener('click', function(){ saveBasicSalaryOverride_(null, this); });
 
-    // ---- Give advance ----
+    // ---- Give advance (optionally on a monthly repayment schedule) ----
     var advanceForm = container.querySelector('.adj-give-advance-form');
     var advanceAmountInput = container.querySelector('.adj-advance-amount');
     var advanceNoteInput = container.querySelector('.adj-advance-note');
     var advanceStatus = container.querySelector('.adj-advance-status');
+    var advanceScheduleToggle = container.querySelector('.adj-advance-schedule-toggle');
+    var advanceScheduleCheck = container.querySelector('.adj-advance-schedule-check');
+    var advanceScheduleFields = container.querySelector('.adj-advance-schedule-fields');
+    var advanceMonthlyInput = container.querySelector('.adj-advance-monthly');
+    var advanceStartInput = container.querySelector('.adj-advance-start');
+    var advancePreview = container.querySelector('.adj-advance-preview');
+    function updateAdvancePreview(){
+      if(!advanceScheduleCheck.checked){ advancePreview.textContent = ''; return; }
+      advancePreview.textContent = dedPreviewText_(Number(advanceAmountInput.value), Number(advanceMonthlyInput.value), advanceStartInput.value);
+    }
     container.querySelector('.adj-give-advance').addEventListener('click', function(){
       advanceForm.hidden = false;
+      advanceScheduleToggle.style.display = 'flex';
       advanceAmountInput.focus();
     });
     container.querySelector('.adj-advance-cancel').addEventListener('click', function(){
       advanceForm.hidden = true;
+      advanceScheduleToggle.style.display = 'none';
+      advanceScheduleFields.hidden = true;
+      advanceScheduleCheck.checked = false;
       advanceAmountInput.value = ''; advanceNoteInput.value = ''; advanceStatus.textContent = '';
+      advanceMonthlyInput.value = ''; advancePreview.textContent = '';
     });
+    advanceScheduleCheck.addEventListener('change', function(){
+      advanceScheduleFields.hidden = !this.checked;
+      updateAdvancePreview();
+    });
+    advanceAmountInput.addEventListener('input', updateAdvancePreview);
+    advanceMonthlyInput.addEventListener('input', updateAdvancePreview);
+    advanceStartInput.addEventListener('change', updateAdvancePreview);
     container.querySelector('.adj-advance-confirm').addEventListener('click', function(){
       var amount = Number(advanceAmountInput.value);
       if(!amount || amount<=0){ advanceStatus.textContent = 'Enter an amount greater than 0.'; return; }
       var note = advanceNoteInput.value.trim();
+      var params = { employeeId:e.id, amount:amount, note:note, month:payrollMonth };
+      if(advanceScheduleCheck.checked){
+        var monthly = Number(advanceMonthlyInput.value);
+        if(!monthly || monthly<=0){ advanceStatus.textContent = 'Enter a monthly repayment greater than 0.'; return; }
+        if(monthly > amount){ advanceStatus.textContent = 'Monthly repayment cannot be more than the advance amount.'; return; }
+        if(!advanceStartInput.value){ advanceStatus.textContent = 'Choose a first repayment month.'; return; }
+        params.monthly = monthly;
+        params.startMonth = advanceStartInput.value;
+      }
       advanceStatus.textContent = '';
-      withBusy_(this, apiRead('giveAdvance', { employeeId:e.id, amount:amount, note:note, month:payrollMonth }), 'Recording…').then(function(res){
+      withBusy_(this, apiRead('giveAdvance', params), 'Recording…').then(function(res){
         if(res && res.ok){
           payrollAdjustmentsData = res.payrollAdjustments;
           renderPayrollAdjustments();
         } else {
           advanceStatus.textContent = (res && res.error) || 'Could not record advance.';
+        }
+      });
+    });
+
+    // ---- Deduction account (fixed amount owed, e.g. a broken table) ----
+    var dedForm = container.querySelector('.adj-ded-account-form');
+    var dedDescriptionInput = container.querySelector('.adj-ded-description');
+    var dedTotalInput = container.querySelector('.adj-ded-total');
+    var dedMonthlyInput = container.querySelector('.adj-ded-monthly');
+    var dedStartInput = container.querySelector('.adj-ded-start');
+    var dedPreview = container.querySelector('.adj-ded-preview');
+    var dedStatus = container.querySelector('.adj-ded-status');
+    function updateDedPreview(){
+      dedPreview.textContent = dedPreviewText_(Number(dedTotalInput.value), Number(dedMonthlyInput.value), dedStartInput.value);
+    }
+    container.querySelector('.adj-ded-account').addEventListener('click', function(){
+      dedForm.hidden = false;
+      dedDescriptionInput.focus();
+    });
+    container.querySelector('.adj-ded-cancel').addEventListener('click', function(){
+      dedForm.hidden = true;
+      dedDescriptionInput.value = ''; dedTotalInput.value = ''; dedMonthlyInput.value = '';
+      dedPreview.textContent = ''; dedStatus.textContent = '';
+    });
+    dedTotalInput.addEventListener('input', updateDedPreview);
+    dedMonthlyInput.addEventListener('input', updateDedPreview);
+    dedStartInput.addEventListener('change', updateDedPreview);
+    container.querySelector('.adj-ded-confirm').addEventListener('click', function(){
+      var description = dedDescriptionInput.value.trim();
+      var total = Number(dedTotalInput.value);
+      var monthly = Number(dedMonthlyInput.value);
+      var startMonth = dedStartInput.value;
+      dedStatus.textContent = '';
+      if(!description){ dedStatus.textContent = 'Enter a description (e.g. "Broken table").'; return; }
+      if(!total || total<=0){ dedStatus.textContent = 'Total owed must be greater than 0.'; return; }
+      if(!monthly || monthly<=0){ dedStatus.textContent = 'Monthly deduction must be greater than 0.'; return; }
+      if(monthly > total){ dedStatus.textContent = 'Monthly deduction cannot be more than the total.'; return; }
+      if(!startMonth){ dedStatus.textContent = 'Choose a first month.'; return; }
+      withBusy_(this, apiRead('addDeductionAccount', { employeeId:e.id, description:description, total:total, monthly:monthly, startMonth:startMonth, month:payrollMonth }), 'Adding…').then(function(res){
+        if(res && res.ok){
+          payrollAdjustmentsData = res.payrollAdjustments;
+          renderPayrollAdjustments();
+        } else {
+          dedStatus.textContent = (res && res.error) || 'Could not add this deduction account.';
         }
       });
     });
