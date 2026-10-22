@@ -408,9 +408,6 @@
         <div class="field"><span class="label">Contact — cell phone</span><input type="text" id="co-contact-cell" placeholder="digits only — at least one phone is required"></div>
         <div class="field"><span class="label">Contact — email (optional)</span><input type="text" id="co-contact-email"></div>
       </div>
-      <div class="field-row">
-        <div class="field"><span class="label">VAT403 Trade Classification (optional)</span><input type="text" id="co-vat-trade" placeholder="separate from the SIC7 code below"></div>
-      </div>
       <div class="field-row"><button class="btn primary" id="btn-save-company">Save company details</button></div>
       <div id="company-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
@@ -452,7 +449,7 @@
   var job = null;
   var view = 'new';
   var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
-    payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'', vatTradeClassification:'' } };
+    payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
   var currentFileName = null;
 
   function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -1040,7 +1037,6 @@
     document.getElementById('co-contact-bustel').value = c.contactBusTel||'';
     document.getElementById('co-contact-cell').value = c.contactCellNo||'';
     document.getElementById('co-contact-email').value = c.contactEmail||'';
-    document.getElementById('co-vat-trade').value = c.vatTradeClassification||'';
   }
   document.getElementById('btn-save-company').addEventListener('click', function(){
     var info = {
@@ -1053,8 +1049,7 @@
       contactSurname: document.getElementById('co-contact-surname').value.trim(),
       contactBusTel: document.getElementById('co-contact-bustel').value.trim(),
       contactCellNo: document.getElementById('co-contact-cell').value.trim(),
-      contactEmail: document.getElementById('co-contact-email').value.trim(),
-      vatTradeClassification: document.getElementById('co-vat-trade').value.trim()
+      contactEmail: document.getElementById('co-contact-email').value.trim()
     };
     withBusy_(this, apiRead('saveCompanyInfo', info)).then(function(res){
       settings.companyInfo = (res && res.companyInfo) || info;
@@ -3401,7 +3396,6 @@
     var co = res.company || {};
     if(!co.contactFirstName || !co.contactSurname) errors.push('Company: missing Contact Person name (Settings › Payroll › Company).');
     if(!co.contactBusTel && !co.contactCellNo) errors.push('Company: missing a Contact Person phone number (business or cell) (Settings › Payroll › Company).');
-    if(!co.vatTradeClassification) warnings.push('Company: no VAT403 Trade Classification code set (field 2035) — add one under Settings › Payroll › Company if e@syFile flags it.');
 
     res.employees.forEach(function(e){
       var isRsaId = /^\d{13}$/.test(e.idNumber||'');
@@ -3550,14 +3544,21 @@
 
     // ---- Header record (employer demographics) ----
     // Field codes/order/mandatory-status below are from SARS's own PAYE Employer
-    // Reconciliation BRS (v19-4/v25-1, Appendix "Employer record"): 2025/2036 = Contact
-    // Person first name/surname (both mandatory), 2026/2040 = Contact Person business
-    // phone / cell phone (EITHER one is required), 2027 = contact email (optional),
-    // 2035 = VAT403 Trade Classification (mandatory, distinct from the 2082 SIC7 code
-    // already below — not yet captured anywhere in this app, see the Settings field).
+    // Reconciliation BRS (Appendix "Employer record"): 2025/2036 = Contact Person
+    // first name/surname (both mandatory), 2026/2040 = Contact Person business phone
+    // / cell phone (EITHER one is required), 2027 = contact email (optional), 2030 =
+    // Transaction Year, 2031 = Period of Reconciliation (CCYYMM).
     // Earlier versions of this file sent 2025/2026/2027/2036 blank and never sent 2040
     // at all, which is exactly why e@syFile rejected/flagged it — "contact person" and
     // "contact number" are required, not optional.
+    //
+    // Field 2035 (Employer/VAT403 Trade Classification) deliberately does NOT appear
+    // here any more — an earlier version of this file sent it whenever Settings had a
+    // value for it, but SARS's BRS says 2035 "must not be completed" once Transaction
+    // Year is 2021 or later (only years before that could optionally send it), and
+    // e@syFile rejects the entire file if it's present. Since every transaction year
+    // this app will ever generate is 2021+, this field must never be sent — don't
+    // reintroduce it without re-checking the current BRS first.
     var headerFields = [
       ['2010', company.name||'', true],
       ['2015', 'LIVE', true],
@@ -3572,7 +3573,6 @@
       ['2031', data.periodYYYYMM, false]
     ];
     if(company.contactBusTel) headerFields.push(['2026', company.contactBusTel, true]);
-    if(company.vatTradeClassification) headerFields.push(['2035', company.vatTradeClassification, false]);
     headerFields.push(['2036', company.contactSurname||'', true]);
     headerFields.push(['2037', 'N', true]);
     if(company.contactCellNo) headerFields.push(['2040', company.contactCellNo, true]);
