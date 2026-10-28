@@ -1903,7 +1903,17 @@
       var panel = document.getElementById('add-employee-panel');
       panel.hidden = !panel.hidden;
       if(!panel.hidden){
-        panel.innerHTML = '<div class="job-detail" style="margin-top:14px;">' + employeeFormHtml_(null) + '</div>';
+        // employeeFormHtml_ only renders the fields — it never includes a save
+        // button of its own (renderEmployeeDetail_ below adds its own trailing
+        // button row after it, for the Edit case). This panel needs the same thing
+        // for Add, or wireEmployeeForm_'s saveBtn lookup silently finds nothing to
+        // wire up and clicking has no effect.
+        panel.innerHTML = '<div class="job-detail" style="margin-top:14px;">' + employeeFormHtml_(null) +
+          '<div class="field-row" style="margin-top:16px;">' +
+            '<button class="btn primary emp-save">Add employee</button>' +
+            '<span class="save-confirm sub" style="align-self:center;"></span>' +
+          '</div>' +
+        '</div>';
         wireEmployeeForm_(panel, null, function(){ panel.hidden = true; loadPayrollRoster(); });
       }
     });
@@ -2416,7 +2426,9 @@
 
     var basicSalaryNote = e.amountOverridden
       ? ' <span class="sub adj-basic-salary-note">(overridden for '+esc(payrollMonth)+' — normally '+money(e.defaultAmount)+')</span>'
-      : '';
+      : (e.amountProrated
+        ? ' <span class="sub adj-basic-salary-note chip example" style="display:inline-block;">Pro-rated: started part-way through this pay period ('+esc(e.proratedPeriodFrom)+' – '+esc(e.proratedPeriodTo)+') — '+e.proratedWorkedDays+' of '+e.proratedTotalDays+' working days (normally '+money(e.defaultAmount)+')</span>'
+        : '');
 
     container.innerHTML =
       '<div class="label" style="margin-bottom:8px;">'+esc(e.name)+' — '+esc(payrollMonth)+'</div>' +
