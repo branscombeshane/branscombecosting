@@ -1914,6 +1914,11 @@
             '<span class="save-confirm sub" style="align-self:center;"></span>' +
           '</div>' +
         '</div>';
+        // Pre-fill (not lock) the next employee number — still a plain editable text
+        // box, so Shane can overwrite it for a one-off case, but new hires get a
+        // sensible number without him having to go check the Roster for the highest
+        // one in use first.
+        panel.querySelector('.emp-employeeNumber').value = nextEmployeeNumber_();
         wireEmployeeForm_(panel, null, function(){ panel.hidden = true; loadPayrollRoster(); });
       }
     });
@@ -1932,6 +1937,24 @@
       if(container && e) renderEmployeeDetail_(container, e);
       else expandedEmployeeId = null;
     }
+  }
+
+  // Next Employee # to suggest when adding someone new: one more than the highest
+  // purely-numeric employee number anywhere on the Roster (active, discharged, or
+  // rehired — payrollData.employees already holds everyone, not just active, so a
+  // past employee's number never gets handed out twice), never lower than 1035.
+  // Numbers that aren't plain digits (e.g. an imported "CAS-3") are ignored rather
+  // than breaking the comparison.
+  function nextEmployeeNumber_(){
+    var maxNum = 1034;
+    (payrollData && payrollData.employees || []).forEach(function(emp){
+      var raw = String(emp.employeeNumber||'').trim();
+      if(/^\d+$/.test(raw)){
+        var n = Number(raw);
+        if(n > maxNum) maxNum = n;
+      }
+    });
+    return String(maxNum + 1);
   }
 
   function employeeFormHtml_(e){
@@ -2021,6 +2044,15 @@
       if(!rec.contactNumber){
         if(errSpan) errSpan.textContent = 'Contact number is required.';
         return;
+      }
+      if(rec.employeeNumber){
+        var clash = (payrollData && payrollData.employees || []).find(function(x){
+          return x.id !== (e && e.id) && String(x.employeeNumber||'').trim() === rec.employeeNumber;
+        });
+        if(clash){
+          if(errSpan) errSpan.textContent = 'Employee # "'+rec.employeeNumber+'" is already used by '+clash.name+'.';
+          return;
+        }
       }
       rec.uifExempt = String(rec.uifExempt);
       rec.month = payrollMonth;
