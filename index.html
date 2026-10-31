@@ -1769,13 +1769,47 @@
     var imagesPromise = pdfImages.length
       ? Promise.all(pdfImages.map(function(p){ return blobToBase64(p.blob); }))
       : Promise.resolve([]);
+    var el = document.querySelector('#review-panel .save-confirm');
+    if(el) el.textContent = 'Saving…';
     imagesPromise.then(function(images){
       return apiWrite('addJob', { job: payload, images: images });
     }).then(function(){
-      var el = document.querySelector('#review-panel .save-confirm');
+      // addJob now also saves the drawing to Drive, a real network round trip the
+      // hidden-iframe POST can't report back on directly — so wait for the actual
+      // result (pollAddJobResult_) rather than guessing a fixed delay before showing
+      // the Quotes list, which used to race and sometimes show a list missing the
+      // quote you just saved until you manually refreshed.
+      return pollAddJobResult_(newId);
+    }).then(function(){
       if(el) el.textContent = 'Saved.';
       resetNewQuoteForm_();
-      setTimeout(function(){ showView('quotes'); }, 900);
+      setTimeout(function(){ showView('quotes'); }, 400);
+    }).catch(function(e){
+      if(el) el.textContent = 'Something went wrong saving (' + ((e&&e.message)||'try again') + ') — your BOM/pricing is still here, try Save quote again.';
+    });
+  }
+
+  // Polls getAddJobResult until the save has actually finished server-side (including
+  // any Drive upload), up to ~20s. If it's still "pending" after that, we give up
+  // waiting but resolve anyway rather than blocking forever — appendRow itself is fast,
+  // so by this point the save has almost certainly gone through even if the poll
+  // response was slow or dropped; a real failure comes back as an explicit 'error'
+  // status well before this, via runAddJob_'s catch in Code.gs.
+  function pollAddJobResult_(id){
+    var attempts = 0, maxAttempts = 20;
+    return new Promise(function(resolve, reject){
+      function tick(){
+        attempts++;
+        apiRead('getAddJobResult', { id: id }).then(function(res){
+          if(res && res.status === 'done') resolve(res);
+          else if(res && res.status === 'error') reject(new Error(res.error || 'Save failed'));
+          else if(attempts >= maxAttempts) resolve(res);
+          else setTimeout(tick, 1000);
+        }).catch(function(e){
+          if(attempts >= maxAttempts) reject(e); else setTimeout(tick, 1000);
+        });
+      }
+      tick();
     });
   }
 
