@@ -708,23 +708,14 @@
     var m = /^(.*?)\s*-\s*(\d+)\s*mm\s*$/i.exec((name||'').trim());
     return m ? { species: m[1].trim(), thicknessMm: Number(m[2]) } : null;
   }
-  // Timber isn't bought at the exact finished thickness a drawing calls for — you buy
-  // the next standard stock size up and plane it down (16mm finished is really bought
-  // as 25mm stock and planed down; 30mm finished needs 38mm stock, not 25mm), so
-  // costing on the finished thickness under-costs the material actually used.
-  // Given the rate a component roughly matched to (any thickness variant of the right
-  // species), this finds every stock thickness on the rate card for that same species
-  // and returns the smallest one that's still >= the component's finished thickness —
-  // the real stock size it'll be cut from. Returns:
-  //   undefined — matchedRate isn't part of a thickness family at all (its name has no
-  //               "- Nmm" suffix, or it's the only size on the card for that species) —
-  //               nothing to round between, leave the caller's existing behaviour alone.
-  //   null      — it IS a thickness family, but even the thickest stock size on the
-  //               rate card isn't enough to cover the needed thickness.
-  //   {rate, thicknessMm} — the stock size (and its rate card row) to cost on instead.
-  function stockThicknessFor_(matchedRate, neededMm){
+  // Shared by stockThicknessFor_ and cylinderStockThicknessFor_ below: finds every
+  // stock-thickness variant of the SAME species on the rate card as matchedRate,
+  // sorted thinnest to thickest. Returns null if matchedRate isn't part of a thickness
+  // family at all (its name has no "- Nmm" suffix) or only has one size listed for that
+  // species (nothing to choose between).
+  function stockThicknessSiblings_(matchedRate){
     var parsed = matchedRate && parseStockThicknessName_(matchedRate.name);
-    if(!parsed) return undefined;
+    if(!parsed) return null;
     var speciesNorm = normalize(parsed.species);
     var siblings = rates.filter(function(r){
       if(r.category!=='material' || !isVolumeUnit_(r.unit)) return false;
@@ -733,7 +724,39 @@
     }).map(function(r){
       return { rate:r, thicknessMm: parseStockThicknessName_(r.name).thicknessMm };
     }).sort(function(a,b){ return a.thicknessMm - b.thicknessMm; });
-    if(siblings.length<2) return undefined;
+    return siblings.length>=2 ? siblings : null;
+  }
+  // Timber isn't bought at the exact finished thickness a drawing calls for — you buy
+  // the next standard stock size up and plane it down (16mm finished is really bought
+  // as 25mm stock and planed down; 30mm finished needs 38mm stock, not 25mm), so
+  // costing on the finished thickness under-costs the material actually used.
+  // Given the rate a component roughly matched to (any thickness variant of the right
+  // species), this finds the smallest stock thickness on the rate card for that same
+  // species that's still >= the component's finished thickness — the real stock size
+  // it'll be cut from. Returns:
+  //   undefined — matchedRate isn't part of a thickness family at all, or it's the only
+  //               size on the card for that species — nothing to round between, leave
+  //               the caller's existing behaviour alone.
+  //   null      — it IS a thickness family, but even the thickest stock size on the
+  //               rate card isn't enough to cover the needed thickness.
+  //   {rate, thicknessMm} — the stock size (and its rate card row) to cost on instead.
+  function stockThicknessFor_(matchedRate, neededMm){
+    var siblings = stockThicknessSiblings_(matchedRate);
+    if(siblings===null) return undefined;
+    var fit = siblings.find(function(s){ return s.thicknessMm >= neededMm; });
+    return fit || null;
+  }
+  // Round/turned components (cylinder legs, columns...) aren't built by planing a
+  // board down to a finished thickness — they're built from strips cut at an angle,
+  // glued up into a many-sided ring big enough to contain the finished diameter, and
+  // then turned round on the lathe. So which stock thickness is needed depends on the
+  // FINISHED DIAMETER instead of a thickness: 350mm and under uses 25mm stock, over
+  // that uses 38mm. Same species-family lookup and return shape as stockThicknessFor_
+  // above (undefined/null/{rate,thicknessMm}) — just a different rule for the size.
+  function cylinderStockThicknessFor_(matchedRate, diameterMm){
+    var neededMm = (Number(diameterMm)||0) <= 350 ? 25 : 38;
+    var siblings = stockThicknessSiblings_(matchedRate);
+    if(siblings===null) return undefined;
     var fit = siblings.find(function(s){ return s.thicknessMm >= neededMm; });
     return fit || null;
   }
@@ -1470,16 +1493,52 @@
       var volumeBased = basisRate && isVolumeUnit_(basisRate.unit);
       var components = m.components || [];
       var total = 0, hasAny = false, missingThickness = false;
-      // Solid timber is bought at standard stock thicknesses and planed down to the
-      // finished size a drawing calls for — see stockThicknessFor_ above. stockSizesUsed
-      // tracks which stock thickness(es) this material's own components actually
-      // needed, so the line can auto-link to the correct stock-size rate afterwards (or
-      // get flagged if more than one size was needed, or nothing on the card is thick
-      // enough).
-      var stockSizesUsed = {}; // thicknessMm -> {rate, roundedUp}
+      // Solid timber is bought at standard stock thicknesses, and what "stock
+      // thickness" a component needs depends on its shape:
+      //  - flat (panels, rails, legs with a square/rectangular section): planed down
+      //    from the next stock size up that still covers the finished thickness shown
+      //    on the drawing — see stockThicknessFor_ above.
+      //  - round (turned legs, columns...): built from strips glued into a many-sided
+      //    ring and then turned round on the lathe, so it's the FINISHED DIAMETER that
+      //    decides the stock size, not a thickness — see cylinderStockThicknessFor_.
+      // stockSizesUsed tracks which stock thickness(es) this material's own components
+      // actually needed (whichever rule applied), so the line can auto-link to the
+      // correct stock-size rate afterwards, or get flagged if more than one size was
+      // needed or nothing on the card covers it.
+      var stockSizesUsed = {}; // thicknessMm -> {rate, roundedUp, anyRound}
       var tooThickForStock = false;
       components.forEach(function(c){
-        if(!c || !c.length_mm || !c.width_mm) return;
+        if(!c) return;
+        var isRound = c.shape==='round';
+        if(isRound){
+          if(!c.diameter_mm || !c.height_mm) return;
+          hasAny = true;
+          var qtyN = c.quantity||1;
+          // Lateral (side) surface area of the finished cylinder — it gets finished
+          // (oiled/painted) just like a flat face would.
+          totalFinishArea += Math.PI*c.diameter_mm*c.height_mm/1e6*qtyN;
+          if(volumeBased){
+            var radiusM = c.diameter_mm/2000;
+            var cylVolume = Math.PI*radiusM*radiusM*(c.height_mm/1000)*qtyN;
+            var stockR = cylinderStockThicknessFor_(basisRate, c.diameter_mm);
+            if(stockR===null){
+              tooThickForStock = true;
+              total += cylVolume; // no covering stock size on the card — cost the net round volume for now
+            } else if(stockR===undefined){
+              total += cylVolume; // species isn't a recognised thickness family — unchanged behaviour
+            } else {
+              var rEntry = stockSizesUsed[stockR.thicknessMm] || { rate: stockR.rate, roundedUp: false, anyRound: false };
+              rEntry.roundedUp = true;
+              rEntry.anyRound = true;
+              stockSizesUsed[stockR.thicknessMm] = rEntry;
+              total += cylVolume; // the rate linked is what changes with diameter, not the volume formula itself
+            }
+          } else {
+            total += Math.PI*c.diameter_mm*c.diameter_mm/4e6*qtyN; // area-priced fallback: circle's own area
+          }
+          return;
+        }
+        if(!c.length_mm || !c.width_mm) return;
         hasAny = true;
         var area = (c.length_mm*c.width_mm)/1e6*(c.quantity||1);
         totalFinishArea += area;
@@ -1492,7 +1551,7 @@
             } else if(stock===undefined){
               total += area*c.thickness_mm/1000; // no stock-thickness family for this rate — unchanged behaviour
             } else {
-              var entry = stockSizesUsed[stock.thicknessMm] || { rate: stock.rate, roundedUp: false };
+              var entry = stockSizesUsed[stock.thicknessMm] || { rate: stock.rate, roundedUp: false, anyRound: false };
               if(stock.thicknessMm > c.thickness_mm) entry.roundedUp = true;
               stockSizesUsed[stock.thicknessMm] = entry;
               total += area*stock.thicknessMm/1000;
@@ -1514,22 +1573,25 @@
       }
       // Swap the matched/suggested rate for the correct stock-thickness sibling, when
       // the components settled on exactly one stock size and at least one of them was
-      // actually rounded up to it (not just a coincidental exact match already). Keeps
-      // whichever exact/suggestion confidence the species-level match already had —
-      // this only changes WHICH thickness variant of that species it points to.
+      // actually rounded up to it (or, for round/turned parts, picked by diameter —
+      // see the isRound branch above, which always sets roundedUp). Keeps whichever
+      // exact/suggestion confidence the species-level match already had — this only
+      // changes WHICH thickness variant of that species it points to.
       var stockSizes = Object.keys(stockSizesUsed).map(Number);
       if(stockSizes.length===1 && stockSizesUsed[stockSizes[0]].roundedUp){
-        var stockRate = stockSizesUsed[stockSizes[0]].rate;
-        if(match) match = stockRate; else if(suggestion) suggestion = stockRate;
-        volumeFlags.push('"'+m.description+'" priced on '+stockSizes[0]+'mm stock thickness (standard sizes are planed down to the finished thickness shown on the drawing) — linked to "'+stockRate.name+'".');
+        var picked = stockSizesUsed[stockSizes[0]];
+        if(match) match = picked.rate; else if(suggestion) suggestion = picked.rate;
+        volumeFlags.push(picked.anyRound
+          ? '"'+m.description+'" is a turned/round part, priced on '+stockSizes[0]+'mm stock (strips joined into a ring and turned round on the lathe — the stock size follows the finished diameter, 350mm and under uses 25mm, over that uses 38mm) — linked to "'+picked.rate.name+'".'
+          : '"'+m.description+'" priced on '+stockSizes[0]+'mm stock thickness (standard sizes are planed down to the finished thickness shown on the drawing) — linked to "'+picked.rate.name+'".');
       } else if(stockSizes.length>1){
         var thickest = Math.max.apply(null, stockSizes);
-        var thickestRate = stockSizesUsed[thickest].rate;
-        if(match) match = thickestRate; else if(suggestion) suggestion = thickestRate;
+        var thickestEntry = stockSizesUsed[thickest];
+        if(match) match = thickestEntry.rate; else if(suggestion) suggestion = thickestEntry.rate;
         volumeFlags.push('"'+m.description+'" needs more than one stock thickness ('+stockSizes.join('mm, ')+'mm) across its components — this line only auto-linked to the '+thickest+'mm rate; split it into separate lines if you want each piece priced on its own stock size.');
       }
       if(tooThickForStock){
-        volumeFlags.push('"'+m.description+'" has a component thicker than any stock size on the rate card for this species — costed on its own finished thickness for now; check the quantity, or add a thicker stock-size rate card entry.');
+        volumeFlags.push('"'+m.description+'" doesn\'t have a big enough stock thickness on the rate card for this species — costed without stock-rounding for now; check the quantity, or add a larger stock-size rate card entry.');
       }
       lineItems.push({
         id: uid(), type:'material', description: desc,
