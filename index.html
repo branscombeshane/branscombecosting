@@ -360,6 +360,10 @@
         <div class="field"><span class="label">Default labour rate (per hour, excl. VAT)</span><div class="input-affix"><span class="affix">R</span><input type="number" id="set-labour" step="1" min="0"></div></div>
         <div class="field"><span class="label">Default waste % (materials &amp; finish)</span><input type="number" id="set-waste" step="1" min="0"></div>
       </div>
+      <div class="field-row">
+        <div class="field"><span class="label">Default waste % for round/turned parts</span><input type="number" id="set-cylinder-waste" step="1" min="0"></div>
+      </div>
+      <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Cylinder legs and other turned parts are cut from staves and lathed round, which uses up a lot more stock than the finished piece itself — this default applies only to material lines the drawing-reader tags as a round/turned shape, not flat panels.</div>
       <div class="field-row"><button class="btn primary" id="btn-save-settings">Save defaults</button></div>
       <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
@@ -455,7 +459,7 @@
   var pdfImages = [];
   var job = null;
   var view = 'new';
-  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
+  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
     payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
   var currentFileName = null;
 
@@ -961,6 +965,7 @@
     document.getElementById('set-markup').value = settings.markupPct;
     document.getElementById('set-labour').value = settings.labourRate;
     document.getElementById('set-waste').value = settings.defaultWastePct||0;
+    document.getElementById('set-cylinder-waste').value = settings.cylinderWastePct||0;
     renderSubcategoryManager();
   }
 
@@ -1033,6 +1038,7 @@
     settings.markupPct = Number(document.getElementById('set-markup').value)||0;
     settings.labourRate = Number(document.getElementById('set-labour').value)||0;
     settings.defaultWastePct = Number(document.getElementById('set-waste').value)||0;
+    settings.cylinderWastePct = Number(document.getElementById('set-cylinder-waste').value)||0;
     apiWrite('saveSettings', settings).then(function(){
       var msg = document.getElementById('settings-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
@@ -1507,12 +1513,18 @@
       // needed or nothing on the card covers it.
       var stockSizesUsed = {}; // thicknessMm -> {rate, roundedUp, anyRound}
       var tooThickForStock = false;
+      // Tracks whether this material's quantity came from any round/turned component —
+      // used below to apply the higher "round/turned" waste % default instead of the
+      // ordinary materials waste %, since stave-and-lathe construction uses up a lot
+      // more stock than the finished piece (see settings.cylinderWastePct).
+      var anyRoundComponent = false;
       components.forEach(function(c){
         if(!c) return;
         var isRound = c.shape==='round';
         if(isRound){
           if(!c.diameter_mm || !c.height_mm) return;
           hasAny = true;
+          anyRoundComponent = true;
           var qtyN = c.quantity||1;
           // Lateral (side) surface area of the finished cylinder — it gets finished
           // (oiled/painted) just like a flat face would.
@@ -1596,7 +1608,7 @@
       lineItems.push({
         id: uid(), type:'material', description: desc,
         qty: qty, unit: basisRate ? (basisRate.unit || 'm²') : 'm²',
-        wastagePct: Number(settings.defaultWastePct)||0,
+        wastagePct: anyRoundComponent ? (Number(settings.cylinderWastePct)||0) : (Number(settings.defaultWastePct)||0),
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
         suggestedRateId: suggestion ? suggestion.id : null
       });
