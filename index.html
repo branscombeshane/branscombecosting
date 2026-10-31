@@ -127,7 +127,13 @@
   .dropzone.drag{ border-color:var(--accent); color:var(--accent); }
   .dropzone strong{ color:var(--ink); display:block; margin-bottom:4px; font-size:15px; }
   .thumbs{ display:flex; gap:10px; margin-top:16px; flex-wrap:wrap; }
-  .thumbs canvas{ border:1px solid var(--line); max-height:120px; width:auto; }
+  .thumbs canvas{ border:1px solid var(--line); max-height:120px; width:auto; display:block; }
+  .thumb-wrap{ position:relative; display:inline-block; }
+  .thumb-wrap .thumb-page-label{ position:absolute; left:4px; bottom:4px; background:rgba(0,0,0,0.6); color:#fff; font-size:10px; padding:1px 6px; border-radius:3px; font-family:"IBM Plex Sans",sans-serif; }
+  .thumb-remove{ position:absolute; top:-8px; right:-8px; width:22px; height:22px; border-radius:50%;
+    border:1px solid var(--warn); background:var(--warn); color:#fff; font-size:14px; line-height:1;
+    cursor:pointer; display:flex; align-items:center; justify-content:center; padding:0; }
+  .thumb-remove:hover{ filter:brightness(1.1); }
 
   button{ font-family:inherit; cursor:pointer; }
   .btn{
@@ -1193,15 +1199,19 @@
         var typedArray = new Uint8Array(reader.result);
         pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
         pdfjsLib.getDocument({ data: typedArray }).promise.then(function(pdf){
-          var maxPages = Math.min(pdf.numPages, 4);
+          // Render every page up to a generous cap — a CAD export with a title sheet, a
+          // few elevations and a schedule rarely runs past this — so there's something
+          // to pick from. Extraction only ever sees whatever's still here after pages
+          // are removed below (see renderThumbs), so this cap only bounds the preview,
+          // not what gets sent to Claude or how many pages a quote ends up costing.
+          var RENDER_CAP = 20;
+          var maxPages = Math.min(pdf.numPages, RENDER_CAP);
           var pagePromises = [];
           for(var i=1;i<=maxPages;i++) pagePromises.push(renderPage(pdf, i));
-          return Promise.all(pagePromises);
-        }).then(function(results){
-          pdfImages = results;
-          var thumbs = document.getElementById('thumbs');
-          thumbs.innerHTML = '';
-          results.forEach(function(r){ thumbs.appendChild(r.canvas); });
+          return Promise.all(pagePromises).then(function(results){ return { results: results, total: pdf.numPages }; });
+        }).then(function(out){
+          pdfImages = out.results;
+          renderThumbs(out.total > out.results.length ? out.total : null);
           document.getElementById('extract-row').hidden = false;
         }).catch(function(e){
           console.error(e);
@@ -1213,9 +1223,7 @@
       document.getElementById('thumbs').innerHTML = '<div class="status-msg thinking">Reading ' + esc(file.name) + '…</div>';
       renderImageFile(file).then(function(r){
         pdfImages = [r];
-        var thumbs = document.getElementById('thumbs');
-        thumbs.innerHTML = '';
-        thumbs.appendChild(r.canvas);
+        renderThumbs(null);
         document.getElementById('extract-row').hidden = false;
       }).catch(function(e){
         console.error(e);
@@ -1224,6 +1232,47 @@
     } else {
       document.getElementById('thumbs').innerHTML = '<div class="status-msg error">That file type isn\'t supported — use a PDF drawing or a JPEG/PNG photo.</div>';
     }
+  }
+
+  // Draws pdfImages as removable thumbnails — each gets a page-number label and an ×
+  // button so a multi-page export can be trimmed down to just the sheet(s) that actually
+  // matter (e.g. page 1 of an 8-page PDF) before extracting or saving, without having to
+  // re-upload. The last remaining page can't be removed this way — drop a new file, or
+  // use "start a blank quote instead", to clear the drawing entirely.
+  function renderThumbs(totalIfTruncated){
+    var thumbs = document.getElementById('thumbs');
+    thumbs.innerHTML = '';
+    if(!pdfImages.length){
+      thumbs.innerHTML = '<div class="status-msg error">All pages removed — drop a file to start again.</div>';
+      document.getElementById('extract-row').hidden = true;
+      return;
+    }
+    if(totalIfTruncated){
+      thumbs.appendChild(el('<div class="sub" style="width:100%;color:var(--ink-soft);">Showing the first '+pdfImages.length+' of '+totalIfTruncated+' pages.</div>'));
+    }
+    pdfImages.forEach(function(p, i){
+      var wrap = document.createElement('div');
+      wrap.className = 'thumb-wrap';
+      wrap.appendChild(p.canvas);
+      var label = document.createElement('span');
+      label.className = 'thumb-page-label';
+      label.textContent = 'p' + (i+1);
+      wrap.appendChild(label);
+      if(pdfImages.length > 1){
+        var rm = document.createElement('button');
+        rm.type = 'button';
+        rm.className = 'thumb-remove';
+        rm.title = 'Remove this page from the quote';
+        rm.textContent = '×';
+        rm.addEventListener('click', function(e){
+          e.stopPropagation();
+          pdfImages = pdfImages.filter(function(x){ return x !== p; });
+          renderThumbs();
+        });
+        wrap.appendChild(rm);
+      }
+      thumbs.appendChild(wrap);
+    });
   }
 
   function renderImageFile(file){
