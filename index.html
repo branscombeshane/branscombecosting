@@ -364,6 +364,12 @@
         <div class="field"><span class="label">Default waste % for round/turned parts</span><input type="number" id="set-cylinder-waste" step="1" min="0"></div>
       </div>
       <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Cylinder legs and other turned parts are cut from staves and lathed round, which uses up a lot more stock than the finished piece itself — this default applies only to material lines the drawing-reader tags as a round/turned shape, not flat panels.</div>
+      <div class="field-row">
+        <div class="field"><span class="label">Drawer runner clearance per side (mm)</span><input type="number" id="set-drawer-side-clearance" step="1" min="0"></div>
+        <div class="field"><span class="label">Drawer box height deduction (mm)</span><input type="number" id="set-drawer-height-deduction" step="1" min="0"></div>
+        <div class="field"><span class="label">Drawer runner fitting margin (mm)</span><input type="number" id="set-drawer-runner-margin" step="1" min="0"></div>
+      </div>
+      <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Most drawings don't show a drawer box's own size — it's worked out here from the drawer opening instead. Box width = opening width minus the per-side clearance (both sides); box height = opening height minus the height deduction; box depth snaps down to the largest standard Blum runner length (270–650mm) that still fits the available carcass depth once the fitting margin is subtracted. Applies only to material lines the drawing-reader tags as a drawer box.</div>
       <div class="field-row"><button class="btn primary" id="btn-save-settings">Save defaults</button></div>
       <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
@@ -459,7 +465,7 @@
   var pdfImages = [];
   var job = null;
   var view = 'new';
-  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
+  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, drawerSideClearanceMm: 10, drawerHeightDeductionMm: 40, drawerRunnerMarginMm: 25, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
     payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
   var currentFileName = null;
 
@@ -764,6 +770,38 @@
     var fit = siblings.find(function(s){ return s.thicknessMm >= neededMm; });
     return fit || null;
   }
+  // Standard nominal lengths for Blum TANDEM plus BLUMOTION (550H series) concealed
+  // runners, the normal soft-close runner for a separate timber drawer box — per
+  // Blum's published catalogue. If a job ever uses a different Blum runner family
+  // with a different length set, update this list rather than the logic around it.
+  var BLUM_RUNNER_LENGTHS_MM = [270, 300, 350, 400, 450, 500, 550, 600, 650];
+  // Drawing sets almost never show a drawer box's own size — that's worked out from
+  // the drawer opening and the runner hardware, not drawn — so the app derives it:
+  //   boxWidth  = opening width  − 2x the per-side runner clearance (Blum's normal
+  //               runners need clear space down each side of the box)
+  //   boxHeight = opening height − a fixed deduction (kept conservative on purpose,
+  //               per Natalie's instruction — this should never leave a job under-costed)
+  //   boxDepth  = the largest standard Blum runner length that still fits the
+  //               available carcass depth once a fitting margin is subtracted
+  // Returns {boxWidthMm, boxHeightMm, boxDepthMm, runnerFits:true} normally, or
+  // runnerFits:false (boxDepthMm falls back to the raw usable depth) when nothing on
+  // the standard length list is short enough to fit — that case gets flagged so the
+  // person costing the job can check it rather than silently under- or over-sizing it.
+  function drawerBoxSizeFor_(openingWidthMm, openingHeightMm, availableDepthMm){
+    var sideClearance = Number(settings.drawerSideClearanceMm);
+    if(!(sideClearance>=0)) sideClearance = 10;
+    var heightDeduction = Number(settings.drawerHeightDeductionMm);
+    if(!(heightDeduction>=0)) heightDeduction = 40;
+    var runnerMargin = Number(settings.drawerRunnerMarginMm);
+    if(!(runnerMargin>=0)) runnerMargin = 25;
+    var boxWidthMm = Math.max(0, (Number(openingWidthMm)||0) - 2*sideClearance);
+    var boxHeightMm = Math.max(0, (Number(openingHeightMm)||0) - heightDeduction);
+    var usableDepth = (Number(availableDepthMm)||0) - runnerMargin;
+    var fits = BLUM_RUNNER_LENGTHS_MM.filter(function(L){ return L<=usableDepth; });
+    var runnerFits = fits.length>0;
+    var boxDepthMm = runnerFits ? Math.max.apply(null, fits) : Math.max(0, usableDepth);
+    return { boxWidthMm: boxWidthMm, boxHeightMm: boxHeightMm, boxDepthMm: boxDepthMm, runnerFits: runnerFits };
+  }
   // Different designers word the same product differently ("50 mm Solid Oak" vs
   // "Solid Oak" vs "Oak - 50mm"), so a fuzzy word-overlap match is only trustworthy
   // enough to auto-link when it's an exact match on the normalized name (or an exact
@@ -966,6 +1004,9 @@
     document.getElementById('set-labour').value = settings.labourRate;
     document.getElementById('set-waste').value = settings.defaultWastePct||0;
     document.getElementById('set-cylinder-waste').value = settings.cylinderWastePct||0;
+    document.getElementById('set-drawer-side-clearance').value = settings.drawerSideClearanceMm!=null ? settings.drawerSideClearanceMm : 10;
+    document.getElementById('set-drawer-height-deduction').value = settings.drawerHeightDeductionMm!=null ? settings.drawerHeightDeductionMm : 40;
+    document.getElementById('set-drawer-runner-margin').value = settings.drawerRunnerMarginMm!=null ? settings.drawerRunnerMarginMm : 25;
     renderSubcategoryManager();
   }
 
@@ -1039,6 +1080,9 @@
     settings.labourRate = Number(document.getElementById('set-labour').value)||0;
     settings.defaultWastePct = Number(document.getElementById('set-waste').value)||0;
     settings.cylinderWastePct = Number(document.getElementById('set-cylinder-waste').value)||0;
+    settings.drawerSideClearanceMm = Number(document.getElementById('set-drawer-side-clearance').value)||0;
+    settings.drawerHeightDeductionMm = Number(document.getElementById('set-drawer-height-deduction').value)||0;
+    settings.drawerRunnerMarginMm = Number(document.getElementById('set-drawer-runner-margin').value)||0;
     apiWrite('saveSettings', settings).then(function(){
       var msg = document.getElementById('settings-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
@@ -1507,6 +1551,10 @@
       //  - round (turned legs, columns...): built from strips glued into a many-sided
       //    ring and then turned round on the lathe, so it's the FINISHED DIAMETER that
       //    decides the stock size, not a thickness — see cylinderStockThicknessFor_.
+      //  - drawerBox (the timber sides/back/bottom of a drawer box): its own panel
+      //    size isn't drawn at all, so the box is derived from the drawer opening and
+      //    the runner hardware first (see drawerBoxSizeFor_), then costed the same way
+      //    as a flat component once it has a real width/height/depth to work with.
       // stockSizesUsed tracks which stock thickness(es) this material's own components
       // actually needed (whichever rule applied), so the line can auto-link to the
       // correct stock-size rate afterwards, or get flagged if more than one size was
@@ -1547,6 +1595,41 @@
             }
           } else {
             total += Math.PI*c.diameter_mm*c.diameter_mm/4e6*qtyN; // area-priced fallback: circle's own area
+          }
+          return;
+        }
+        var isDrawerBox = c.shape==='drawerBox';
+        if(isDrawerBox){
+          if(!c.opening_width_mm || !c.opening_height_mm || !c.availableDepth_mm || !c.thickness_mm) return;
+          hasAny = true;
+          var qtyN = c.quantity||1;
+          var box = drawerBoxSizeFor_(c.opening_width_mm, c.opening_height_mm, c.availableDepth_mm);
+          // Treats the drawer box as 2 sides (depth x height) + 1 back (width x height)
+          // + 1 bottom (width x depth) — matching how it's priced as one combined
+          // "drawer box / internals" material line rather than separate side/back/
+          // bottom lines.
+          var panelAreaM2 = (2*(box.boxDepthMm*box.boxHeightMm) + (box.boxWidthMm*box.boxHeightMm) + (box.boxWidthMm*box.boxDepthMm))/1e6;
+          totalFinishArea += panelAreaM2*qtyN;
+          if(!box.runnerFits){
+            volumeFlags.push('"'+m.description+'" — the available depth behind this drawer opening ('+Math.round(c.availableDepth_mm)+'mm) is too shallow for even the shortest standard Blum runner ('+BLUM_RUNNER_LENGTHS_MM[0]+'mm) once the fitting margin is allowed for — check this drawer by hand.');
+          } else {
+            volumeFlags.push('"'+m.description+'" drawer box sized from its opening ('+Math.round(c.opening_width_mm)+'x'+Math.round(c.opening_height_mm)+'mm) to '+Math.round(box.boxWidthMm)+'x'+Math.round(box.boxHeightMm)+'x'+box.boxDepthMm+'mm (W x H x D), built for a '+box.boxDepthMm+'mm Blum runner — adjust the clearances under Settings if this looks wrong.');
+          }
+          if(volumeBased){
+            var stockDB = stockThicknessFor_(basisRate, c.thickness_mm);
+            if(stockDB===null){
+              tooThickForStock = true;
+              total += panelAreaM2*qtyN*c.thickness_mm/1000; // no covering stock size on the card — cost the finished thickness for now
+            } else if(stockDB===undefined){
+              total += panelAreaM2*qtyN*c.thickness_mm/1000; // no stock-thickness family for this rate — unchanged behaviour
+            } else {
+              var dbEntry = stockSizesUsed[stockDB.thicknessMm] || { rate: stockDB.rate, roundedUp: false, anyRound: false };
+              if(stockDB.thicknessMm > c.thickness_mm) dbEntry.roundedUp = true;
+              stockSizesUsed[stockDB.thicknessMm] = dbEntry;
+              total += panelAreaM2*qtyN*stockDB.thicknessMm/1000;
+            }
+          } else {
+            total += panelAreaM2*qtyN;
           }
           return;
         }
