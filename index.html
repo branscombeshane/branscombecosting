@@ -701,6 +701,42 @@
     var n = (u||'').toString().toLowerCase().replace(/³/g,'3').replace(/[^a-z0-9]/g,'');
     return n==='m3' || n==='cubicmetre' || n==='cubicmetres' || n==='cubicmeter' || n==='cubicmeters';
   }
+  // Solid-timber rate card entries that come in more than one stock thickness are
+  // named "<species> - <N>mm" (e.g. "Solid Oak - 25mm", "Solid Oak - 38mm") — this
+  // pulls the species name and thickness back out of that naming convention.
+  function parseStockThicknessName_(name){
+    var m = /^(.*?)\s*-\s*(\d+)\s*mm\s*$/i.exec((name||'').trim());
+    return m ? { species: m[1].trim(), thicknessMm: Number(m[2]) } : null;
+  }
+  // Timber isn't bought at the exact finished thickness a drawing calls for — you buy
+  // the next standard stock size up and plane it down (16mm finished is really bought
+  // as 25mm stock and planed down; 30mm finished needs 38mm stock, not 25mm), so
+  // costing on the finished thickness under-costs the material actually used.
+  // Given the rate a component roughly matched to (any thickness variant of the right
+  // species), this finds every stock thickness on the rate card for that same species
+  // and returns the smallest one that's still >= the component's finished thickness —
+  // the real stock size it'll be cut from. Returns:
+  //   undefined — matchedRate isn't part of a thickness family at all (its name has no
+  //               "- Nmm" suffix, or it's the only size on the card for that species) —
+  //               nothing to round between, leave the caller's existing behaviour alone.
+  //   null      — it IS a thickness family, but even the thickest stock size on the
+  //               rate card isn't enough to cover the needed thickness.
+  //   {rate, thicknessMm} — the stock size (and its rate card row) to cost on instead.
+  function stockThicknessFor_(matchedRate, neededMm){
+    var parsed = matchedRate && parseStockThicknessName_(matchedRate.name);
+    if(!parsed) return undefined;
+    var speciesNorm = normalize(parsed.species);
+    var siblings = rates.filter(function(r){
+      if(r.category!=='material' || !isVolumeUnit_(r.unit)) return false;
+      var p = parseStockThicknessName_(r.name);
+      return p && normalize(p.species)===speciesNorm;
+    }).map(function(r){
+      return { rate:r, thicknessMm: parseStockThicknessName_(r.name).thicknessMm };
+    }).sort(function(a,b){ return a.thicknessMm - b.thicknessMm; });
+    if(siblings.length<2) return undefined;
+    var fit = siblings.find(function(s){ return s.thicknessMm >= neededMm; });
+    return fit || null;
+  }
   // Different designers word the same product differently ("50 mm Solid Oak" vs
   // "Solid Oak" vs "Oak - 50mm"), so a fuzzy word-overlap match is only trustworthy
   // enough to auto-link when it's an exact match on the normalized name (or an exact
@@ -1422,13 +1458,34 @@
       var volumeBased = basisRate && isVolumeUnit_(basisRate.unit);
       var components = m.components || [];
       var total = 0, hasAny = false, missingThickness = false;
+      // Solid timber is bought at standard stock thicknesses and planed down to the
+      // finished size a drawing calls for — see stockThicknessFor_ above. stockSizesUsed
+      // tracks which stock thickness(es) this material's own components actually
+      // needed, so the line can auto-link to the correct stock-size rate afterwards (or
+      // get flagged if more than one size was needed, or nothing on the card is thick
+      // enough).
+      var stockSizesUsed = {}; // thicknessMm -> {rate, roundedUp}
+      var tooThickForStock = false;
       components.forEach(function(c){
         if(!c || !c.length_mm || !c.width_mm) return;
         hasAny = true;
         var area = (c.length_mm*c.width_mm)/1e6*(c.quantity||1);
         totalFinishArea += area;
         if(volumeBased){
-          if(c.thickness_mm){ total += area*c.thickness_mm/1000; }
+          if(c.thickness_mm){
+            var stock = stockThicknessFor_(basisRate, c.thickness_mm);
+            if(stock===null){
+              tooThickForStock = true;
+              total += area*c.thickness_mm/1000; // fall back to the finished thickness so qty isn't just left blank
+            } else if(stock===undefined){
+              total += area*c.thickness_mm/1000; // no stock-thickness family for this rate — unchanged behaviour
+            } else {
+              var entry = stockSizesUsed[stock.thicknessMm] || { rate: stock.rate, roundedUp: false };
+              if(stock.thicknessMm > c.thickness_mm) entry.roundedUp = true;
+              stockSizesUsed[stock.thicknessMm] = entry;
+              total += area*stock.thicknessMm/1000;
+            }
+          }
           else { missingThickness = true; }
         } else {
           total += area;
@@ -1442,6 +1499,25 @@
       } else {
         if(hasAny && total>0) qty = Math.round(total*100)/100;
         else volumeFlags.push('No size given for "'+m.description+'" — enter the quantity by hand.');
+      }
+      // Swap the matched/suggested rate for the correct stock-thickness sibling, when
+      // the components settled on exactly one stock size and at least one of them was
+      // actually rounded up to it (not just a coincidental exact match already). Keeps
+      // whichever exact/suggestion confidence the species-level match already had —
+      // this only changes WHICH thickness variant of that species it points to.
+      var stockSizes = Object.keys(stockSizesUsed).map(Number);
+      if(stockSizes.length===1 && stockSizesUsed[stockSizes[0]].roundedUp){
+        var stockRate = stockSizesUsed[stockSizes[0]].rate;
+        if(match) match = stockRate; else if(suggestion) suggestion = stockRate;
+        volumeFlags.push('"'+m.description+'" priced on '+stockSizes[0]+'mm stock thickness (standard sizes are planed down to the finished thickness shown on the drawing) — linked to "'+stockRate.name+'".');
+      } else if(stockSizes.length>1){
+        var thickest = Math.max.apply(null, stockSizes);
+        var thickestRate = stockSizesUsed[thickest].rate;
+        if(match) match = thickestRate; else if(suggestion) suggestion = thickestRate;
+        volumeFlags.push('"'+m.description+'" needs more than one stock thickness ('+stockSizes.join('mm, ')+'mm) across its components — this line only auto-linked to the '+thickest+'mm rate; split it into separate lines if you want each piece priced on its own stock size.');
+      }
+      if(tooThickForStock){
+        volumeFlags.push('"'+m.description+'" has a component thicker than any stock size on the rate card for this species — costed on its own finished thickness for now; check the quantity, or add a thicker stock-size rate card entry.');
       }
       lineItems.push({
         id: uid(), type:'material', description: desc,
