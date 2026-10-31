@@ -1548,6 +1548,11 @@
         '<div class="field"><span class="label">Colour / finish</span><input type="text" data-f="colour" value="'+esc(j.colour||'')+'"></div>' +
       '</div>' +
       (dimStr ? '<div class="sub" style="margin-top:10px;color:var(--ink-soft);">Overall (mm): <span class="num">'+esc(dimStr)+'</span></div>' : '') +
+      ((j.drawingFileUrls && j.drawingFileUrls.length) ? '<div class="sub" style="margin-top:10px;">' +
+        j.drawingFileUrls.map(function(u, i){
+          return '<a class="view-drawing-link" href="'+esc(u)+'" target="_blank" rel="noopener" style="margin-right:14px;">View drawing'+(j.drawingFileUrls.length>1 ? ' — page '+(i+1) : '')+'</a>';
+        }).join('') +
+      '</div>' : '') +
       '<div class="field" style="margin-top:14px;"><span class="label">Notes about this drawing</span><textarea data-f="notes" rows="2" placeholder="Anything the drawing doesn\'t show, or that should override it.">'+esc(j.notes||'')+'</textarea></div>' +
       (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '');
 
@@ -1698,11 +1703,38 @@
       sourceFileName: job.sourceFileName, flags: job.flags, lineItems: job.lineItems,
       markupPct: job.markupPct
     };
-    apiWrite('addJob', { job: payload }).then(function(){
+    // The page images already rendered for AI extraction (or just uploaded, if "Enter
+    // manually" was used instead) travel with the save so the drawing stays viewable
+    // from the saved quote — see saveDrawingImages_ in Code.gs. Sent only on this first
+    // save; editing an existing quote later doesn't re-send it (no re-upload control yet).
+    var imagesPromise = pdfImages.length
+      ? Promise.all(pdfImages.map(function(p){ return blobToBase64(p.blob); }))
+      : Promise.resolve([]);
+    imagesPromise.then(function(images){
+      return apiWrite('addJob', { job: payload, images: images });
+    }).then(function(){
       var el = document.querySelector('#review-panel .save-confirm');
       if(el) el.textContent = 'Saved.';
+      resetNewQuoteForm_();
       setTimeout(function(){ showView('quotes'); }, 900);
     });
+  }
+
+  // Clears the New Quote form back to a blank slate after a successful save — without
+  // this, the uploaded drawing (and the rest of the draft) would silently carry over
+  // into the next quote if you start one without dropping a fresh file first.
+  function resetNewQuoteForm_(){
+    job = null;
+    pdfImages = [];
+    currentFileName = null;
+    renderUploadArea();
+    document.getElementById('thumbs').innerHTML = '';
+    document.getElementById('extract-row').hidden = true;
+    document.getElementById('drawing-notes').value = '';
+    document.getElementById('extract-status').innerHTML = '';
+    var panel = document.getElementById('review-panel');
+    panel.hidden = true;
+    panel.innerHTML = '';
   }
 
   // ================= QUOTES LIST =================
@@ -1726,7 +1758,9 @@
     var title = (j.customerName ? j.customerName+' - ' : '') + (j.productName||'Untitled');
     card.innerHTML =
       '<div class="row1"><strong>'+esc(title)+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+' <span style="font-size:10px;font-weight:400;font-family:\'IBM Plex Sans\',sans-serif;color:var(--ink-soft);">excl. VAT</span></span></div>' +
-      '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+' · <span style="text-decoration:underline;">edit</span></div>' +
+      '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+
+        ((j.drawingFileUrls && j.drawingFileUrls.length) ? ' · <a class="view-drawing-link" href="'+esc(j.drawingFileUrls[0])+'" target="_blank" rel="noopener">view drawing</a>' : '') +
+        ' · <span style="text-decoration:underline;">edit</span></div>' +
       '<div class="job-detail" hidden></div>';
 
     var detail = card.querySelector('.job-detail');
@@ -1761,6 +1795,7 @@
 
     card.addEventListener('click', function(e){
       if(e.target.closest('.job-detail')) return; // clicks inside the editor manage themselves
+      if(e.target.closest('.view-drawing-link')) return; // let the drawing link open, don't also toggle
       if(detail.hidden){
         detail.hidden = false;
         editingJob = JSON.parse(JSON.stringify(j)); // edit a working copy until "Save changes"
