@@ -1357,7 +1357,10 @@
     });
   }
 
-  function pollExtraction(token){
+  // onProgress(seconds) is optional — the original New Quote flow uses it to update
+  // #think-msg; reExtractJob (re-analyzing a saved quote) passes its own callback so
+  // the two status areas never fight over the same element id.
+  function pollExtraction(token, onProgress){
     var attempts = 0, maxAttempts = 45; // ~90s at 2s each
     return new Promise(function(resolve, reject){
       function tick(){
@@ -1367,8 +1370,7 @@
           else if(res && res.status === 'error'){ reject(new Error(res.error || 'Extraction failed')); }
           else if(attempts >= maxAttempts){ reject(new Error('timeout')); }
           else {
-            var t = document.getElementById('think-msg');
-            if(t) t.textContent = 'Reading the drawing… (' + (attempts*2) + 's)';
+            if(onProgress) onProgress(attempts*2);
             setTimeout(tick, 2000);
           }
         }).catch(function(e){
@@ -1390,7 +1392,12 @@
       var token = uid();
       // Notes travel with the images so the drawing is read taking them into account
       // (see EXTRACTION_PROMPT in Code.gs) — not just tacked onto the quote afterwards.
-      return apiWrite('extractDrawing', { token: token, images: b64s, notes: notes }).then(function(){ return pollExtraction(token); });
+      return apiWrite('extractDrawing', { token: token, images: b64s, notes: notes }).then(function(){
+        return pollExtraction(token, function(secs){
+          var t = document.getElementById('think-msg');
+          if(t) t.textContent = 'Reading the drawing… (' + secs + 's)';
+        });
+      });
     }).then(function(data){
       btn.disabled = false;
       statusEl.innerHTML = '';
@@ -1416,7 +1423,12 @@
   });
 
   // ================= JOB / LINE ITEMS =================
-  function startJobFromExtraction(data, notes){
+  // Pure: turns an extraction result into {lineItems, flags} against the CURRENT rate
+  // card — no reference to the New Quote screen's globals (job/currentFileName), so
+  // it's reusable both for a brand new quote (startJobFromExtraction below) and for
+  // re-building just the BOM on an already-saved quote after the rate card changes
+  // (see the "Re-analyze drawing" button in renderJobCard).
+  function buildBomFromExtraction_(data){
     data = data || {};
     var lineItems = [];
 
@@ -1542,6 +1554,12 @@
     var labourMatch = matchRate('labour','Labour',null);
     lineItems.push({ id: uid(), type:'labour', description:'Workshop labour', qty:0, unit:'hour', rateId: labourMatch?labourMatch.id:null, unitPrice: labourMatch? Number(labourMatch.price)||0 : settings.labourRate });
 
+    return { lineItems: lineItems, flags: (data.flags || []).concat(volumeFlags) };
+  }
+
+  function startJobFromExtraction(data, notes){
+    data = data || {};
+    var bom = buildBomFromExtraction_(data);
     job = {
       customerName: '',
       notes: notes || '',
@@ -1552,8 +1570,8 @@
       colour: data.colour || null,
       overallDimensions: data.overallDimensions || {},
       sourceFileName: currentFileName,
-      flags: (data.flags || []).concat(volumeFlags),
-      lineItems: lineItems,
+      flags: bom.flags,
+      lineItems: bom.lineItems,
       markupPct: settings.markupPct
     };
     renderReview();
@@ -1937,15 +1955,18 @@
 
     function renderEditor(){
       var parts = jobEditorParts(editingJob);
+      var hasDrawing = editingJob.drawingFileUrls && editingJob.drawingFileUrls.length;
       detail.innerHTML =
         '<div class="label" style="margin-bottom:8px;">Drawing details</div>' + parts.header +
         '<div class="label" style="margin:18px 0 8px;">Bill of materials</div>' + parts.bom +
         '<div class="label" style="margin:18px 0 8px;">Markup &amp; total</div>' + parts.markup +
         '<div class="field-row" style="margin-top:16px;">' +
           '<button class="btn primary btn-save-existing">Save changes</button>' +
+          (hasDrawing ? '<button class="btn ghost btn-reanalyze">Re-analyze drawing</button>' : '') +
           '<button class="btn danger job-del">Delete this quote</button>' +
           '<span class="save-confirm sub" style="align-self:center;"></span>' +
-        '</div>';
+        '</div>' +
+        '<div class="reanalyze-status"></div>';
       wireJobEditor(editingJob, detail, { rerender: renderEditor });
       detail.querySelector('.btn-save-existing').addEventListener('click', function(e){
         e.stopPropagation();
@@ -1960,6 +1981,37 @@
         e.stopPropagation();
         if(confirm('Delete this quote?')) apiWrite('deleteJob', { id:j.id }).then(function(){ setTimeout(loadQuotes, 900); });
       });
+      // Re-reads the quote's own saved drawing (from Drive) and rebuilds only the bill
+      // of materials / warnings against the CURRENT rate card — the point being you've
+      // just updated prices or stock thicknesses and want this quote to pick them up,
+      // without re-uploading the file. Customer, product name, drawing number etc. are
+      // left exactly as they are; this is a local draft edit, same as any other change
+      // in this panel — nothing is written to the sheet until "Save changes".
+      var reanalyzeBtn = detail.querySelector('.btn-reanalyze');
+      if(reanalyzeBtn){
+        reanalyzeBtn.addEventListener('click', function(e){
+          e.stopPropagation();
+          if(!confirm('Re-read the drawing and rebuild the bill of materials using the current rate card?\n\nThis replaces the line items and warnings below with a fresh read. Customer, product name, drawing number and other details stay as they are. Any manual edits you\'ve made to individual line items will be lost — click Save changes afterwards once you\'re happy with it.')) return;
+          var statusEl = detail.querySelector('.reanalyze-status');
+          reanalyzeBtn.disabled = true;
+          statusEl.innerHTML = '<div class="status-msg thinking">Reading the drawing… (usually 10–30 seconds)</div>';
+          var token = uid();
+          apiWrite('reExtractJob', { token: token, jobId: editingJob.id, notes: editingJob.notes || '' }).then(function(){
+            return pollExtraction(token, function(secs){
+              var s = detail.querySelector('.reanalyze-status');
+              if(s) s.innerHTML = '<div class="status-msg thinking">Reading the drawing… ('+secs+'s)</div>';
+            });
+          }).then(function(data){
+            var bom = buildBomFromExtraction_(data || {});
+            editingJob.lineItems = bom.lineItems;
+            editingJob.flags = bom.flags;
+            renderEditor();
+          }).catch(function(err){
+            reanalyzeBtn.disabled = false;
+            statusEl.innerHTML = '<div class="status-msg error">'+esc(extractErrorMessage(err))+'</div>';
+          });
+        });
+      }
     }
 
     card.addEventListener('click', function(e){
