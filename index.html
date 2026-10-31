@@ -297,6 +297,7 @@
       <div class="field-row" id="extract-row" hidden>
         <button class="btn primary" id="btn-extract">Extract bill of materials</button>
         <button class="btn ghost" id="btn-manual">or start a blank quote instead</button>
+        <button class="btn ghost" id="btn-cancel-upload" style="color:var(--warn);">Cancel</button>
       </div>
       <div id="extract-status"></div>
     </div>
@@ -1374,6 +1375,10 @@
     startJobFromExtraction({}, document.getElementById('drawing-notes').value.trim());
   });
 
+  document.getElementById('btn-cancel-upload').addEventListener('click', function(){
+    resetNewQuoteForm_();
+  });
+
   // ================= JOB / LINE ITEMS =================
   function startJobFromExtraction(data, notes){
     data = data || {};
@@ -1737,10 +1742,15 @@
       '<div class="panel"><h2>2 · Drawing details</h2>' + parts.header + '</div>' +
       '<div class="panel"><h2>3 · Bill of materials</h2>' + parts.bom + '</div>' +
       '<div class="panel"><h2>4 · Markup &amp; total</h2>' + parts.markup +
-        '<div class="field-row" style="margin-top:18px;"><button class="btn primary btn-save-new">Save quote</button><span class="save-confirm sub" style="align-self:center;"></span></div>' +
+        '<div class="field-row" style="margin-top:18px;"><button class="btn primary btn-save-new">Save quote</button>' +
+        '<button class="btn ghost btn-discard-new" style="color:var(--warn);">Discard this quote</button>' +
+        '<span class="save-confirm sub" style="align-self:center;"></span></div>' +
       '</div>';
     wireJobEditor(job, panel, { rerender: renderReview });
     panel.querySelector('.btn-save-new').addEventListener('click', saveJob);
+    panel.querySelector('.btn-discard-new').addEventListener('click', function(){
+      if(confirm('Discard this quote? Nothing has been saved yet.')) resetNewQuoteForm_();
+    });
   }
 
   function saveJob(){
