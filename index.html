@@ -2566,9 +2566,10 @@
         '</div>' +
         '<div id="sage-customer-status" class="sub" style="margin-top:6px;"></div>' +
         '<div id="sage-quote-picks" style="margin-top:12px;"></div>' +
-        '<div class="field-row" style="margin-top:12px;">' +
+        '<div class="field-row" style="margin-top:12px;align-items:center;">' +
           '<button type="button" class="btn primary" id="btn-sage-send-confirm" disabled>Send to Sage</button>' +
           '<button type="button" class="btn ghost" id="btn-sage-send-cancel">Cancel</button>' +
+          '<span class="sub" id="sage-send-hint" style="align-self:center;"></span>' +
           '<span class="sub" id="sage-send-status" style="align-self:center;"></span>' +
         '</div>' +
       '</div>';
@@ -2578,20 +2579,31 @@
     var statusEl = panel.querySelector('#sage-customer-status');
     var sendBtn = panel.querySelector('#btn-sage-send-confirm');
     var sendStatus = panel.querySelector('#sage-send-status');
+    var hintEl = panel.querySelector('#sage-send-hint');
     var sageChecked = false;
+    var sageCheckFailed = false;
 
+    // Always keeps a plain-language reason under the Send button for why it's greyed
+    // out — "Check Sage" must succeed before sending is allowed (confirms the customer
+    // actually exists in Sage), separately from at least one quote being ticked.
     function updateSendEnabled(){
+      var anyPick = !!picksEl.querySelector('.sage-pick');
       var anyChecked = !!picksEl.querySelector('.sage-pick:checked');
       sendBtn.disabled = !(sageChecked && anyChecked);
+      if(!customerInput.value.trim()){ hintEl.textContent = 'Type a customer name, then click "Check Sage".'; }
+      else if(sageCheckFailed){ hintEl.textContent = 'Fix the customer name above and click "Check Sage" again.'; }
+      else if(!sageChecked){ hintEl.textContent = 'Click "Check Sage" above before you can send.'; }
+      else if(anyPick && !anyChecked){ hintEl.textContent = 'Select at least one quote below to send.'; }
+      else { hintEl.textContent = ''; }
     }
     function renderPicks(){
       var name = customerInput.value.trim().toLowerCase();
       sendBtn.disabled = true;
-      if(!name){ picksEl.innerHTML = ''; return; }
+      if(!name){ picksEl.innerHTML = ''; updateSendEnabled(); return; }
       var matches = (jobsCache||[]).filter(function(j){
         return !j.example && !j.sageQuoteId && String(j.customerName||'').trim().toLowerCase()===name;
       });
-      if(!matches.length){ picksEl.innerHTML = '<div class="sub">No not-yet-sent quotes for this customer.</div>'; return; }
+      if(!matches.length){ picksEl.innerHTML = '<div class="sub">No not-yet-sent quotes for this customer.</div>'; updateSendEnabled(); return; }
       picksEl.innerHTML = matches.map(function(j){
         var t = computeTotals(j);
         return '<label class="chk-label" style="display:flex;margin-top:6px;" data-id="'+esc(j.id)+'">' +
@@ -2607,6 +2619,7 @@
     });
     customerInput.addEventListener('input', function(){
       sageChecked = false;
+      sageCheckFailed = false;
       statusEl.textContent = '';
       renderPicks();
     });
