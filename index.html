@@ -25,6 +25,7 @@
     --wood:#a8703e; --wood-soft:#f0e2d1;
     --warn:#b23b3b; --warn-soft:#f6dede;
     --good:#3f7d53; --good-soft:#dfeee3;
+    --amber:#b2772f; --amber-soft:#f3e4cd;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
@@ -34,6 +35,7 @@
       --wood:#d79a5c; --wood-soft:#382a1c;
       --warn:#e07a7a; --warn-soft:#3a2323;
       --good:#7fce97; --good-soft:#1f3527;
+      --amber:#e0b16a; --amber-soft:#3a2e1c;
     }
   }
   :root[data-theme="dark"]{
@@ -43,6 +45,7 @@
     --wood:#d79a5c; --wood-soft:#382a1c;
     --warn:#e07a7a; --warn-soft:#3a2323;
     --good:#7fce97; --good-soft:#1f3527;
+    --amber:#e0b16a; --amber-soft:#3a2e1c;
   }
 
   *{box-sizing:border-box;}
@@ -97,6 +100,7 @@
     outline:2px solid var(--accent); outline-offset:1px;
   }
   .sidebar footer{ margin-top:auto; font-size:11px; color:var(--ink-soft); }
+  #sidebar-user{ display:block; font-size:12px; font-weight:600; color:var(--ink); margin-bottom:8px; }
   .logout-link{ background:none; border:none; padding:0; margin-top:10px; font-size:11px; color:var(--ink-soft);
     text-decoration:underline; cursor:pointer; display:block; }
   .logout-link:hover{ color:var(--ink); }
@@ -195,11 +199,48 @@
   .chip{ display:inline-flex; align-items:center; gap:6px; font-size:11px; padding:3px 8px; border-radius:2px; font-weight:600; letter-spacing:.02em; white-space:nowrap;}
   .chip.good{ background:var(--good-soft); color:var(--good); }
   .chip.warn{ background:var(--warn-soft); color:var(--warn); }
+  .chip.amber{ background:var(--amber-soft); color:var(--amber); }
   .chip.example{ background:var(--wood-soft); color:var(--wood); }
   .chip button{ background:none; border:none; padding:0; color:inherit; font-weight:700; text-decoration:underline; font-size:11px; }
   .chip-confidence{ font-size:10px; font-weight:700; letter-spacing:.02em; text-transform:uppercase; }
   .chip-confidence.high{ color:var(--good); }
   .chip-confidence.low{ color:var(--warn); }
+
+  /* ================= PRODUCTION BOARD ================= */
+  .prod-board{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
+  .prod-card{ border:1px solid var(--line); background:var(--paper-raised); padding:16px; }
+  .prod-card .prod-title{ font-weight:600; font-size:16px; margin-bottom:2px; }
+  .prod-card .prod-meta{ font-size:12px; color:var(--ink-soft); margin-bottom:10px; }
+  .prod-checklist{ list-style:none; margin:0; padding:0; }
+  .prod-checklist li{ display:flex; align-items:center; gap:9px; padding:5px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .prod-checklist li:last-child{ border-bottom:none; }
+  .prod-checklist input[type="checkbox"]{ width:17px; height:17px; flex:none; }
+  .prod-checklist li.done{ color:var(--ink-soft); text-decoration:line-through; }
+  .approve-box{ border:1px solid var(--line-strong); background:var(--accent-soft); padding:14px 16px; margin-top:14px; }
+  .approve-box .field-row{ align-items:center; }
+  .chk-label{ display:inline-flex; align-items:center; gap:6px; margin-right:18px; font-size:13px; }
+  .weeks-pick{ display:flex; gap:8px; margin:6px 0 2px; }
+  .weeks-pick button{ flex:1; border:1px solid var(--line-strong); background:var(--paper-raised); padding:7px 0; font-weight:600; cursor:pointer; font-family:"IBM Plex Sans",sans-serif; }
+  .weeks-pick button.sel-good{ background:var(--good); color:#fff; border-color:var(--good); }
+  .weeks-pick button.sel-amber{ background:var(--amber); color:#fff; border-color:var(--amber); }
+  .weeks-pick button.sel-warn{ background:var(--warn); color:#fff; border-color:var(--warn); }
+  /* ================= KIOSK (factory floor display) ================= */
+  body.kiosk-mode .sidebar, body.kiosk-mode #login-gate, body.kiosk-mode main{ display:none !important; }
+  #kiosk-board{ display:none; min-height:100vh; background:var(--paper); padding:28px 34px; }
+  body.kiosk-mode #kiosk-board{ display:block; }
+  #kiosk-board h1{ font-family:"Barlow Condensed","Arial Narrow",sans-serif; font-weight:700; font-size:34px; margin:0 0 20px; }
+  .kiosk-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:18px; }
+  .kiosk-card{ border:2px solid var(--line-strong); background:var(--paper-raised); padding:18px 20px; }
+  .kiosk-card .kiosk-title{ font-size:22px; font-weight:700; margin-bottom:4px; }
+  .kiosk-card .kiosk-meta{ font-size:15px; color:var(--ink-soft); margin-bottom:10px; }
+  .kiosk-card .kiosk-due{ display:inline-block; padding:3px 10px; font-size:13px; font-weight:700; border-radius:2px; margin-bottom:10px; }
+  .kiosk-due.good{ background:var(--good-soft); color:var(--good); }
+  .kiosk-due.amber{ background:var(--amber-soft); color:var(--amber); }
+  .kiosk-due.warn{ background:var(--warn-soft); color:var(--warn); }
+  .kiosk-card ul{ list-style:none; margin:0; padding:0; font-size:16px; }
+  .kiosk-card li{ padding:4px 0; }
+  .kiosk-card li.done:before{ content:"\2611  "; color:var(--good); }
+  .kiosk-card li.pending:before{ content:"\2610  "; color:var(--ink-soft); }
 
   .flag{ border-left:3px solid var(--warn); background:var(--warn-soft); padding:9px 12px; font-size:13px; margin-bottom:8px; }
   .flag:last-child{ margin-bottom:0; }
@@ -254,6 +295,7 @@
   <div class="login-card">
     <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
     <form id="login-form">
+      <div class="field"><span class="label">Username</span><input type="text" id="login-username" autocomplete="username"></div>
       <div class="field"><span class="label">Password</span><input type="password" id="login-password" autocomplete="current-password"></div>
       <button type="submit" class="btn primary" id="login-submit">Log in</button>
       <div id="login-status" style="margin-top:14px;"></div>
@@ -266,6 +308,7 @@
   <div class="mode-switch" id="mode-switch">
     <button class="mode-btn" data-mode="costing">Costing</button>
     <button class="mode-btn" data-mode="payroll">Payroll</button>
+    <button class="mode-btn" data-mode="production">Production</button>
   </div>
   <nav id="nav">
     <div class="nav-group" data-mode-group="costing">
@@ -281,8 +324,11 @@
       <button class="navbtn" data-tab="reports">Reports</button>
       <button class="navbtn" data-view="payroll-settings">Settings</button>
     </div>
+    <div class="nav-group" data-mode-group="production" hidden>
+      <button class="navbtn" data-view="production">Production board</button>
+    </div>
   </nav>
-  <footer id="sidebar-footer">Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
+  <footer id="sidebar-footer"><span id="sidebar-user"></span>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
     <button type="button" class="logout-link" id="btn-logout">Log out</button>
   </footer>
 </div>
@@ -358,6 +404,14 @@
     <div id="payroll-body" style="margin-top:20px;"></div>
   </section>
 
+  <section class="view" id="view-production" hidden>
+    <div class="sheet-head">
+      <h1>Production</h1>
+      <div class="sub">Approved jobs currently in the workshop, 6&ndash;8 weeks to completion</div>
+    </div>
+    <div id="production-board"></div>
+  </section>
+
   <section class="view" id="view-settings" hidden>
     <div class="sheet-head">
       <h1>Settings</h1>
@@ -402,6 +456,31 @@
         <div class="field"><span class="label">New subcategory</span><input type="text" id="sc-new-name" placeholder="e.g. Foam"></div>
         <button class="btn primary" id="btn-add-subcategory" style="align-self:flex-end;">Add</button>
       </div>
+    </div>
+
+    <!-- Owner-only — hidden for every other role by applyRolePermissions_/loadUsersAdmin_.
+         Adding/editing a user is also re-checked server-side (requireRole_), so hiding
+         this panel is a UI convenience, not the actual security boundary. -->
+    <div class="panel" id="users-admin-panel" style="max-width:520px;" hidden>
+      <h2 style="margin:0 0 4px;">Team logins</h2>
+      <div class="sub" style="margin-bottom:14px;">Who can log in to Batten, and what they can see. Costing = quotes &amp; rate card. Payroll and approving a quote into a job are owner-only. Production = the production board (Workshop manager can also tick off progress; Project manager's board is view-only for now).</div>
+      <div id="users-list-mgr"></div>
+      <div class="field-row" style="margin-top:16px;align-items:flex-end;">
+        <div class="field"><span class="label">Name</span><input type="text" id="user-new-name" placeholder="e.g. Izak"></div>
+        <div class="field"><span class="label">Username</span><input type="text" id="user-new-username" autocomplete="off"></div>
+        <div class="field"><span class="label">Password</span><input type="password" id="user-new-password" autocomplete="new-password"></div>
+        <div class="field">
+          <span class="label">Role</span>
+          <select id="user-new-role">
+            <option value="owner">Owner</option>
+            <option value="design">Designer</option>
+            <option value="workshop" selected>Workshop manager</option>
+            <option value="pm">Project manager</option>
+          </select>
+        </div>
+        <button class="btn primary" id="btn-add-user" style="align-self:flex-end;">Add user</button>
+      </div>
+      <div id="users-admin-status" class="status-msg" style="display:none;margin-top:12px;"></div>
     </div>
   </section>
 
@@ -466,6 +545,14 @@
   </section>
 
 </main>
+
+<!-- Factory-floor "big screen" display — no login, read-only, reached via ?display=floor.
+     Shown instead of everything above (see body.kiosk-mode in the CSS) when that query
+     param is present; see the KIOSK section of the script below. -->
+<div id="kiosk-board">
+  <h1>Batten &mdash; Production</h1>
+  <div id="kiosk-grid" class="kiosk-grid"></div>
+</div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
@@ -609,13 +696,45 @@
   }
 
   // ================= LOGIN GATE =================
-  // One shared password for the whole app, checked server-side against the
-  // Apps Script's APP_PASSWORD script property (never shipped in this file).
-  // Same POST-then-poll pattern as drawing extraction, since a hidden-iframe
-  // form POST can't read a response back directly.
+  // Per-person login against the Users sheet (one shared APP_PASSWORD no longer exists —
+  // each of Natalie/Izak/Tselane/Angy has their own username/password and role). Same
+  // POST-then-poll pattern as drawing extraction, since a hidden-iframe form POST can't
+  // read a response back directly. The logged-in user {id,name,role} is cached in
+  // localStorage (SESSION_KEY) purely so a page refresh doesn't force a re-login — the
+  // server still re-validates that id's role on every sensitive call (approveJob,
+  // updateJobProgress, addUser/updateUser), so a stale/tampered localStorage value can't
+  // grant anything it doesn't actually have server-side.
   var SESSION_KEY = 'batten_session';
-  function isAuthed(){ try{ return localStorage.getItem(SESSION_KEY)==='1'; }catch(e){ return false; } }
-  function setAuthed(v){ try{ if(v) localStorage.setItem(SESSION_KEY,'1'); else localStorage.removeItem(SESSION_KEY); }catch(e){} }
+  var currentUser = null; // {id, name, role} once logged in — see applyRolePermissions_
+  function isAuthed(){ try{ return !!localStorage.getItem(SESSION_KEY); }catch(e){ return false; } }
+  function loadStoredUser(){
+    try{
+      var raw = localStorage.getItem(SESSION_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function setAuthed(user){
+    try{
+      if(user) localStorage.setItem(SESSION_KEY, JSON.stringify(user));
+      else localStorage.removeItem(SESSION_KEY);
+    }catch(e){}
+  }
+
+  // Which sidebar "mode" each role can see at all. Approving a quote and managing users
+  // are further gated on top of this (owner only) inside the costing/production screens
+  // themselves — see the Approve box in renderJobCard and the Users admin panel in Settings.
+  var ROLE_MODES = { owner:['costing','payroll','production'], design:['costing'], workshop:['production'], pm:['production'] };
+  var ROLE_LABELS = { owner:'Owner', design:'Designer', workshop:'Workshop manager', pm:'Project manager' };
+  function applyRolePermissions_(){
+    var role = currentUser ? currentUser.role : 'owner';
+    var allowed = ROLE_MODES[role] || ['costing'];
+    Array.prototype.forEach.call(document.querySelectorAll('.mode-btn'), function(b){
+      b.hidden = allowed.indexOf(b.dataset.mode) === -1;
+    });
+    if(allowed.indexOf(appMode) === -1) setAppMode(allowed[0]);
+    var userEl = document.getElementById('sidebar-user');
+    if(userEl) userEl.textContent = currentUser ? (currentUser.name + ' · ' + (ROLE_LABELS[currentUser.role]||currentUser.role)) : '';
+  }
 
   function pollLoginResult(token){
     var attempts = 0, maxAttempts = 20; // ~8s at 400ms each
@@ -635,9 +754,9 @@
   }
 
   function loginErrorMsg(res){
-    if(res && res.error==='not_configured') return 'The app password hasn\'t been set up yet — set APP_PASSWORD in the Apps Script\'s Script Properties (see SETUP.md).';
+    if(res && res.error==='no_users') return 'No users have been set up yet — run setupSheets in the Apps Script editor, then add the first user\'s row directly to the Users sheet tab (name, username, a password hashed with hashPassword_, role=owner, active=TRUE).';
     if(res && res.error==='timeout') return 'The backend took too long to respond. Try again.';
-    return 'Incorrect password.';
+    return 'Incorrect username or password.';
   }
 
   document.getElementById('login-form').addEventListener('submit', function(e){
@@ -648,16 +767,18 @@
       statusEl.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(new Error('not_configured')))+'</div>';
       return;
     }
+    var username = document.getElementById('login-username').value;
     var pwd = document.getElementById('login-password').value;
     var token = uid();
     submitBtn.disabled = true;
     statusEl.innerHTML = '<div class="status-msg thinking">Checking…</div>';
-    apiWrite('login', { password: pwd, token: token }).then(function(){
+    apiWrite('login', { username: username, password: pwd, token: token }).then(function(){
       return pollLoginResult(token);
     }).then(function(res){
       submitBtn.disabled = false;
       if(res && res.ok){
-        setAuthed(true);
+        currentUser = res.user;
+        setAuthed(currentUser);
         document.getElementById('login-password').value = '';
         statusEl.innerHTML = '';
         document.body.classList.add('authed');
@@ -672,7 +793,7 @@
   });
 
   document.getElementById('btn-logout').addEventListener('click', function(){
-    setAuthed(false);
+    setAuthed(null);
     location.reload();
   });
 
@@ -691,6 +812,7 @@
       g.hidden = (g.dataset.modeGroup !== mode);
     });
     if(mode==='payroll') showView('payroll');
+    else if(mode==='production') showView('production');
     else showView('new');
   }
   document.getElementById('mode-switch').addEventListener('click', function(e){
@@ -706,7 +828,7 @@
   });
   function showView(v){
     view = v;
-    ['new','quotes','rates','payroll','payroll-settings','settings'].forEach(function(name){
+    ['new','quotes','rates','payroll','payroll-settings','settings','production'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
@@ -718,6 +840,7 @@
     if(v==='payroll') initPayrollView();
     if(v==='settings') fillSettingsForm();
     if(v==='payroll-settings') fillPayrollSettingsForm();
+    if(v==='production') loadProduction();
   }
 
   // ================= RATE CARD =================
@@ -2362,8 +2485,9 @@
     var card = el('<div class="job-card"></div>');
     var date = j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-ZA', {year:'numeric',month:'short',day:'numeric'}) : '';
     var title = (j.customerName ? j.customerName+' - ' : '') + (j.productName||'Untitled');
+    var statusChip = j.approved ? (j.completedAt ? ' <span class="chip good">completed</span>' : ' <span class="chip amber">in production</span>') : '';
     card.innerHTML =
-      '<div class="row1"><strong>'+esc(title)+(j.example?' <span class="chip example">example</span>':'')+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+' <span style="font-size:10px;font-weight:400;font-family:\'IBM Plex Sans\',sans-serif;color:var(--ink-soft);">excl. VAT</span></span></div>' +
+      '<div class="row1"><strong>'+esc(title)+(j.example?' <span class="chip example">example</span>':'')+statusChip+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+' <span style="font-size:10px;font-weight:400;font-family:\'IBM Plex Sans\',sans-serif;color:var(--ink-soft);">excl. VAT</span></span></div>' +
       '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+
         ((j.drawingFileUrls && j.drawingFileUrls.length) ? ' · <a class="view-drawing-link" href="'+esc(j.drawingFileUrls[0])+'" target="_blank" rel="noopener">view drawing</a>' : '') +
         ' · <span style="text-decoration:underline;">edit</span></div>' +
@@ -2385,8 +2509,10 @@
           '<button class="btn danger job-del">Delete this quote</button>' +
           '<span class="save-confirm sub" style="align-self:center;"></span>' +
         '</div>' +
-        '<div class="reanalyze-status"></div>';
+        '<div class="reanalyze-status"></div>' +
+        productionStatusHtml_(editingJob);
       wireJobEditor(editingJob, detail, { rerender: renderEditor });
+      wireApproveBox_(detail, editingJob);
       detail.querySelector('.btn-save-existing').addEventListener('click', function(e){
         e.stopPropagation();
         apiWrite('updateJob', { job: editingJob }).then(function(){
@@ -2446,6 +2572,323 @@
     });
     return card;
   }
+
+  // ================= PRODUCTION (approve -> job card -> board) =================
+  // Phase 1 of turning Batten into a workshop management tool (see the header comment in
+  // Code.gs for the full story). A saved quote, once approved, gets a 6/7/8-week
+  // manufacture window and a per-job checklist of the workshop sections it actually
+  // needs — every job gets Woodwork and Packaging; Steel shop, Upholstery and the
+  // Spray-vs-Oil&Varnish finish choice are picked per job (most jobs don't touch all of
+  // them). This block covers: the Approve box inside a saved quote's editor, the
+  // suggestion heuristic that pre-fills it, and the interactive Production board — the
+  // factory-floor kiosk display (?display=floor) is a separate, much simpler read-only
+  // renderer near the very bottom of this script, since it never logs in at all.
+
+  var PRODUCTION_SECTIONS = {
+    woodwork:    'Woodwork (joinery & carpentry)',
+    steel:       'Steel shop (welding)',
+    upholstery:  'Upholstery',
+    spray:       'Spraying',
+    oil_varnish: 'Finishing (oiling & varnish)',
+    packaging:   'Packaging'
+  };
+  function productionSectionLabel_(key){ return PRODUCTION_SECTIONS[key] || key; }
+
+  // 6 weeks is Natalie's target (green); it slips to 7 (amber) or 8 (red) when the shop's
+  // busy — Shane's own colour scheme, used consistently on the job editor, the Production
+  // board and the factory kiosk display.
+  function weeksColorClass_(weeks){
+    weeks = Number(weeks) || 6;
+    return weeks <= 6 ? 'good' : (weeks === 7 ? 'amber' : 'warn');
+  }
+
+  // A plain keyword scan of the BOM's own descriptions — purely a starting suggestion for
+  // the Approve box below, never auto-applied: Natalie sees and can change every checkbox
+  // before confirming. Deliberately simple (no rate-card lookups) since this only has to
+  // be a reasonable first guess, not authoritative.
+  function suggestProductionSections_(j){
+    var text = (j.lineItems||[]).map(function(li){ return li.description||''; }).join(' ').toLowerCase();
+    var steel = /\bsteel\b|\bweld|\bmetal\b|powder.?coat/.test(text);
+    var upholstery = /upholst|\bfoam\b|\bfabric\b|\bleather\b|\bcushion/.test(text);
+    var spray = /\bspray|\blacquer|\bpaint/.test(text);
+    var oil = /\boil(ed|s)?\b|\bvarnish|\bwax\b/.test(text);
+    // Ambiguous or no signal at all defaults to oil & varnish, since that's the default
+    // finish for the solid-oak construction most of Natalie's work uses (see the
+    // carcass-species default in Settings) — easily overridden before confirming either way.
+    var finish = (spray && !oil) ? 'spray' : 'oil_varnish';
+    return { steel: steel, upholstery: upholstery, finish: finish };
+  }
+
+  function renderApproveBox_(sug){
+    return '<div class="approve-box">' +
+      '<div class="label" style="margin-bottom:6px;">Approve this quote &rarr; create a job card</div>' +
+      '<div class="sub" style="margin-bottom:6px;">Manufacture window (6 weeks is the target; 7 or 8 when the shop\'s busy)</div>' +
+      '<div class="weeks-pick">' +
+        [6,7,8].map(function(w){ return '<button type="button" class="weeks-btn" data-weeks="'+w+'">'+w+' weeks</button>'; }).join('') +
+      '</div>' +
+      '<div class="field-row" style="margin-top:12px;">' +
+        '<label class="chk-label"><input type="checkbox" class="sec-steel"'+(sug.steel?' checked':'')+'> Steel shop (welding)</label>' +
+        '<label class="chk-label"><input type="checkbox" class="sec-upholstery"'+(sug.upholstery?' checked':'')+'> Upholstery</label>' +
+      '</div>' +
+      '<div class="field-row" style="margin-top:4px;">' +
+        '<label class="chk-label"><input type="radio" name="finish-method-'+esc(sug._id||'')+'" class="sec-finish" value="spray"'+(sug.finish==='spray'?' checked':'')+'> Spraying</label>' +
+        '<label class="chk-label"><input type="radio" name="finish-method-'+esc(sug._id||'')+'" class="sec-finish" value="oil_varnish"'+(sug.finish==='oil_varnish'?' checked':'')+'> Finishing (oiling &amp; varnish)</label>' +
+      '</div>' +
+      '<div class="sub" style="margin:8px 0 0;color:var(--ink-soft);">Every job also gets Woodwork and Packaging automatically. These checkboxes are only a starting suggestion from the bill of materials — check them over before approving.</div>' +
+      '<div class="field-row" style="margin-top:12px;">' +
+        '<button type="button" class="btn primary btn-approve-confirm">Approve &amp; create job card</button>' +
+        '<span class="approve-status sub" style="align-self:center;"></span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // Read-only summary shown once a quote IS approved, or (owner only) the Approve box
+  // itself on one that isn't yet. Non-owners see nothing extra on an unapproved quote —
+  // approving is Natalie-only (Shane confirmed), so there's no point showing a box
+  // whichever other role can't actually submit.
+  function productionStatusHtml_(j){
+    if(j.approved){
+      var cls = weeksColorClass_(j.manufactureWeeks);
+      var when = j.completedAt ? ('Completed '+esc((j.completedAt||'').slice(0,10))) :
+        ('<span class="chip '+cls+'">due '+esc(j.dueDate||'')+'</span>');
+      return '<div class="sub" style="margin-top:14px;">Approved by '+esc(j.approvedBy||'')+' on '+esc((j.approvedAt||'').slice(0,10))+' — '+when+'. See the Production board to track progress.</div>';
+    }
+    if(currentUser && currentUser.role==='owner'){
+      var sug = suggestProductionSections_(j);
+      sug._id = j.id;
+      return renderApproveBox_(sug);
+    }
+    return '';
+  }
+
+  // Wires the Approve box's controls, if it's actually present (it only renders for an
+  // unapproved quote, owner role). Safe to call unconditionally after every re-render.
+  function wireApproveBox_(container, editingJob){
+    var box = container.querySelector('.approve-box');
+    if(!box) return;
+    var selectedWeeks = 6;
+    var weeksBtns = box.querySelectorAll('.weeks-btn');
+    function paintWeeks(){
+      weeksBtns.forEach(function(b){
+        b.classList.remove('sel-good','sel-amber','sel-warn');
+        if(Number(b.dataset.weeks)===selectedWeeks) b.classList.add('sel-'+weeksColorClass_(selectedWeeks));
+      });
+    }
+    paintWeeks();
+    weeksBtns.forEach(function(b){
+      b.addEventListener('click', function(e){
+        e.stopPropagation();
+        selectedWeeks = Number(b.dataset.weeks);
+        paintWeeks();
+      });
+    });
+    box.querySelector('.btn-approve-confirm').addEventListener('click', function(e){
+      e.stopPropagation();
+      var sections = [];
+      if(box.querySelector('.sec-steel').checked) sections.push('steel');
+      if(box.querySelector('.sec-upholstery').checked) sections.push('upholstery');
+      var finishRadio = box.querySelector('.sec-finish:checked');
+      if(finishRadio) sections.push(finishRadio.value);
+      var statusEl = box.querySelector('.approve-status');
+      var btn = box.querySelector('.btn-approve-confirm');
+      statusEl.textContent = 'Approving…';
+      withBusy_(btn, apiRead('approveJob', {
+        id: editingJob.id, manufactureWeeks: selectedWeeks, sections: sections.join(','),
+        actingUserId: currentUser ? currentUser.id : ''
+      }), 'Approving…').then(function(res){
+        if(res && res.ok){
+          statusEl.textContent = 'Approved.';
+          setTimeout(loadQuotes, 600);
+        } else if(res && res.error==='forbidden'){
+          statusEl.textContent = 'Only Natalie\'s login can approve a quote.';
+        } else {
+          statusEl.textContent = 'Something went wrong — try again.';
+        }
+      }).catch(function(){ statusEl.textContent = 'Couldn\'t reach the backend — try again.'; });
+    });
+  }
+
+  // Mirrors Code.gs's JOB_PROGRESS_ROLES — purely a UI convenience (disables checkboxes
+  // for a role that can't tick them) so the server-side requireRole_ check isn't the
+  // first time someone finds out; it's still the real enforcement either way.
+  var JOB_PROGRESS_ROLES_CLIENT = ['owner','workshop'];
+
+  function loadProduction(){
+    var container = document.getElementById('production-board');
+    container.innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getJobs').then(function(res){
+      renderProductionBoard_((res && res.jobs) || []);
+    }).catch(function(e){ container.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+
+  function renderProductionBoard_(jobs){
+    var container = document.getElementById('production-board');
+    var active = jobs.filter(function(j){ return j.approved && !j.completedAt; });
+    var canTick = currentUser && JOB_PROGRESS_ROLES_CLIENT.indexOf(currentUser.role) !== -1;
+    if(!active.length){
+      container.innerHTML = '<div class="empty">No jobs in production right now — approve a quote from the Quotes screen to add one.</div>';
+      return;
+    }
+    container.innerHTML = '<div class="prod-board">' + active.map(function(j){
+      var sections = j.productionSections || [];
+      var progress = j.sectionProgress || {};
+      var items = sections.map(function(s){
+        var done = progress[s] && progress[s].done;
+        return '<li class="'+(done?'done':'')+'" data-job="'+esc(j.id)+'" data-section="'+esc(s)+'">' +
+          '<input type="checkbox"'+(done?' checked':'')+(canTick?'':' disabled')+'> '+esc(productionSectionLabel_(s)) +
+        '</li>';
+      }).join('');
+      return '<div class="prod-card">' +
+        '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
+        '<div class="prod-meta">'+esc(j.drawingNumber||'—')+(j.customerName?' · '+esc(j.customerName):'')+' · <span class="chip '+weeksColorClass_(j.manufactureWeeks)+'">due '+esc(j.dueDate||'')+'</span></div>' +
+        '<ul class="prod-checklist">'+items+'</ul>' +
+      '</div>';
+    }).join('') + '</div>' +
+    (!canTick ? '<div class="sub" style="margin-top:14px;color:var(--ink-soft);">Your login can view progress here but not tick it off.</div>' : '');
+
+    if(canTick){
+      container.querySelectorAll('.prod-checklist input[type="checkbox"]').forEach(function(cb){
+        cb.addEventListener('change', function(){
+          var li = cb.closest('li');
+          var jobId = li.dataset.job, section = li.dataset.section;
+          var wasChecked = !cb.checked; // value before this change, for reverting on failure
+          cb.disabled = true;
+          apiRead('updateJobProgress', { id: jobId, section: section, done: cb.checked, actingUserId: currentUser.id }).then(function(res){
+            cb.disabled = false;
+            if(res && res.ok){
+              li.classList.toggle('done', cb.checked);
+              if(res.allDone) setTimeout(loadProduction, 800);
+            } else {
+              cb.checked = wasChecked;
+            }
+          }).catch(function(){ cb.disabled = false; cb.checked = wasChecked; });
+        });
+      });
+    }
+  }
+
+  // ================= USERS ADMIN (Settings, owner only) =================
+  var usersCache = [];
+  function loadUsersAdmin_(){
+    var panel = document.getElementById('users-admin-panel');
+    if(!panel) return;
+    panel.hidden = false;
+    apiRead('getUsers').then(function(res){
+      usersCache = (res && res.users) || [];
+      renderUsersAdmin_();
+    }).catch(function(){
+      document.getElementById('users-list-mgr').innerHTML = '<div class="status-msg error">Couldn\'t load users.</div>';
+    });
+  }
+
+  function renderUsersAdmin_(){
+    var wrap = document.getElementById('users-list-mgr');
+    if(!wrap) return;
+    if(!usersCache.length){ wrap.innerHTML = '<div class="empty">No users yet — add the first one below (make it yourself, role Owner).</div>'; return; }
+    wrap.innerHTML = usersCache.map(function(u){
+      return '<div class="field-row user-row" data-id="'+esc(u.id)+'" style="margin-top:8px;align-items:center;">' +
+        '<input type="text" class="u-name" value="'+esc(u.name)+'" style="flex:1;min-width:100px;">' +
+        '<input type="text" class="u-username" value="'+esc(u.username)+'" style="flex:1;min-width:100px;">' +
+        '<input type="password" class="u-password" placeholder="(unchanged)" autocomplete="new-password" style="flex:1;min-width:110px;">' +
+        '<select class="u-role">' +
+          ['owner','design','workshop','pm'].map(function(r){
+            return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+esc(ROLE_LABELS[r]||r)+'</option>';
+          }).join('') +
+        '</select>' +
+        '<label class="chk-label"><input type="checkbox" class="u-active"'+(u.active?' checked':'')+'> Active</label>' +
+        '<button class="btn small u-save">Save</button>' +
+      '</div>';
+    }).join('');
+    wrap.querySelectorAll('.u-save').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var row = btn.closest('.user-row');
+        var id = row.dataset.id;
+        var payload = {
+          id: id,
+          name: row.querySelector('.u-name').value.trim(),
+          username: row.querySelector('.u-username').value.trim(),
+          role: row.querySelector('.u-role').value,
+          active: row.querySelector('.u-active').checked
+        };
+        var pwd = row.querySelector('.u-password').value;
+        if(pwd) payload.password = pwd;
+        var statusEl = document.getElementById('users-admin-status');
+        statusEl.style.display = 'block';
+        statusEl.className = 'status-msg';
+        statusEl.textContent = 'Saving…';
+        var token = uid();
+        withBusy_(btn, apiWrite('updateUser', { user: payload, actingUserId: currentUser.id, token: token }).then(function(){
+          return pollTokenResult_('getUpdateUserResult', token);
+        }), 'Saving…').then(function(res){
+          if(res && res.result && res.result.ok){
+            statusEl.textContent = 'Saved.';
+            loadUsersAdmin_();
+          } else {
+            statusEl.className = 'status-msg error';
+            statusEl.textContent = (res && res.result && res.result.error) || 'Something went wrong.';
+          }
+        }).catch(function(){
+          statusEl.className = 'status-msg error';
+          statusEl.textContent = 'Couldn\'t reach the backend.';
+        });
+      });
+    });
+  }
+
+  // Shared poll helper for the write-then-poll actions that hand back {status,result}
+  // (addUser/updateUser) rather than the flatter shape login/addJob/extraction use —
+  // kept separate from pollLoginResult/pollAddJobResult_ so none of those need reshaping.
+  function pollTokenResult_(action, token){
+    var attempts = 0, maxAttempts = 20;
+    return new Promise(function(resolve, reject){
+      function tick(){
+        attempts++;
+        apiRead(action, { token: token }).then(function(res){
+          if(res && res.status==='done') resolve(res);
+          else if(attempts >= maxAttempts) resolve({ status:'done', result:{ error:'Timed out.' } });
+          else setTimeout(tick, 400);
+        }).catch(function(e){
+          if(attempts >= maxAttempts) reject(e); else setTimeout(tick, 400);
+        });
+      }
+      tick();
+    });
+  }
+
+  document.getElementById('btn-add-user').addEventListener('click', function(){
+    var nameInput = document.getElementById('user-new-name');
+    var usernameInput = document.getElementById('user-new-username');
+    var passwordInput = document.getElementById('user-new-password');
+    var roleInput = document.getElementById('user-new-role');
+    var name = nameInput.value.trim(), username = usernameInput.value.trim(), password = passwordInput.value;
+    if(!name || !username || !password){
+      var statusEl = document.getElementById('users-admin-status');
+      statusEl.style.display = 'block';
+      statusEl.className = 'status-msg error';
+      statusEl.textContent = 'Name, username and password are all required.';
+      return;
+    }
+    var statusEl = document.getElementById('users-admin-status');
+    statusEl.style.display = 'block';
+    statusEl.className = 'status-msg';
+    statusEl.textContent = 'Adding…';
+    var token = uid();
+    apiWrite('addUser', { user: { name:name, username:username, password:password, role:roleInput.value }, actingUserId: currentUser.id, token: token }).then(function(){
+      return pollTokenResult_('getAddUserResult', token);
+    }).then(function(res){
+      if(res && res.result && res.result.id){
+        statusEl.textContent = 'Added.';
+        nameInput.value = ''; usernameInput.value = ''; passwordInput.value = '';
+        loadUsersAdmin_();
+      } else {
+        statusEl.className = 'status-msg error';
+        statusEl.textContent = (res && res.result && res.result.error) || 'Something went wrong.';
+      }
+    }).catch(function(){
+      statusEl.className = 'status-msg error';
+      statusEl.textContent = 'Couldn\'t reach the backend.';
+    });
+  });
 
   // ================= PAYROLL =================
   // Single-company payroll (Natalie's furniture business only) ported from Shane's
@@ -4589,20 +5032,65 @@
       document.body.insertAdjacentHTML('afterbegin',
         '<div class="status-msg error" style="margin:14px 14px 0;">Not connected to a backend yet — set <code>API_URL</code> near the top of index.html to your Apps Script Web App URL. See SETUP.md.</div>');
     }
+    applyRolePermissions_();
     renderUploadArea();
     loadRates();
     apiRead('getSettings').then(function(res){
       if(res && res.settings) settings = res.settings;
       if(view==='settings') fillSettingsForm();
     }).catch(function(){});
-    showView('new');
+    if(currentUser && currentUser.role==='owner') loadUsersAdmin_();
+    var allowed = ROLE_MODES[currentUser?currentUser.role:'owner'] || ['costing'];
+    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : 'new'));
   }
 
-  if(isAuthed()){
+  // ================= KIOSK (factory floor display) =================
+  // Reached via ...?display=floor — the "big screen in the factory" Shane described, for
+  // staff who have no login of their own at all. Entirely read-only, no password, no
+  // pricing/customer-financial data: just which jobs are in production, their due-date
+  // colour and which checklist sections are done. Auto-refreshes so nobody has to touch it.
+  var KIOSK_MODE = /(^|[?&])display=floor(&|$)/.test(location.search);
+  function kioskDueBadge_(j){
+    var cls = weeksColorClass_(j.manufactureWeeks);
+    var label = j.dueDate ? ('Due ' + j.dueDate) : '';
+    return '<span class="kiosk-due '+cls+'">'+esc(label)+'</span>';
+  }
+  function renderKiosk_(jobs){
+    var grid = document.getElementById('kiosk-grid');
+    var active = jobs.filter(function(j){ return j.approved && !j.completedAt; });
+    if(!active.length){ grid.innerHTML = '<div class="empty">No jobs in production right now.</div>'; return; }
+    grid.innerHTML = active.map(function(j){
+      var sections = j.productionSections||[];
+      var progress = j.sectionProgress||{};
+      var items = sections.map(function(s){
+        var done = progress[s] && progress[s].done;
+        return '<li class="'+(done?'done':'pending')+'">'+esc(productionSectionLabel_(s))+'</li>';
+      }).join('');
+      return '<div class="kiosk-card">' +
+        '<div class="kiosk-title">'+esc(j.productName||'Untitled')+'</div>' +
+        '<div class="kiosk-meta">'+esc(j.drawingNumber||'')+(j.customerName?' · '+esc(j.customerName):'')+'</div>' +
+        kioskDueBadge_(j) +
+        '<ul>'+items+'</ul>' +
+      '</div>';
+    }).join('');
+  }
+  function loadKioskOnce_(){
+    apiRead('getJobs').then(function(res){ renderKiosk_((res && res.jobs) || []); }).catch(function(){});
+  }
+  function initKiosk_(){
+    loadKioskOnce_();
+    setInterval(loadKioskOnce_, 60000);
+  }
+
+  if(KIOSK_MODE){
+    document.body.classList.add('kiosk-mode');
+    initKiosk_();
+  } else if(isAuthed()){
+    currentUser = loadStoredUser();
     document.body.classList.add('authed');
     boot();
   } else {
-    document.getElementById('login-password').focus();
+    document.getElementById('login-username').focus();
   }
 
   if('serviceWorker' in navigator){
