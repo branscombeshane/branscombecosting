@@ -370,6 +370,12 @@
         <div class="field"><span class="label">Drawer runner fitting margin (mm)</span><input type="number" id="set-drawer-runner-margin" step="1" min="0"></div>
       </div>
       <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Most drawings don't show a drawer box's own size — it's worked out here from the drawer opening instead. Box width = opening width minus the per-side clearance (both sides); box height = opening height minus the height deduction; box depth snaps down to the largest standard Blum runner length (270–650mm) that still fits the available carcass depth once the fitting margin is subtracted. Applies only to material lines the drawing-reader tags as a drawer box.</div>
+      <div class="field-row">
+        <div class="field"><span class="label">Labour minutes per component</span><input type="number" id="set-labour-min-component" step="1" min="0"></div>
+        <div class="field"><span class="label">Labour minutes per hardware item</span><input type="number" id="set-labour-min-hardware" step="1" min="0"></div>
+        <div class="field"><span class="label">Base labour hours per job</span><input type="number" id="set-labour-base-hours" step="0.5" min="0"></div>
+      </div>
+      <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">The Labour line on every new quote now pre-fills itself (still editable, same as a material line) from: every component counted on the bill of materials × the minutes above, plus every hardware item × its own minutes, plus the fixed base hours for design/setup/admin on every job. A round/turned component counts as 2 components and a drawer box as 4, since lathe work and a 4-panel box both take meaningfully longer to build than one flat panel. These three numbers are starting placeholders, not a researched standard — no two workshops build at the same speed, so check the first several quotes' "Actual hours worked" (entered on a saved quote once it's built) against what was estimated here, and adjust these numbers to match Natalie's shop specifically.</div>
       <div class="field-row"><button class="btn primary" id="btn-save-settings">Save defaults</button></div>
       <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
@@ -465,7 +471,7 @@
   var pdfImages = [];
   var job = null;
   var view = 'new';
-  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, drawerSideClearanceMm: 10, drawerHeightDeductionMm: 40, drawerRunnerMarginMm: 25, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
+  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, drawerSideClearanceMm: 10, drawerHeightDeductionMm: 40, drawerRunnerMarginMm: 25, labourMinutesPerComponent: 25, labourMinutesPerHardwareItem: 8, labourBaseHoursPerJob: 3, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
     payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
   var currentFileName = null;
 
@@ -1007,6 +1013,9 @@
     document.getElementById('set-drawer-side-clearance').value = settings.drawerSideClearanceMm!=null ? settings.drawerSideClearanceMm : 10;
     document.getElementById('set-drawer-height-deduction').value = settings.drawerHeightDeductionMm!=null ? settings.drawerHeightDeductionMm : 40;
     document.getElementById('set-drawer-runner-margin').value = settings.drawerRunnerMarginMm!=null ? settings.drawerRunnerMarginMm : 25;
+    document.getElementById('set-labour-min-component').value = settings.labourMinutesPerComponent!=null ? settings.labourMinutesPerComponent : 25;
+    document.getElementById('set-labour-min-hardware').value = settings.labourMinutesPerHardwareItem!=null ? settings.labourMinutesPerHardwareItem : 8;
+    document.getElementById('set-labour-base-hours').value = settings.labourBaseHoursPerJob!=null ? settings.labourBaseHoursPerJob : 3;
     renderSubcategoryManager();
   }
 
@@ -1083,6 +1092,9 @@
     settings.drawerSideClearanceMm = Number(document.getElementById('set-drawer-side-clearance').value)||0;
     settings.drawerHeightDeductionMm = Number(document.getElementById('set-drawer-height-deduction').value)||0;
     settings.drawerRunnerMarginMm = Number(document.getElementById('set-drawer-runner-margin').value)||0;
+    settings.labourMinutesPerComponent = Number(document.getElementById('set-labour-min-component').value)||0;
+    settings.labourMinutesPerHardwareItem = Number(document.getElementById('set-labour-min-hardware').value)||0;
+    settings.labourBaseHoursPerJob = Number(document.getElementById('set-labour-base-hours').value)||0;
     apiWrite('saveSettings', settings).then(function(){
       var msg = document.getElementById('settings-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
@@ -1504,14 +1516,20 @@
   function buildBomFromExtraction_(data){
     data = data || {};
     var lineItems = [];
+    // Tallied across hardware and materials below, to auto-fill the Labour line's hours
+    // at the end of this function — see the comment above that line for the formula.
+    var totalHardwareQty = 0;
+    var totalWeightedComponents = 0;
 
     (data.hardware||[]).forEach(function(h){
       var m = matchRateWithConfidence_('hardware', h.description, h.sku);
       var match = m && m.exact ? m.rate : null;
       var suggestion = m && !m.exact ? m.rate : null;
+      var hQty = (h.quantity!=null? h.quantity : 1);
+      totalHardwareQty += Number(hQty)||0;
       lineItems.push({
         id: uid(), type:'hardware', description: h.description || 'Hardware item',
-        qty: (h.quantity!=null? h.quantity : 1), unit:'each', sku: h.sku||null,
+        qty: hQty, unit:'each', sku: h.sku||null,
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
         suggestedRateId: suggestion ? suggestion.id : null
       });
@@ -1574,6 +1592,10 @@
           hasAny = true;
           anyRoundComponent = true;
           var qtyN = c.quantity||1;
+          // Counts as 2 "components" worth of labour time each — angle-cut staves,
+          // glue-up into a ring, then lathe turning is meaningfully more work than
+          // cutting one flat panel (see the labour-hours note near the Labour line below).
+          totalWeightedComponents += qtyN*2;
           // Lateral (side) surface area of the finished cylinder — it gets finished
           // (oiled/painted) just like a flat face would.
           totalFinishArea += Math.PI*c.diameter_mm*c.height_mm/1e6*qtyN;
@@ -1603,6 +1625,10 @@
           if(!c.opening_width_mm || !c.opening_height_mm || !c.availableDepth_mm || !c.thickness_mm) return;
           hasAny = true;
           var qtyN = c.quantity||1;
+          // Counts as 4 "components" worth of labour time each — a drawer box is really
+          // 2 sides, a back and a bottom, cut and assembled (see the labour-hours note
+          // near the Labour line below), not one part.
+          totalWeightedComponents += qtyN*4;
           var box = drawerBoxSizeFor_(c.opening_width_mm, c.opening_height_mm, c.availableDepth_mm);
           // Treats the drawer box as 2 sides (depth x height) + 1 back (width x height)
           // + 1 bottom (width x depth) — matching how it's priced as one combined
@@ -1635,6 +1661,7 @@
         }
         if(!c.length_mm || !c.width_mm) return;
         hasAny = true;
+        totalWeightedComponents += (c.quantity||1);
         var area = (c.length_mm*c.width_mm)/1e6*(c.quantity||1);
         totalFinishArea += area;
         if(volumeBased){
@@ -1708,10 +1735,30 @@
       rateId: null, unitPrice: 0
     });
 
-    var labourMatch = matchRate('labour','Labour',null);
-    lineItems.push({ id: uid(), type:'labour', description:'Workshop labour', qty:0, unit:'hour', rateId: labourMatch?labourMatch.id:null, unitPrice: labourMatch? Number(labourMatch.price)||0 : settings.labourRate });
+    // Auto-estimates labour hours from the bill of materials just built, rather than
+    // leaving the Labour line at 0 for someone to fill in from scratch every time:
+    //   (every component counted above × minutes per component, from Settings)
+    // + (every hardware item × minutes per hardware item, from Settings)
+    // + (a fixed base, for design/setup/admin time that isn't tied to any one part)
+    // A round/turned component is weighted as 2 "components" and a drawer box as 4 (see
+    // the totalWeightedComponents notes above) since those genuinely take longer to build
+    // than one flat panel. Still just a pre-fill — the Labour line stays fully editable,
+    // same as a material line's auto-filled quantity. See Settings for the three rates
+    // this is built from; they're starting placeholders, not a researched standard — no
+    // two workshops build at the same pace — so check this against actual hours worked
+    // (recorded on the saved quote once the job's built) and adjust them to match.
+    var labourMinutes = totalWeightedComponents*(Number(settings.labourMinutesPerComponent)||0)
+      + totalHardwareQty*(Number(settings.labourMinutesPerHardwareItem)||0)
+      + (Number(settings.labourBaseHoursPerJob)||0)*60;
+    var labourHoursEst = Math.round((labourMinutes/60)*100)/100;
+    var labourFlags = (totalWeightedComponents>0 || totalHardwareQty>0)
+      ? ['Labour line estimated at '+labourHoursEst+' h ('+totalWeightedComponents+' weighted component(s), '+totalHardwareQty+' hardware item(s), plus the fixed base hours in Settings) — check it, and adjust the per-component/per-hardware/base rates in Settings once you know how it compares to actual hours worked.']
+      : [];
 
-    return { lineItems: lineItems, flags: (data.flags || []).concat(volumeFlags) };
+    var labourMatch = matchRate('labour','Labour',null);
+    lineItems.push({ id: uid(), type:'labour', description:'Workshop labour', qty: labourHoursEst, unit:'hour', rateId: labourMatch?labourMatch.id:null, unitPrice: labourMatch? Number(labourMatch.price)||0 : settings.labourRate });
+
+    return { lineItems: lineItems, flags: (data.flags || []).concat(volumeFlags).concat(labourFlags) };
   }
 
   function startJobFromExtraction(data, notes){
@@ -1859,6 +1906,12 @@
         }).join('') +
       '</div>' : '') +
       '<div class="field" style="margin-top:14px;"><span class="label">Notes about this drawing</span><textarea data-f="notes" rows="2" placeholder="Anything the drawing doesn\'t show, or that should override it.">'+esc(j.notes||'')+'</textarea></div>' +
+      // Only shown once a quote's actually saved (j.id only exists then) — meaningless
+      // on a draft that hasn't been through a real job yet. The Labour line above is
+      // the estimate; this is what to compare it against once the job's built, so the
+      // per-component/per-hardware/base-hours rates in Settings can be tuned to match
+      // Natalie's shop specifically rather than staying a generic placeholder forever.
+      (j.id ? '<div class="field" style="margin-top:14px;max-width:280px;"><span class="label">Actual hours worked (once built)</span><input type="number" data-f="actualHours" step="0.5" min="0" value="'+(j.actualHours!=null? j.actualHours : '')+'" placeholder="e.g. 14"></div>' : '') +
       (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '');
 
     var bom =
@@ -1891,7 +1944,9 @@
     container.querySelectorAll('[data-f]').forEach(function(inp){
       inp.addEventListener('input', function(){
         var f = inp.dataset.f;
-        jobRef[f] = (f==='quantity') ? (Number(inp.value)||1) : inp.value;
+        if(f==='quantity') jobRef[f] = Number(inp.value)||1;
+        else if(f==='actualHours') jobRef[f] = inp.value===''? null : (Number(inp.value)||0);
+        else jobRef[f] = inp.value;
       });
     });
 
