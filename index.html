@@ -165,21 +165,27 @@
   }
   textarea{ resize:vertical; box-sizing:border-box; line-height:1.5; }
   input.num, td input[type="number"]{ font-family:"IBM Plex Mono",monospace; text-align:right; }
-  .cell-desc{ min-width:190px; }
-  .cell-qty, .cell-unit{ width:84px; }
-  .cell-waste{ width:68px; }
-  .cell-rate{ width:104px; }
+  .cell-desc{ min-width:260px; }
+  .cell-qty{ width:110px; }
+  .cell-unit{ width:84px; }
+  .cell-waste{ width:72px; }
+  .cell-rate{ width:124px; }
   .rate-pick{ margin-top:6px; font-size:11px; padding:3px 5px; }
   .bom-table{ table-layout:fixed; }
-  .bom-table .cell-desc{ width:220px; }
-  .bom-table .cell-qty{ width:80px; }
-  .bom-table .cell-unit{ width:70px; }
-  .bom-table .cell-waste{ width:80px; }
-  .bom-table .cell-rate{ width:110px; }
-  .bom-table .cell-total{ width:110px; }
-  .bom-table .cell-ratecard{ width:180px; }
+  /* Widened from the original 220/80/70/80/110/110px — those were clipping both
+     longer material descriptions and anything past 2-3 decimal places on a volume
+     quantity (monospace digits run wider per character than the column allowed for).
+     .table-wrap already scrolls horizontally, so there's no downside to giving every
+     column real breathing room instead of fighting for space. */
+  .bom-table .cell-desc{ width:340px; }
+  .bom-table .cell-qty{ width:110px; }
+  .bom-table .cell-unit{ width:84px; }
+  .bom-table .cell-waste{ width:84px; }
+  .bom-table .cell-rate{ width:128px; }
+  .bom-table .cell-total{ width:128px; }
+  .bom-table .cell-ratecard{ width:220px; }
   .bom-table .cell-actions{ width:36px; }
-  .bom-table td, .bom-table th{ overflow:hidden; }
+  .bom-table td, .bom-table th{ overflow:hidden; text-overflow:ellipsis; }
   .bom-table .cell-ratecard .chip{ max-width:100%; white-space:normal; }
   .bom-table .rate-pick{ width:100%; box-sizing:border-box; }
   .input-affix{ position:relative; display:block; }
