@@ -77,10 +77,10 @@
   }
   .wordmark small{ display:block; font-family:"IBM Plex Sans",sans-serif; letter-spacing:0; text-transform:none;
     font-size:10px; color:var(--ink-soft); font-weight:400; margin-top:10px; margin-right:.32em; }
-  .mode-switch{ display:flex; border:1px solid var(--line-strong); }
-  .mode-btn{ flex:1; background:none; border:none; padding:9px 6px; font-family:"Barlow Condensed","Arial Narrow",sans-serif;
-    font-size:13px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); cursor:pointer; }
-  .mode-btn:first-child{ border-right:1px solid var(--line-strong); }
+  .mode-switch{ display:flex; flex-direction:column; border:1px solid var(--line-strong); }
+  .mode-btn{ background:none; border:none; padding:9px 12px; font-family:"Barlow Condensed","Arial Narrow",sans-serif;
+    font-size:13px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); cursor:pointer; text-align:left; }
+  .mode-btn:not(:last-child){ border-bottom:1px solid var(--line-strong); }
   .mode-btn:hover{ color:var(--ink); }
   .mode-btn.active{ background:var(--accent); color:#fff; }
   nav{ display:flex; flex-direction:column; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
@@ -2831,17 +2831,21 @@
     if(!wrap) return;
     if(!usersCache.length){ wrap.innerHTML = '<div class="empty">No users yet — add the first one below (make it yourself, role Owner).</div>'; return; }
     wrap.innerHTML = usersCache.map(function(u){
-      return '<div class="field-row user-row" data-id="'+esc(u.id)+'" style="margin-top:8px;align-items:center;">' +
-        '<input type="text" class="u-name" value="'+esc(u.name)+'" style="flex:1;min-width:100px;">' +
-        '<input type="text" class="u-username" value="'+esc(u.username)+'" style="flex:1;min-width:100px;">' +
-        '<input type="password" class="u-password" placeholder="(unchanged)" autocomplete="new-password" style="flex:1;min-width:110px;">' +
-        '<select class="u-role">' +
-          ['owner','design','workshop','pm'].map(function(r){
-            return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+esc(ROLE_LABELS[r]||r)+'</option>';
-          }).join('') +
-        '</select>' +
-        '<label class="chk-label"><input type="checkbox" class="u-active"'+(u.active?' checked':'')+'> Active</label>' +
-        '<button class="btn small u-save">Save</button>' +
+      return '<div class="user-row" data-id="'+esc(u.id)+'" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">' +
+        '<div class="field-row" style="align-items:flex-end;">' +
+          '<div class="field" style="min-width:110px;"><span class="label">Name</span><input type="text" class="u-name" value="'+esc(u.name)+'"></div>' +
+          '<div class="field" style="min-width:110px;"><span class="label">Username</span><input type="text" class="u-username" value="'+esc(u.username)+'"></div>' +
+          '<div class="field" style="min-width:140px;"><span class="label">New password</span><input type="password" class="u-password" placeholder="leave blank to keep current" autocomplete="new-password"></div>' +
+          '<div class="field" style="min-width:140px;"><span class="label">Role</span><select class="u-role">' +
+            ['owner','design','workshop','pm'].map(function(r){
+              return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+esc(ROLE_LABELS[r]||r)+'</option>';
+            }).join('') +
+          '</select></div>' +
+        '</div>' +
+        '<div class="field-row" style="margin-top:8px;align-items:center;">' +
+          '<label class="chk-label"><input type="checkbox" class="u-active"'+(u.active?' checked':'')+'> Active</label>' +
+          '<button class="btn small u-save">Save</button>' +
+        '</div>' +
       '</div>';
     }).join('');
     wrap.querySelectorAll('.u-save').forEach(function(btn){
