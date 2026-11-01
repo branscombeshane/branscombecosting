@@ -163,7 +163,6 @@
   td.num, th.num{ text-align:right; }
   tr.section-row td{ background:var(--paper); font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:.06em; color:var(--ink-soft); border-bottom:1px solid var(--line-strong); }
   tr.li-size-missing td{ background:var(--warn-soft); }
-  tr.li-size-missing .cell-desc{ position:relative; }
   tr.subgroup-row td{ font-weight:600; font-size:11px; letter-spacing:.03em; color:var(--ink-soft); padding-top:12px; border-bottom:1px solid var(--line); }
   input[type="text"], input[type="number"], input[type="password"], select, textarea{
     font-family:inherit; font-size:13px; border:1px solid var(--line); background:var(--paper);
@@ -194,6 +193,15 @@
   .bom-table td, .bom-table th{ overflow:hidden; text-overflow:ellipsis; }
   .bom-table .cell-ratecard .chip{ max-width:100%; white-space:normal; }
   .bom-table .rate-pick{ width:100%; box-sizing:border-box; }
+  /* Description pinned to the left edge of the scroll area so it's never the thing that
+     scrolls out of view — without this, scrolling right to reach Rate card/Actions loses
+     track of which line you're even looking at (Shane: "the scroll to see details is not
+     great"). Needs its own opaque background per row state or scrolled content shows
+     through underneath it; thead gets a higher z-index so its own background wins over
+     the body's as they overlap during scroll. */
+  .bom-table .cell-desc{ position:sticky; left:0; z-index:1; background:var(--paper-raised); box-shadow:1px 0 0 var(--line-strong); }
+  .bom-table thead .cell-desc{ z-index:2; background:var(--paper-raised); }
+  .bom-table tr.li-size-missing .cell-desc{ background:var(--warn-soft); }
   .input-affix{ position:relative; display:block; }
   .input-affix .affix{ position:absolute; left:7px; top:50%; transform:translateY(-50%); color:var(--ink-soft); font-size:13px; font-family:"IBM Plex Mono",monospace; pointer-events:none; }
   .input-affix input{ padding-left:18px; }
@@ -364,9 +372,10 @@
 
   <section class="view" id="view-quotes" hidden>
     <div class="sheet-head">
-      <h1>Quotes</h1>
-      <div class="sub" id="quotes-count"></div>
+      <div><h1>Quotes</h1><div class="sub" id="quotes-count"></div></div>
+      <button class="btn" id="btn-open-sage-send">Send to Sage</button>
     </div>
+    <div id="sage-send-panel" hidden></div>
     <div id="quotes-list"></div>
   </section>
 
@@ -2511,6 +2520,163 @@
     panel.innerHTML = '';
   }
 
+  // ================= SAGE QUOTE SEND =================
+  // Bundles one or more not-yet-sent Batten quotes for the same customer into a single
+  // Sage quote (see Code.gs's "Sage Quote push" section for the real work — this is
+  // just the picker). Deliberately separate from Approve below: sending to Sage and
+  // approving a quote into a factory job are two independent steps that can happen in
+  // either order (Shane confirmed), so nothing here reads or sets approved/dueDate etc.
+
+  function pollSageQuotePush_(token, onProgress){
+    var attempts = 0, maxAttempts = 45; // ~90s at 2s each — same budget as pollExtraction
+    return new Promise(function(resolve, reject){
+      function tick(){
+        attempts++;
+        apiRead('getSageQuotePushResult', { token: token }).then(function(res){
+          if(res && res.status === 'done'){ resolve(res.result || {}); }
+          else if(res && res.status === 'error'){ reject(new Error(res.error || 'Sending to Sage failed')); }
+          else if(attempts >= maxAttempts){ reject(new Error('timeout')); }
+          else { if(onProgress) onProgress(attempts*2); setTimeout(tick, 2000); }
+        }).catch(function(e){
+          if(attempts >= maxAttempts) reject(e); else setTimeout(tick, 2000);
+        });
+      }
+      tick();
+    });
+  }
+
+  function renderSageSendPanel_(){
+    var panel = document.getElementById('sage-send-panel');
+    // Every customer name any not-yet-sent quote currently has, as typing suggestions
+    // only — doesn't mean they're actually in Sage, "Check Sage" below is what matters.
+    var names = {};
+    (jobsCache||[]).forEach(function(j){
+      if(!j.example && j.customerName && !j.sageQuoteId) names[j.customerName] = true;
+    });
+    panel.innerHTML =
+      '<div class="approve-box">' +
+        '<div class="label" style="margin-bottom:6px;">Send quotes to Sage</div>' +
+        '<div class="sub" style="margin-bottom:10px;">Pick the customer, then which of their not-yet-sent quotes to bundle into one Sage quote — one Sage line per quote selected.</div>' +
+        '<div class="field-row">' +
+          '<div class="field" style="min-width:240px;"><span class="label">Customer (must match Sage exactly)</span>' +
+            '<input type="text" id="sage-send-customer" list="sage-send-customer-list" placeholder="e.g. Acme Interiors">' +
+            '<datalist id="sage-send-customer-list">'+Object.keys(names).map(function(n){ return '<option value="'+esc(n)+'">'; }).join('')+'</datalist>' +
+          '</div>' +
+          '<button type="button" class="btn" id="btn-sage-check-customer" style="align-self:flex-end;">Check Sage</button>' +
+        '</div>' +
+        '<div id="sage-customer-status" class="sub" style="margin-top:6px;"></div>' +
+        '<div id="sage-quote-picks" style="margin-top:12px;"></div>' +
+        '<div class="field-row" style="margin-top:12px;">' +
+          '<button type="button" class="btn primary" id="btn-sage-send-confirm" disabled>Send to Sage</button>' +
+          '<button type="button" class="btn ghost" id="btn-sage-send-cancel">Cancel</button>' +
+          '<span class="sub" id="sage-send-status" style="align-self:center;"></span>' +
+        '</div>' +
+      '</div>';
+
+    var customerInput = panel.querySelector('#sage-send-customer');
+    var picksEl = panel.querySelector('#sage-quote-picks');
+    var statusEl = panel.querySelector('#sage-customer-status');
+    var sendBtn = panel.querySelector('#btn-sage-send-confirm');
+    var sendStatus = panel.querySelector('#sage-send-status');
+    var sageChecked = false;
+
+    function updateSendEnabled(){
+      var anyChecked = !!picksEl.querySelector('.sage-pick:checked');
+      sendBtn.disabled = !(sageChecked && anyChecked);
+    }
+    function renderPicks(){
+      var name = customerInput.value.trim().toLowerCase();
+      sendBtn.disabled = true;
+      if(!name){ picksEl.innerHTML = ''; return; }
+      var matches = (jobsCache||[]).filter(function(j){
+        return !j.example && !j.sageQuoteId && String(j.customerName||'').trim().toLowerCase()===name;
+      });
+      if(!matches.length){ picksEl.innerHTML = '<div class="sub">No not-yet-sent quotes for this customer.</div>'; return; }
+      picksEl.innerHTML = matches.map(function(j){
+        var t = computeTotals(j);
+        return '<label class="chk-label" style="display:flex;margin-top:6px;" data-id="'+esc(j.id)+'">' +
+          '<input type="checkbox" class="sage-pick" checked> ' +
+          esc(j.productName||'Untitled')+(j.drawingNumber?' ('+esc(j.drawingNumber)+')':'') +
+          ' <span class="num" style="margin-left:auto;">'+money(t.total)+'</span>' +
+        '</label>';
+      }).join('');
+      updateSendEnabled();
+    }
+    picksEl.addEventListener('change', function(e){
+      if(e.target.classList.contains('sage-pick')) updateSendEnabled();
+    });
+    customerInput.addEventListener('input', function(){
+      sageChecked = false;
+      statusEl.textContent = '';
+      renderPicks();
+    });
+    renderPicks();
+
+    panel.querySelector('#btn-sage-check-customer').addEventListener('click', function(e){
+      var btn = e.currentTarget;
+      var name = customerInput.value.trim();
+      if(!name){ statusEl.innerHTML = '<span style="color:var(--warn);">Type a customer name first.</span>'; return; }
+      statusEl.textContent = '';
+      withBusy_(btn, apiRead('sageCheckCustomer', { customerName: name }), 'Checking…').then(function(res){
+        if(res && res.error){
+          sageChecked = false;
+          statusEl.innerHTML = '<span style="color:var(--warn);">'+esc(res.error)+'</span>';
+        } else if(res && res.exists){
+          sageChecked = true;
+          statusEl.innerHTML = '<span style="color:var(--good);">Found in Sage: '+esc(res.sageCustomerName)+'.</span>';
+        } else {
+          sageChecked = false;
+          statusEl.innerHTML = '<span style="color:var(--warn);">'+esc((res && res.reason) || 'Not found in Sage.')+'</span>';
+        }
+        updateSendEnabled();
+      }).catch(function(e){
+        sageChecked = false;
+        statusEl.innerHTML = '<span style="color:var(--warn);">'+esc(backendErrorMsg(e))+'</span>';
+      });
+    });
+
+    panel.querySelector('#btn-sage-send-cancel').addEventListener('click', function(){
+      panel.hidden = true;
+      panel.innerHTML = '';
+    });
+
+    sendBtn.addEventListener('click', function(){
+      var name = customerInput.value.trim();
+      var rows = [];
+      Array.prototype.forEach.call(picksEl.querySelectorAll('.sage-pick:checked'), function(cb){
+        var id = cb.closest('label').dataset.id;
+        var j = (jobsCache||[]).find(function(x){ return x.id===id; });
+        if(!j) return;
+        var t = computeTotals(j);
+        rows.push({ battenQuoteId: j.id, description: (j.productName||'Untitled')+(j.drawingNumber?' ('+j.drawingNumber+')':''), total: t.total });
+      });
+      if(!rows.length) return;
+      sendBtn.disabled = true;
+      sendStatus.textContent = 'Sending…';
+      var token = uid();
+      apiWrite('sageQuotePush', { token: token, customerName: name, rows: rows, byName: currentUser ? currentUser.name : '' }).then(function(){
+        return pollSageQuotePush_(token, function(secs){ sendStatus.textContent = 'Sending… ('+secs+'s)'; });
+      }).then(function(res){
+        sendStatus.textContent = 'Sent — Sage quote '+(res.sageQuoteNumber || res.sageQuoteId || '')+'.';
+        setTimeout(function(){
+          panel.hidden = true; panel.innerHTML = '';
+          loadQuotes();
+        }, 1200);
+      }).catch(function(e){
+        sendBtn.disabled = false;
+        sendStatus.textContent = '';
+        statusEl.innerHTML = '<span style="color:var(--warn);">'+esc(e && e.message ? e.message : 'Something went wrong sending to Sage.')+'</span>';
+      });
+    });
+  }
+
+  document.getElementById('btn-open-sage-send').addEventListener('click', function(){
+    var panel = document.getElementById('sage-send-panel');
+    if(!panel.hidden){ panel.hidden = true; panel.innerHTML = ''; return; }
+    panel.hidden = false;
+    renderSageSendPanel_();
+  });
+
   // ================= QUOTES LIST =================
   function loadQuotes(){
     var list = document.getElementById('quotes-list');
@@ -2531,6 +2697,7 @@
     var date = j.createdAt ? new Date(j.createdAt).toLocaleDateString('en-ZA', {year:'numeric',month:'short',day:'numeric'}) : '';
     var title = (j.customerName ? j.customerName+' - ' : '') + (j.productName||'Untitled');
     var statusChip = j.approved ? (j.completedAt ? ' <span class="chip good">completed</span>' : ' <span class="chip amber">in production</span>') : '';
+    if(j.sageQuoteId) statusChip += ' <span class="chip good" title="Sent to Sage">Sage '+esc(j.sageQuoteNumber||j.sageQuoteId)+'</span>';
     card.innerHTML =
       '<div class="row1"><strong>'+esc(title)+(j.example?' <span class="chip example">example</span>':'')+statusChip+'</strong><span class="num" style="font-size:16px;">'+money(t.total)+' <span style="font-size:10px;font-weight:400;font-family:\'IBM Plex Sans\',sans-serif;color:var(--ink-soft);">excl. VAT</span></span></div>' +
       '<div class="meta">'+esc(j.drawingNumber||'—')+' · qty '+esc(j.quantity||1)+' · '+esc(date)+
@@ -2622,9 +2789,10 @@
   // Phase 1 of turning Batten into a workshop management tool (see the header comment in
   // Code.gs for the full story). A saved quote, once approved, gets a 6/7/8-week
   // manufacture window and a per-job checklist of the workshop sections it actually
-  // needs — every job gets Woodwork and Packaging; Steel shop, Upholstery and the
-  // Spray-vs-Oil&Varnish finish choice are picked per job (most jobs don't touch all of
-  // them). This block covers: the Approve box inside a saved quote's editor, the
+  // needs — every job gets Packaging; Woodwork, Steel shop, Upholstery and the
+  // Spray-vs-Oil&Varnish finish choice are all picked per job (not every job touches
+  // woodwork — e.g. a steel-only piece — so it's just another checkbox, same as the rest).
+  // This block covers: the Approve box inside a saved quote's editor, the
   // suggestion heuristic that pre-fills it, and the interactive Production board — the
   // factory-floor kiosk display (?display=floor) is a separate, much simpler read-only
   // renderer near the very bottom of this script, since it never logs in at all.
@@ -2653,6 +2821,10 @@
   // be a reasonable first guess, not authoritative.
   function suggestProductionSections_(j){
     var text = (j.lineItems||[]).map(function(li){ return li.description||''; }).join(' ').toLowerCase();
+    // Woodwork is just another suggested checkbox now, not forced on — Shane: "Not every
+    // job has woodwork, some are only steel etc". Matches on timber species/material words
+    // plus joinery/carcass terms, since most (not all) jobs are solid-timber construction.
+    var woodwork = /\bwood|\btimber|\boak\b|\bpine\b|\bply\b|\bmdf\b|\bjoin|\bcarpentry|\bcarcass|\bveneer/.test(text);
     var steel = /\bsteel\b|\bweld|\bmetal\b|powder.?coat/.test(text);
     var upholstery = /upholst|\bfoam\b|\bfabric\b|\bleather\b|\bcushion/.test(text);
     var spray = /\bspray|\blacquer|\bpaint/.test(text);
@@ -2661,7 +2833,7 @@
     // finish for the solid-oak construction most of Natalie's work uses (see the
     // carcass-species default in Settings) — easily overridden before confirming either way.
     var finish = (spray && !oil) ? 'spray' : 'oil_varnish';
-    return { steel: steel, upholstery: upholstery, finish: finish };
+    return { woodwork: woodwork, steel: steel, upholstery: upholstery, finish: finish };
   }
 
   function renderApproveBox_(sug){
@@ -2672,6 +2844,7 @@
         [6,7,8].map(function(w){ return '<button type="button" class="weeks-btn" data-weeks="'+w+'">'+w+' weeks</button>'; }).join('') +
       '</div>' +
       '<div class="field-row" style="margin-top:12px;">' +
+        '<label class="chk-label"><input type="checkbox" class="sec-woodwork"'+(sug.woodwork?' checked':'')+'> Woodwork (joinery &amp; carpentry)</label>' +
         '<label class="chk-label"><input type="checkbox" class="sec-steel"'+(sug.steel?' checked':'')+'> Steel shop (welding)</label>' +
         '<label class="chk-label"><input type="checkbox" class="sec-upholstery"'+(sug.upholstery?' checked':'')+'> Upholstery</label>' +
       '</div>' +
@@ -2679,7 +2852,7 @@
         '<label class="chk-label"><input type="radio" name="finish-method-'+esc(sug._id||'')+'" class="sec-finish" value="spray"'+(sug.finish==='spray'?' checked':'')+'> Spraying</label>' +
         '<label class="chk-label"><input type="radio" name="finish-method-'+esc(sug._id||'')+'" class="sec-finish" value="oil_varnish"'+(sug.finish==='oil_varnish'?' checked':'')+'> Finishing (oiling &amp; varnish)</label>' +
       '</div>' +
-      '<div class="sub" style="margin:8px 0 0;color:var(--ink-soft);">Every job also gets Woodwork and Packaging automatically. These checkboxes are only a starting suggestion from the bill of materials — check them over before approving.</div>' +
+      '<div class="sub" style="margin:8px 0 0;color:var(--ink-soft);">Every job also gets Packaging automatically. These checkboxes (including Woodwork) are only a starting suggestion from the bill of materials — check them over before approving.</div>' +
       '<div class="field-row" style="margin-top:12px;">' +
         '<button type="button" class="btn primary btn-approve-confirm">Approve &amp; create job card</button>' +
         '<span class="approve-status sub" style="align-self:center;"></span>' +
@@ -2730,6 +2903,7 @@
     box.querySelector('.btn-approve-confirm').addEventListener('click', function(e){
       e.stopPropagation();
       var sections = [];
+      if(box.querySelector('.sec-woodwork').checked) sections.push('woodwork');
       if(box.querySelector('.sec-steel').checked) sections.push('steel');
       if(box.querySelector('.sec-upholstery').checked) sections.push('upholstery');
       var finishRadio = box.querySelector('.sec-finish:checked');
