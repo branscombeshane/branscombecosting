@@ -191,6 +191,9 @@
   .chip.warn{ background:var(--warn-soft); color:var(--warn); }
   .chip.example{ background:var(--wood-soft); color:var(--wood); }
   .chip button{ background:none; border:none; padding:0; color:inherit; font-weight:700; text-decoration:underline; font-size:11px; }
+  .chip-confidence{ font-size:10px; font-weight:700; letter-spacing:.02em; text-transform:uppercase; }
+  .chip-confidence.high{ color:var(--good); }
+  .chip-confidence.low{ color:var(--warn); }
 
   .flag{ border-left:3px solid var(--warn); background:var(--warn-soft); padding:9px 12px; font-size:13px; margin-bottom:8px; }
   .flag:last-child{ margin-bottom:0; }
@@ -808,16 +811,25 @@
     var boxDepthMm = runnerFits ? Math.max.apply(null, fits) : Math.max(0, usableDepth);
     return { boxWidthMm: boxWidthMm, boxHeightMm: boxHeightMm, boxDepthMm: boxDepthMm, runnerFits: runnerFits };
   }
+  // A bare dimension ("10mm", "20mm", "650") carries no product-identifying information
+  // on its own — all kinds of unrelated products share the same handful of round numbers,
+  // so two descriptions agreeing on one is a coincidence, not evidence they're the same
+  // thing (this is exactly how "20mm Stone top" once got suggested as "Square Bar - 10mm
+  // x 10mm" — the only thing they had in common was an "mm" number). A real descriptive
+  // word in common (a species, a material name, a finish...) is what actually counts.
+  function isDimensionToken_(w){ return /^\d+(\.\d+)?(mm|cm|m|kg)?$/.test(w); }
   // Different designers word the same product differently ("50 mm Solid Oak" vs
   // "Solid Oak" vs "Oak - 50mm"), so a fuzzy word-overlap match is only trustworthy
   // enough to auto-link when it's an exact match on the normalized name (or an exact
   // SKU match for hardware). Anything weaker is a "does this look right?" suggestion
-  // for the person costing the job to confirm or dismiss, never a silent guess.
+  // for the person costing the job to confirm or dismiss, never a silent guess — but the
+  // score itself is still returned (not just a yes/no), so the UI can show how sure this
+  // particular suggestion is rather than treating a near-certain one the same as a guess.
   function matchRateWithConfidence_(type, description, sku){
     var pool = rates.filter(function(r){ return r.category===type; });
     if(sku){
       var bySku = pool.find(function(r){ return r.sku && String(r.sku).trim().toLowerCase()===String(sku).trim().toLowerCase(); });
-      if(bySku) return { rate: bySku, exact: true };
+      if(bySku) return { rate: bySku, exact: true, score: 100 };
     }
     var n = normalize(description);
     if(!n) return null;
@@ -830,13 +842,17 @@
       else if(n.indexOf(rn)!==-1 || rn.indexOf(n)!==-1) score=60;
       else{
         var aw=n.split(' '), bw=rn.split(' ');
-        var overlap = bw.filter(function(w){ return w.length>2 && aw.indexOf(w)!==-1; }).length;
-        score = overlap*15;
+        var overlapWords = bw.filter(function(w){ return w.length>2 && aw.indexOf(w)!==-1; });
+        var descriptiveOverlap = overlapWords.filter(function(w){ return !isDimensionToken_(w); }).length;
+        var dimOverlap = overlapWords.length - descriptiveOverlap;
+        // A shared dimension only counts as corroborating evidence once there's at least
+        // one real descriptive word in common too — never as the sole basis for a match.
+        score = descriptiveOverlap*15 + (descriptiveOverlap>0 ? dimOverlap*5 : 0);
       }
       if(score>bestScore){ bestScore=score; best=r; }
     });
-    if(bestScore>=100) return { rate:best, exact:true };
-    if(bestScore>=20) return { rate:best, exact:false };
+    if(bestScore>=100) return { rate:best, exact:true, score:100 };
+    if(bestScore>=20) return { rate:best, exact:false, score:bestScore };
     return null;
   }
   // Back-compat helper for callers (like labour matching) that just want the
@@ -1531,7 +1547,8 @@
         id: uid(), type:'hardware', description: h.description || 'Hardware item',
         qty: hQty, unit:'each', sku: h.sku||null,
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
-        suggestedRateId: suggestion ? suggestion.id : null
+        suggestedRateId: suggestion ? suggestion.id : null,
+        suggestedScore: suggestion ? m.score : null
       });
     });
 
@@ -1702,7 +1719,23 @@
       var stockSizes = Object.keys(stockSizesUsed).map(Number);
       if(stockSizes.length===1 && stockSizesUsed[stockSizes[0]].roundedUp){
         var picked = stockSizesUsed[stockSizes[0]];
-        if(match) match = picked.rate; else if(suggestion) suggestion = picked.rate;
+        if(match){
+          match = picked.rate;
+        } else if(suggestion){
+          suggestion = picked.rate;
+          // The stock-thickness/diameter rule re-derives this rate from the SPECIES the
+          // drawing actually named (parsed straight off the rate card's own
+          // "<species> - <N>mm" naming, not a fresh guess) — so once the species match
+          // was solid to begin with (two or more real descriptive words in common, not
+          // just a coincidental shared number — see matchRateWithConfidence_), which
+          // exact thickness variant it lands on doesn't need its own manual "yes, that
+          // one" click: auto-link it, same as an exact match, since this rule has
+          // already re-confirmed it independently.
+          if(matchInfo && matchInfo.score>=30){
+            match = suggestion;
+            suggestion = null;
+          }
+        }
         volumeFlags.push(picked.anyRound
           ? '"'+m.description+'" is a turned/round part, priced on '+stockSizes[0]+'mm stock (strips joined into a ring and turned round on the lathe — the stock size follows the finished diameter, 350mm and under uses 25mm, over that uses 38mm) — linked to "'+picked.rate.name+'".'
           : '"'+m.description+'" priced on '+stockSizes[0]+'mm stock thickness (standard sizes are planed down to the finished thickness shown on the drawing) — linked to "'+picked.rate.name+'".');
@@ -1720,7 +1753,8 @@
         qty: qty, unit: basisRate ? (basisRate.unit || 'm²') : 'm²',
         wastagePct: anyRoundComponent ? (Number(settings.cylinderWastePct)||0) : (Number(settings.defaultWastePct)||0),
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
-        suggestedRateId: suggestion ? suggestion.id : null
+        suggestedRateId: suggestion ? suggestion.id : null,
+        suggestedScore: suggestion ? (matchInfo ? matchInfo.score : null) : null
       });
     });
 
@@ -1797,12 +1831,21 @@
     return { materials:materials, hardware:hardware, finish:finish, labour:labour, subtotal:subtotal, markup:markup, total:subtotal+markup };
   }
 
+  // Turns a raw match score (see matchRateWithConfidence_) into something a person can
+  // judge at a glance rather than having to guess what a bare "similar to" means: 60+ is
+  // a whole word (or more) of real overlap — usually right; under that is thinner, often
+  // just one word in common, and worth an actual look before trusting it.
+  function confidenceLabel_(score){
+    if(score==null) return '';
+    if(score>=60) return '<span class="chip-confidence high" title="Strong word overlap with the rate card name">high confidence</span>';
+    return '<span class="chip-confidence low" title="Only a thin word overlap — check this one">low confidence, check this</span>';
+  }
   function rateChip(item){
     var rate = item.rateId ? rates.find(function(r){ return r.id===item.rateId; }) : null;
     if(!rate){
       var suggestion = item.suggestedRateId ? rates.find(function(r){ return r.id===item.suggestedRateId; }) : null;
       if(suggestion){
-        return '<span class="chip warn" style="white-space:normal;">Similar to "'+esc(suggestion.name)+'" ('+money(suggestion.price)+') ' +
+        return '<span class="chip warn" style="white-space:normal;">Similar to "'+esc(suggestion.name)+'" ('+money(suggestion.price)+') '+confidenceLabel_(item.suggestedScore)+' ' +
           '<button class="link-confirm-suggestion" data-id="'+item.id+'">Yes, that one</button> ' +
           '<button class="link-dismiss-suggestion" data-id="'+item.id+'">Not the same</button></span>';
       }
