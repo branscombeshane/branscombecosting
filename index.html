@@ -779,11 +779,45 @@
     var fit = siblings.find(function(s){ return s.thicknessMm >= neededMm; });
     return fit || null;
   }
-  // Standard nominal lengths for Blum TANDEM plus BLUMOTION (550H series) concealed
-  // runners, the normal soft-close runner for a separate timber drawer box — per
-  // Blum's published catalogue. If a job ever uses a different Blum runner family
-  // with a different length set, update this list rather than the logic around it.
-  var BLUM_RUNNER_LENGTHS_MM = [270, 300, 350, 400, 450, 500, 550, 600, 650];
+  // Standard nominal lengths for Blum's 560H series — TANDEM full-extension runners
+  // with BLUMOTION soft-close, confirmed as what Natalie actually stocks — per Blum's
+  // published catalogue. Finer steps and a lower top length than the single/partial-
+  // extension 550H series, so don't assume the two interchange. If the runner family
+  // Natalie buys ever changes, update this list rather than the logic around it.
+  var BLUM_RUNNER_LENGTHS_MM = [250, 270, 300, 320, 350, 380, 400, 420, 450, 480, 500, 520, 550, 600];
+  // Drawer runners are priced off the rate card, not a hardcoded figure — this finds
+  // the rate card's own runner-length "family" the way stockThicknessSiblings_ finds a
+  // timber species' stock-thickness family: every hardware entry named "<label> - <N>mm"
+  // (Natalie's convention: "Blum Tandem Soft Close Runner - 350mm"), grouped by the text
+  // before the dash. Returns null if there's no such family on the card at all, or if
+  // there's more than one distinct family — rather than guessing which one is the
+  // drawer runner, that's flagged for a person to sort out (rename one, or merge them).
+  function drawerRunnerFamily_(){
+    var found = {}; // normalized label -> { label, sizes: {lengthMm: rate} }
+    rates.forEach(function(r){
+      if(r.category!=='hardware') return;
+      var m = /^(.*?)\s*-\s*(\d+)\s*mm\s*$/i.exec((r.name||'').trim());
+      if(!m) return;
+      var label = m[1].trim();
+      var key = normalize(label);
+      if(!key) return;
+      if(!found[key]) found[key] = { label: label, sizes: {} };
+      found[key].sizes[Number(m[2])] = r;
+    });
+    var keys = Object.keys(found);
+    return keys.length===1 ? found[keys[0]] : null;
+  }
+  // Given the box depth drawerBoxSizeFor_ already rounded down to a standard Blum
+  // length, finds the rate card row priced for exactly that length. Returns undefined
+  // if there's no recognisable runner family on the card at all (nothing to link to —
+  // same meaning as stockThicknessFor_'s undefined), or null if the family exists but
+  // that specific length hasn't been added to the card yet (flag it, don't guess a
+  // price), or the matched rate.
+  function drawerRunnerRateFor_(lengthMm){
+    var family = drawerRunnerFamily_();
+    if(!family) return undefined;
+    return family.sizes[lengthMm] || null;
+  }
   // Drawing sets almost never show a drawer box's own size — that's worked out from
   // the drawer opening and the runner hardware, not drawn — so the app derives it:
   //   boxWidth  = opening width  − 2x the per-side runner clearance (Blum's normal
@@ -1536,6 +1570,11 @@
     // at the end of this function — see the comment above that line for the formula.
     var totalHardwareQty = 0;
     var totalWeightedComponents = 0;
+    // lengthMm -> number of drawers needing a runner of exactly that length, tallied
+    // across every drawerBox component below (possibly several materials/drawers
+    // landing on the same standard length) — turned into hardware line(s) after the
+    // materials loop, see the runnerLengthsNeeded block near the Labour line below.
+    var runnerLengthsNeeded = {};
 
     (data.hardware||[]).forEach(function(h){
       var m = matchRateWithConfidence_('hardware', h.description, h.sku);
@@ -1656,6 +1695,9 @@
           if(!box.runnerFits){
             volumeFlags.push('"'+m.description+'" — the available depth behind this drawer opening ('+Math.round(c.availableDepth_mm)+'mm) is too shallow for even the shortest standard Blum runner ('+BLUM_RUNNER_LENGTHS_MM[0]+'mm) once the fitting margin is allowed for — check this drawer by hand.');
           } else {
+            // One pair of runners per drawer — tallied by exact length here, turned into
+            // hardware line(s) after the materials loop once every drawer's been counted.
+            runnerLengthsNeeded[box.boxDepthMm] = (runnerLengthsNeeded[box.boxDepthMm]||0) + qtyN;
             volumeFlags.push('"'+m.description+'" drawer box sized from its opening ('+Math.round(c.opening_width_mm)+'x'+Math.round(c.opening_height_mm)+'mm) to '+Math.round(box.boxWidthMm)+'x'+Math.round(box.boxHeightMm)+'x'+box.boxDepthMm+'mm (W x H x D), built for a '+box.boxDepthMm+'mm Blum runner — adjust the clearances under Settings if this looks wrong.');
           }
           if(volumeBased){
@@ -1756,6 +1798,28 @@
         suggestedRateId: suggestion ? suggestion.id : null,
         suggestedScore: suggestion ? (matchInfo ? matchInfo.score : null) : null
       });
+    });
+
+    // One hardware line per distinct runner length actually needed, priced straight off
+    // the rate card (Natalie's own "Blum Tandem Soft Close Runner - <N>mm" entries — see
+    // drawerRunnerFamily_/drawerRunnerRateFor_ above) rather than a hardcoded figure, so
+    // it always reflects whatever Natalie's actually paying. A length that's missing from
+    // the card, or no recognisable runner family at all, gets flagged instead of guessed —
+    // same treatment as a stock-thickness size the rate card doesn't cover.
+    Object.keys(runnerLengthsNeeded).forEach(function(lengthStr){
+      var lengthMm = Number(lengthStr);
+      var drawerCount = runnerLengthsNeeded[lengthMm];
+      var runnerRate = drawerRunnerRateFor_(lengthMm);
+      totalHardwareQty += drawerCount;
+      if(runnerRate===undefined){
+        volumeFlags.push('Drawer box(es) need '+drawerCount+' x '+lengthMm+'mm Blum runner (pair) — no runner rate card entries found (expected hardware items named like "Blum Tandem Soft Close Runner - '+lengthMm+'mm") — add them, or enter this hardware line by hand.');
+        lineItems.push({ id: uid(), type:'hardware', description: lengthMm+'mm Blum drawer runner (pair)', qty: drawerCount, unit:'pair', sku:null, rateId:null, unitPrice:0, suggestedRateId:null, suggestedScore:null });
+      } else if(runnerRate===null){
+        volumeFlags.push('Drawer box(es) need '+drawerCount+' x '+lengthMm+'mm Blum runner (pair) — that length isn\'t on the rate card yet (the other runner lengths are) — add it, or enter this hardware line by hand.');
+        lineItems.push({ id: uid(), type:'hardware', description: lengthMm+'mm Blum drawer runner (pair)', qty: drawerCount, unit:'pair', sku:null, rateId:null, unitPrice:0, suggestedRateId:null, suggestedScore:null });
+      } else {
+        lineItems.push({ id: uid(), type:'hardware', description: runnerRate.name, qty: drawerCount, unit: runnerRate.unit||'pair', sku: runnerRate.sku||null, rateId: runnerRate.id, unitPrice: Number(runnerRate.price)||0, suggestedRateId:null, suggestedScore:null });
+      }
     });
 
     // Every product gets finished, so a finish line is standard on every quote rather than
