@@ -319,6 +319,7 @@
     <button class="mode-btn" data-mode="costing">Costing</button>
     <button class="mode-btn" data-mode="payroll">Payroll</button>
     <button class="mode-btn" data-mode="production">Production</button>
+    <button class="mode-btn" data-mode="admin">Admin</button>
   </div>
   <nav id="nav">
     <div class="nav-group" data-mode-group="costing">
@@ -336,6 +337,9 @@
     </div>
     <div class="nav-group" data-mode-group="production" hidden>
       <button class="navbtn" data-view="production">Production board</button>
+    </div>
+    <div class="nav-group" data-mode-group="admin" hidden>
+      <button class="navbtn" data-view="admin">Team &amp; site settings</button>
     </div>
   </nav>
   <footer id="sidebar-footer"><span id="sidebar-user"></span>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
@@ -469,12 +473,20 @@
       </div>
     </div>
 
-    <!-- Owner-only — hidden for every other role by applyRolePermissions_/loadUsersAdmin_.
-         Adding/editing a user is also re-checked server-side (requireRole_), so hiding
-         this panel is a UI convenience, not the actual security boundary. -->
-    <div class="panel" id="users-admin-panel" style="max-width:520px;" hidden>
+  </section>
+
+  <section class="view" id="view-admin" hidden>
+    <div class="sheet-head">
+      <h1>Admin</h1>
+      <div class="sub">Team logins and site-wide settings — kept apart from Costing settings since this isn't costing-specific</div>
+    </div>
+
+    <!-- Owner-only in practice (only an owner can ever reach this view — see
+         applyRolePermissions_), but adding/editing a user is also re-checked server-side
+         (requireRole_), so that's the actual security boundary, not this screen's visibility. -->
+    <div class="panel" id="users-admin-panel" style="max-width:620px;">
       <h2 style="margin:0 0 4px;">Team logins</h2>
-      <div class="sub" style="margin-bottom:14px;">Who can log in to Batten, and what they can see. Costing = quotes &amp; rate card. Payroll and approving a quote into a job are owner-only. Production = the production board (Workshop manager can also tick off progress; Project manager's board is view-only for now).</div>
+      <div class="sub" style="margin-bottom:14px;">Who can log in to Batten. Owner sees and can do everything, including Admin itself and approving a quote into a job — those two are never available to an Employee. An Employee only gets the functions ticked below; tick "Tick off production progress" only alongside "Production board", since it has nothing to act on otherwise.</div>
       <div id="users-list-mgr"></div>
       <div class="field-row" style="margin-top:16px;align-items:flex-end;">
         <div class="field"><span class="label">Name</span><input type="text" id="user-new-name" placeholder="e.g. Izak"></div>
@@ -483,15 +495,21 @@
         <div class="field">
           <span class="label">Role</span>
           <select id="user-new-role">
+            <option value="employee" selected>Employee</option>
             <option value="owner">Owner</option>
-            <option value="design">Designer</option>
-            <option value="workshop" selected>Workshop manager</option>
-            <option value="pm">Project manager</option>
           </select>
         </div>
-        <button class="btn primary" id="btn-add-user" style="align-self:flex-end;">Add user</button>
+      </div>
+      <div id="user-new-permissions" class="field-row" style="margin-top:8px;"></div>
+      <div class="field-row" style="margin-top:12px;">
+        <button class="btn primary" id="btn-add-user">Add user</button>
       </div>
       <div id="users-admin-status" class="status-msg" style="display:none;margin-top:12px;"></div>
+    </div>
+
+    <div class="panel" style="max-width:620px;">
+      <h2 style="margin:0 0 4px;">Site settings</h2>
+      <div class="sub">Nothing else lives here yet — Costing's own defaults stay on the Costing &gt; Settings screen, and Payroll's on Payroll &gt; Settings, since both are specific to that job. Anything that applies across the whole app, rather than to one of those, belongs here going forward.</div>
     </div>
   </section>
 
@@ -731,18 +749,29 @@
     }catch(e){}
   }
 
-  // Which sidebar "mode" each role can see at all. Approving a quote and managing users
-  // are further gated on top of this (owner only) inside the costing/production screens
-  // themselves — see the Approve box in renderJobCard and the Users admin panel in Settings.
-  var ROLE_MODES = { owner:['costing','payroll','production'], design:['costing'], workshop:['production'], pm:['production'] };
-  var ROLE_LABELS = { owner:'Owner', design:'Designer', workshop:'Workshop manager', pm:'Project manager' };
+  // Owner sees every sidebar "mode", including Admin, and that's never configurable —
+  // same as approving a quote into a job (see the Approve box in renderJobCard). An
+  // employee only sees the modes among their own ticked permissions (see the Admin tab's
+  // Team logins panel) — Admin itself is deliberately not one of those permissions.
+  var ROLE_LABELS = { owner:'Owner', employee:'Employee' };
+  // The checkboxes shown in Admin when "Employee" is selected — key must match Code.gs's
+  // PERMISSION_KEYS exactly. 'tickProgress' only does anything alongside 'production'.
+  var EMPLOYEE_PERMISSIONS = [
+    { key:'costing', label:'Costing', hint:'New quotes, the Quotes list and the Rate Card.' },
+    { key:'production', label:'Production board', hint:'View the workshop production board.' },
+    { key:'tickProgress', label:'Tick off production progress', hint:'Mark a job’s checklist sections done on the production board (needs Production board too).' },
+    { key:'payroll', label:'Payroll', hint:'Salaries, payslips and payroll runs — sensitive, only tick this for someone who should see it.' }
+  ];
+  function allowedModesFor_(user){
+    if(!user || user.role==='owner') return ['costing','payroll','production','admin'];
+    return ['costing','payroll','production'].filter(function(m){ return (user.permissions||[]).indexOf(m)!==-1; });
+  }
   function applyRolePermissions_(){
-    var role = currentUser ? currentUser.role : 'owner';
-    var allowed = ROLE_MODES[role] || ['costing'];
+    var allowed = allowedModesFor_(currentUser);
     Array.prototype.forEach.call(document.querySelectorAll('.mode-btn'), function(b){
       b.hidden = allowed.indexOf(b.dataset.mode) === -1;
     });
-    if(allowed.indexOf(appMode) === -1) setAppMode(allowed[0]);
+    if(allowed.indexOf(appMode) === -1) setAppMode(allowed[0] || 'costing');
     var userEl = document.getElementById('sidebar-user');
     if(userEl) userEl.textContent = currentUser ? (currentUser.name + ' · ' + (ROLE_LABELS[currentUser.role]||currentUser.role)) : '';
   }
@@ -824,6 +853,7 @@
     });
     if(mode==='payroll') showView('payroll');
     else if(mode==='production') showView('production');
+    else if(mode==='admin') showView('admin');
     else showView('new');
   }
   document.getElementById('mode-switch').addEventListener('click', function(e){
@@ -839,7 +869,7 @@
   });
   function showView(v){
     view = v;
-    ['new','quotes','rates','payroll','payroll-settings','settings','production'].forEach(function(name){
+    ['new','quotes','rates','payroll','payroll-settings','settings','production','admin'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
@@ -852,6 +882,7 @@
     if(v==='settings') fillSettingsForm();
     if(v==='payroll-settings') fillPayrollSettingsForm();
     if(v==='production') loadProduction();
+    if(v==='admin') loadUsersAdmin_();
   }
 
   // ================= RATE CARD =================
@@ -2940,10 +2971,12 @@
     });
   }
 
-  // Mirrors Code.gs's JOB_PROGRESS_ROLES — purely a UI convenience (disables checkboxes
-  // for a role that can't tick them) so the server-side requireRole_ check isn't the
-  // first time someone finds out; it's still the real enforcement either way.
-  var JOB_PROGRESS_ROLES_CLIENT = ['owner','workshop'];
+  // Mirrors Code.gs's requirePermission_(id,'tickProgress') — purely a UI convenience
+  // (disables checkboxes for someone who can't tick them) so the server-side check isn't
+  // the first time someone finds out; it's still the real enforcement either way.
+  function canTickProgress_(user){
+    return !!user && (user.role==='owner' || (user.permissions||[]).indexOf('tickProgress')!==-1);
+  }
 
   function loadProduction(){
     var container = document.getElementById('production-board');
@@ -2956,7 +2989,7 @@
   function renderProductionBoard_(jobs){
     var container = document.getElementById('production-board');
     var active = jobs.filter(function(j){ return j.approved && !j.completedAt; });
-    var canTick = currentUser && JOB_PROGRESS_ROLES_CLIENT.indexOf(currentUser.role) !== -1;
+    var canTick = canTickProgress_(currentUser);
     if(!active.length){
       container.innerHTML = '<div class="empty">No jobs in production right now — approve a quote from the Quotes screen to add one.</div>';
       return;
@@ -2999,18 +3032,41 @@
     }
   }
 
-  // ================= USERS ADMIN (Settings, owner only) =================
+  // ================= USERS ADMIN (Admin tab, owner only) =================
   var usersCache = [];
+  document.getElementById('user-new-permissions').innerHTML = permissionCheckboxesHtml_([], 'un-perm');
+  wireRoleTogglesPermissions_(document.getElementById('user-new-role'), document.getElementById('user-new-permissions'));
   function loadUsersAdmin_(){
-    var panel = document.getElementById('users-admin-panel');
-    if(!panel) return;
-    panel.hidden = false;
-    apiRead('getUsers').then(function(res){
+    if(!currentUser) return;
+    apiRead('getUsers', { actingUserId: currentUser.id }).then(function(res){
+      if(res && res.error){
+        document.getElementById('users-list-mgr').innerHTML = '<div class="status-msg error">'+esc(res.error)+'</div>';
+        return;
+      }
       usersCache = (res && res.users) || [];
       renderUsersAdmin_();
     }).catch(function(){
       document.getElementById('users-list-mgr').innerHTML = '<div class="status-msg error">Couldn\'t load users.</div>';
     });
+  }
+
+  // Shared between the "add user" form and each existing user's edit row — one checkbox
+  // per EMPLOYEE_PERMISSIONS entry, `selected` pre-ticked, `cls` is the CSS class the
+  // save/add handler below reads back off (e.g. 'u-perm' or 'un-perm').
+  function permissionCheckboxesHtml_(selected, cls){
+    selected = selected || [];
+    return EMPLOYEE_PERMISSIONS.map(function(p){
+      return '<label class="chk-label" style="display:flex;min-width:190px;margin-top:4px;" title="'+esc(p.hint)+'">' +
+        '<input type="checkbox" class="'+cls+'" value="'+p.key+'"'+(selected.indexOf(p.key)!==-1?' checked':'')+'> '+esc(p.label) +
+      '</label>';
+    }).join('');
+  }
+  // Wires a role <select> (owner/employee) to show/hide its permission-checkbox container —
+  // shared by the new-user form and every existing user's edit row.
+  function wireRoleTogglesPermissions_(roleSelect, permsContainer){
+    function sync(){ permsContainer.hidden = (roleSelect.value !== 'employee'); }
+    roleSelect.addEventListener('change', sync);
+    sync();
   }
 
   function renderUsersAdmin_(){
@@ -3023,28 +3079,34 @@
           '<div class="field" style="min-width:110px;"><span class="label">Name</span><input type="text" class="u-name" value="'+esc(u.name)+'"></div>' +
           '<div class="field" style="min-width:110px;"><span class="label">Username</span><input type="text" class="u-username" value="'+esc(u.username)+'"></div>' +
           '<div class="field" style="min-width:140px;"><span class="label">New password</span><input type="password" class="u-password" placeholder="leave blank to keep current" autocomplete="new-password"></div>' +
-          '<div class="field" style="min-width:140px;"><span class="label">Role</span><select class="u-role">' +
-            ['owner','design','workshop','pm'].map(function(r){
+          '<div class="field" style="min-width:120px;"><span class="label">Role</span><select class="u-role">' +
+            ['employee','owner'].map(function(r){
               return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+esc(ROLE_LABELS[r]||r)+'</option>';
             }).join('') +
           '</select></div>' +
         '</div>' +
+        '<div class="field-row u-perms">'+permissionCheckboxesHtml_(u.permissions, 'u-perm')+'</div>' +
         '<div class="field-row" style="margin-top:8px;align-items:center;">' +
           '<label class="chk-label"><input type="checkbox" class="u-active"'+(u.active?' checked':'')+'> Active</label>' +
           '<button class="btn small u-save">Save</button>' +
         '</div>' +
       '</div>';
     }).join('');
+    wrap.querySelectorAll('.user-row').forEach(function(row){
+      wireRoleTogglesPermissions_(row.querySelector('.u-role'), row.querySelector('.u-perms'));
+    });
     wrap.querySelectorAll('.u-save').forEach(function(btn){
       btn.addEventListener('click', function(){
         var row = btn.closest('.user-row');
         var id = row.dataset.id;
+        var role = row.querySelector('.u-role').value;
         var payload = {
           id: id,
           name: row.querySelector('.u-name').value.trim(),
           username: row.querySelector('.u-username').value.trim(),
-          role: row.querySelector('.u-role').value,
-          active: row.querySelector('.u-active').checked
+          role: role,
+          active: row.querySelector('.u-active').checked,
+          permissions: Array.prototype.map.call(row.querySelectorAll('.u-perm:checked'), function(cb){ return cb.value; })
         };
         var pwd = row.querySelector('.u-password').value;
         if(pwd) payload.password = pwd;
@@ -3108,13 +3170,16 @@
     statusEl.style.display = 'block';
     statusEl.className = 'status-msg';
     statusEl.textContent = 'Adding…';
+    var permsContainer = document.getElementById('user-new-permissions');
+    var permissions = Array.prototype.map.call(permsContainer.querySelectorAll('.un-perm:checked'), function(cb){ return cb.value; });
     var token = uid();
-    apiWrite('addUser', { user: { name:name, username:username, password:password, role:roleInput.value }, actingUserId: currentUser.id, token: token }).then(function(){
+    apiWrite('addUser', { user: { name:name, username:username, password:password, role:roleInput.value, permissions:permissions }, actingUserId: currentUser.id, token: token }).then(function(){
       return pollTokenResult_('getAddUserResult', token);
     }).then(function(res){
       if(res && res.result && res.result.id){
         statusEl.textContent = 'Added.';
         nameInput.value = ''; usernameInput.value = ''; passwordInput.value = '';
+        permsContainer.querySelectorAll('.un-perm').forEach(function(cb){ cb.checked = false; });
         loadUsersAdmin_();
       } else {
         statusEl.className = 'status-msg error';
@@ -5275,9 +5340,8 @@
       if(res && res.settings) settings = res.settings;
       if(view==='settings') fillSettingsForm();
     }).catch(function(){});
-    if(currentUser && currentUser.role==='owner') loadUsersAdmin_();
-    var allowed = ROLE_MODES[currentUser?currentUser.role:'owner'] || ['costing'];
-    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : 'new'));
+    var allowed = allowedModesFor_(currentUser);
+    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : (allowed[0]==='admin' ? 'admin' : 'new')));
   }
 
   // ================= KIOSK (factory floor display) =================
