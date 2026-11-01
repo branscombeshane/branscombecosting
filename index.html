@@ -162,6 +162,8 @@
   td{ padding:7px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
   td.num, th.num{ text-align:right; }
   tr.section-row td{ background:var(--paper); font-weight:600; text-transform:uppercase; font-size:11px; letter-spacing:.06em; color:var(--ink-soft); border-bottom:1px solid var(--line-strong); }
+  tr.li-size-missing td{ background:var(--warn-soft); }
+  tr.li-size-missing .cell-desc{ position:relative; }
   tr.subgroup-row td{ font-weight:600; font-size:11px; letter-spacing:.03em; color:var(--ink-soft); padding-top:12px; border-bottom:1px solid var(--line); }
   input[type="text"], input[type="number"], input[type="password"], select, textarea{
     font-family:inherit; font-size:13px; border:1px solid var(--line); background:var(--paper);
@@ -1813,11 +1815,17 @@
       // ordinary materials waste %, since stave-and-lathe construction uses up a lot
       // more stock than the finished piece (see settings.cylinderWastePct).
       var anyRoundComponent = false;
+      // Counts a component skipped for missing dimensions even when OTHER components
+      // under this same material have everything they need — without this, a material
+      // with (say) 3 components where only 1 is missing its size would silently total
+      // just the other 2's volume with no flag at all, since the material-level "couldn't
+      // work out a volume" check below only fires when EVERY component came up empty.
+      var skippedComponents = 0;
       components.forEach(function(c){
         if(!c) return;
         var isRound = c.shape==='round';
         if(isRound){
-          if(!c.diameter_mm || !c.height_mm) return;
+          if(!c.diameter_mm || !c.height_mm){ skippedComponents++; return; }
           hasAny = true;
           anyRoundComponent = true;
           var qtyN = c.quantity||1;
@@ -1851,7 +1859,7 @@
         }
         var isDrawerBox = c.shape==='drawerBox';
         if(isDrawerBox){
-          if(!c.opening_width_mm || !c.opening_height_mm || !c.availableDepth_mm || !c.thickness_mm) return;
+          if(!c.opening_width_mm || !c.opening_height_mm || !c.availableDepth_mm || !c.thickness_mm){ skippedComponents++; return; }
           hasAny = true;
           var qtyN = c.quantity||1;
           // Counts as 4 "components" worth of labour time each — a drawer box is really
@@ -1891,7 +1899,7 @@
           }
           return;
         }
-        if(!c.length_mm || !c.width_mm) return;
+        if(!c.length_mm || !c.width_mm){ skippedComponents++; return; }
         hasAny = true;
         totalWeightedComponents += (c.quantity||1);
         var area = (c.length_mm*c.width_mm)/1e6*(c.quantity||1);
@@ -1916,14 +1924,27 @@
           total += area;
         }
       });
+      if(skippedComponents>0){
+        volumeFlags.push('"'+m.description+'" — '+skippedComponents+' component'+(skippedComponents>1?'s':'')+' on this material couldn\'t be sized from the drawing (a length, width, diameter or opening dimension was missing) and '+(skippedComponents>1?'were':'was')+' left out of this line\'s quantity entirely — check the drawing by hand and adjust the quantity if needed.');
+      }
       var desc = m.description + (m.colour ? (' — ' + m.colour) : '');
       var qty = 0;
+      // sizeMissing marks this line for the BOM table itself (see lineRow) — a 0 quantity
+      // sitting quietly in a long table, with a rate already applied so the line total also
+      // reads "R 0,00", is too easy to scan straight past; it needs to stand out right where
+      // it's seen, not only as a flag in the list above the table.
+      var sizeMissing = skippedComponents>0;
       if(volumeBased){
-        if(hasAny && !missingThickness && total>0) qty = Math.round(total*1000)/1000;
-        else volumeFlags.push('Couldn\'t work out a volume for "'+m.description+'" (rate card unit: '+(basisRate.unit||'m³')+') — enter the actual quantity by hand.');
+        // Rounded to 5 decimal places (0.00001 m³ = 10 cm³), not 3 — a single small solid-
+        // timber part (a stretcher, cross bar, cleat...) can genuinely be well under 0.001 m³
+        // on its own; rounding to 3dp was silently flooring those down to a displayed (and
+        // STORED) 0.000, erasing a real, correctly-priced line's quantity and total entirely
+        // rather than just losing some cosmetic precision.
+        if(hasAny && !missingThickness && total>0) qty = Math.round(total*100000)/100000;
+        else { sizeMissing = true; volumeFlags.push('Couldn\'t work out a volume for "'+m.description+'" (rate card unit: '+(basisRate.unit||'m³')+') — enter the actual quantity by hand.'); }
       } else {
-        if(hasAny && total>0) qty = Math.round(total*100)/100;
-        else volumeFlags.push('No size given for "'+m.description+'" — enter the quantity by hand.');
+        if(hasAny && total>0) qty = Math.round(total*10000)/10000; // 4dp (0.0001 m² = 1 cm²) — same reasoning as above
+        else { sizeMissing = true; volumeFlags.push('No size given for "'+m.description+'" — enter the quantity by hand.'); }
       }
       // Swap the matched/suggested rate for the correct stock-thickness sibling, when
       // the components settled on exactly one stock size and at least one of them was
@@ -1969,7 +1990,8 @@
         wastagePct: anyRoundComponent ? (Number(settings.cylinderWastePct)||0) : (Number(settings.defaultWastePct)||0),
         rateId: match? match.id : null, unitPrice: match? Number(match.price)||0 : 0,
         suggestedRateId: suggestion ? suggestion.id : null,
-        suggestedScore: suggestion ? (matchInfo ? matchInfo.score : null) : null
+        suggestedScore: suggestion ? (matchInfo ? matchInfo.score : null) : null,
+        sizeMissing: sizeMissing
       });
     });
 
@@ -1995,13 +2017,18 @@
       }
     });
 
-    // A Carcass line, auto-derived from overall dimensions, ONLY when the drawing didn't
-    // call out its own structural case material (see EXTRACTION_PROMPT's "carcass"
-    // field — most drawings don't). Priced on the species/thickness set in Settings, via
+    // A Carcass line, auto-derived from overall dimensions, ONLY when this product is
+    // case/box furniture (something with drawers/doors sitting inside a structural outer
+    // case — credenzas, cabinets, dressers...) AND the drawing didn't call out that case
+    // as its own material (see EXTRACTION_PROMPT's "carcass" field — most drawings don't).
+    // "applicable" is what keeps this from firing on furniture that structurally has no
+    // carcass at all — a table, desk, bench, stool or similar leg-and-top piece — which
+    // used to get a spurious Carcass line added just because it also didn't call one out
+    // (there was nothing TO call out). Priced on the species/thickness set in Settings, via
     // the same stock-thickness-family lookup as everything else in solid timber, so it
     // still rounds to a real stock size if the exact default thickness isn't on the card.
     var carcassInfo = data.carcass || {};
-    if(!carcassInfo.shown){
+    if(carcassInfo.applicable && !carcassInfo.shown){
       var carcassPanels = computeCarcassPanels_(data.overallDimensions, carcassInfo.columns, carcassInfo.rows);
       if(!carcassPanels){
         volumeFlags.push('No carcass material was shown on the drawing, and the overall dimensions weren\'t complete enough to work one out automatically — add a carcass material line by hand.');
@@ -2037,7 +2064,7 @@
         }
         lineItems.push({
           id: uid(), type:'material', description: 'Carcass (auto-calculated — not shown on drawing)',
-          qty: Math.round(carcassVolume*1000)/1000, unit: carcassRate ? (carcassRate.unit||'m³') : 'm³',
+          qty: Math.round(carcassVolume*100000)/100000, unit: carcassRate ? (carcassRate.unit||'m³') : 'm³', // 5dp — see the materials loop's own volume rounding note above
           wastagePct: Number(settings.defaultWastePct)||0,
           rateId: carcassRate ? carcassRate.id : null, unitPrice: carcassRate ? Number(carcassRate.price)||0 : 0,
           suggestedRateId: null, suggestedScore: null
@@ -2179,9 +2206,18 @@
     return quickAddRate(item);
   }
 
+  // sizeMissing (set in buildBomFromExtraction_ when a component's length/width/diameter/
+  // opening couldn't be read off the drawing) gets a warn-coloured row and an inline badge
+  // right next to the description — a 0 quantity with a rate already filled in otherwise
+  // reads as a complete, correctly-priced line (just happens to total R0,00), which is
+  // exactly the kind of thing that's easy to scan straight past in a long bill of
+  // materials. The flags list above the table still explains why; this is so the row
+  // itself can't be missed even if the flags weren't read.
   function lineRow(item){
-    return '<tr data-id="'+item.id+'">' +
-      '<td class="cell-desc"><input type="text" class="li-desc" value="'+esc(item.description)+'"></td>' +
+    var warnRow = item.sizeMissing ? ' class="li-size-missing"' : '';
+    var badge = item.sizeMissing ? ' <span class="chip warn" title="Couldn\'t size this from the drawing — check it by hand">size needed</span>' : '';
+    return '<tr data-id="'+item.id+'"'+warnRow+'>' +
+      '<td class="cell-desc"><input type="text" class="li-desc" value="'+esc(item.description)+'">'+badge+'</td>' +
       '<td class="cell-qty"><input type="number" class="li-qty num" step="0.01" value="'+item.qty+'"></td>' +
       '<td class="cell-unit"><input type="text" class="li-unit" value="'+esc(item.unit)+'"></td>' +
       '<td class="cell-waste num"><input type="number" class="li-waste num" step="1" min="0" value="'+(item.wastagePct||0)+'"></td>' +
@@ -2296,6 +2332,15 @@
         if(e.target.classList.contains('li-unit')) item.unit = e.target.value;
         if(e.target.classList.contains('li-waste')) item.wastagePct = Number(e.target.value)||0;
         if(e.target.classList.contains('li-price')) item.unitPrice = Number(e.target.value)||0;
+        // Once a flagged "couldn't size this" line has an actual quantity typed in by
+        // hand, the warning's served its purpose — drop the highlight/badge right away
+        // rather than leaving it stuck there until some unrelated re-render clears it.
+        if(e.target.classList.contains('li-qty') && item.sizeMissing && Number(e.target.value)>0){
+          item.sizeMissing = false;
+          tr.classList.remove('li-size-missing');
+          var badgeEl = tr.querySelector('.cell-desc .chip.warn');
+          if(badgeEl) badgeEl.remove();
+        }
         if(e.target.classList.contains('li-qty') || e.target.classList.contains('li-waste') || e.target.classList.contains('li-price')){
           var td = tr.querySelector('.li-total');
           if(td) td.textContent = money(lineTotal(item));
