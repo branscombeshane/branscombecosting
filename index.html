@@ -378,13 +378,18 @@
         <div class="field"><span class="label">Drawer box height deduction (mm)</span><input type="number" id="set-drawer-height-deduction" step="1" min="0"></div>
         <div class="field"><span class="label">Drawer runner fitting margin (mm)</span><input type="number" id="set-drawer-runner-margin" step="1" min="0"></div>
       </div>
-      <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Most drawings don't show a drawer box's own size — it's worked out here from the drawer opening instead. Box width = opening width minus the per-side clearance (both sides); box height = opening height minus the height deduction; box depth snaps down to the largest standard Blum runner length (270–650mm) that still fits the available carcass depth once the fitting margin is subtracted. Applies only to material lines the drawing-reader tags as a drawer box.</div>
+      <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Most drawings don't show a drawer box's own size — it's worked out here from the drawer opening instead. Box width = opening width minus the per-side clearance (both sides); box height = opening height minus the height deduction; box depth snaps down to the largest standard Blum 560H runner length (250–600mm) that still fits the available carcass depth once the fitting margin is subtracted, then adds the matching runner pair from the rate card. Applies only to material lines the drawing-reader tags as a drawer box.</div>
       <div class="field-row">
         <div class="field"><span class="label">Labour minutes per component</span><input type="number" id="set-labour-min-component" step="1" min="0"></div>
         <div class="field"><span class="label">Labour minutes per hardware item</span><input type="number" id="set-labour-min-hardware" step="1" min="0"></div>
         <div class="field"><span class="label">Base labour hours per job</span><input type="number" id="set-labour-base-hours" step="0.5" min="0"></div>
       </div>
       <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">The Labour line on every new quote now pre-fills itself (still editable, same as a material line) from: every component counted on the bill of materials × the minutes above, plus every hardware item × its own minutes, plus the fixed base hours for design/setup/admin on every job. A round/turned component counts as 2 components and a drawer box as 4, since lathe work and a 4-panel box both take meaningfully longer to build than one flat panel. These three numbers are starting placeholders, not a researched standard — no two workshops build at the same speed, so check the first several quotes' "Actual hours worked" (entered on a saved quote once it's built) against what was estimated here, and adjust these numbers to match Natalie's shop specifically.</div>
+      <div class="field-row">
+        <div class="field"><span class="label">Default carcass species</span><input type="text" id="set-carcass-species" placeholder="Solid Oak"></div>
+        <div class="field"><span class="label">Default carcass thickness (mm)</span><input type="number" id="set-carcass-thickness" step="1" min="0"></div>
+      </div>
+      <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Most drawings only show the visible parts (tops, fronts, drawer internals, legs) and never call out the structural case itself — when that happens, a Carcass line is added automatically from the overall dimensions, priced on this species/thickness (must match a rate card name, e.g. "Solid Oak - 25mm" for the 25mm default). It includes the outer box (2 sides, a back, a bottom) plus internal dividers worked out from the drawer/door grid the drawing shows — full-height vertical dividers between columns, and a divider per row boundary in each column — a reasonable but approximate stand-in for Natalie's actual construction, flagged on the quote so it's never a silent guess. If the drawing DOES call out its own carcass material, this is skipped entirely.</div>
       <div class="field-row"><button class="btn primary" id="btn-save-settings">Save defaults</button></div>
       <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
@@ -480,7 +485,7 @@
   var pdfImages = [];
   var job = null;
   var view = 'new';
-  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, drawerSideClearanceMm: 10, drawerHeightDeductionMm: 40, drawerRunnerMarginMm: 25, labourMinutesPerComponent: 25, labourMinutesPerHardwareItem: 8, labourBaseHoursPerJob: 3, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
+  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, drawerSideClearanceMm: 10, drawerHeightDeductionMm: 40, drawerRunnerMarginMm: 25, labourMinutesPerComponent: 25, labourMinutesPerHardwareItem: 8, labourBaseHoursPerJob: 3, carcassSpeciesName: 'Solid Oak', carcassThicknessMm: 25, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
     payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
   var currentFileName = null;
 
@@ -824,6 +829,41 @@
     if(!family) return undefined;
     return family.sizes[lengthMm] || null;
   }
+  // Most drawings never call out their own structural case ("carcass") material at all
+  // — they show the visible/decorative parts and expect the workshop to build a case to
+  // hold them, as standard practice (see EXTRACTION_PROMPT's "carcass" field). When
+  // that's so, this works out a stand-in from the product's overall size and its
+  // drawer/door grid, rather than leaving a whole case's worth of material uncosted:
+  //   - 2 side panels (depth x full height) + 1 back panel (width x full height) +
+  //     1 bottom panel (width x depth) — full overall height is used throughout, not
+  //     reduced for a top or legs (Natalie's own call: simpler, and if anything slightly
+  //     over- rather than under-estimates, which is the direction she'd rather be wrong in)
+  //   - when a drawer/door grid (columns/rows) is given: full-height vertical dividers
+  //     between columns, plus a divider at each row boundary within each column
+  //     (treating columns as equal width — true for most grid layouts)
+  // This is an approximation of Natalie's actual construction, not a reading of the
+  // drawing — always flagged on the quote so it's checked, never a silent number.
+  // Returns null if the overall dimensions aren't complete enough to work anything out.
+  function computeCarcassPanels_(overallDimensions, columns, rows){
+    var W = Number(overallDimensions && overallDimensions.width_mm)||0;
+    var H = Number(overallDimensions && overallDimensions.height_mm)||0;
+    var D = Number(overallDimensions && overallDimensions.depth_mm)||0;
+    if(!W || !H || !D) return null;
+    var areaM2 = (2*D*H + W*H + W*D) / 1e6; // 2 sides + back + bottom
+    var parts = ['2 side panels', '1 back panel', '1 bottom panel'];
+    var cols = Number(columns)||0, rws = Number(rows)||0;
+    if(cols>1){
+      areaM2 += (cols-1)*D*H/1e6;
+      parts.push((cols-1)+' vertical divider'+(cols-1===1?'':'s'));
+    }
+    if(rws>1 && cols>=1){
+      var colWidth = W/Math.max(cols,1);
+      var rowDividerCount = (rws-1)*Math.max(cols,1);
+      areaM2 += rowDividerCount*colWidth*D/1e6;
+      parts.push(rowDividerCount+' row divider'+(rowDividerCount===1?'':'s'));
+    }
+    return { areaM2: areaM2, parts: parts };
+  }
   // Drawing sets almost never show a drawer box's own size — that's worked out from
   // the drawer opening and the runner hardware, not drawn — so the app derives it:
   //   boxWidth  = opening width  − 2x the per-side runner clearance (Blum's normal
@@ -1072,6 +1112,8 @@
     document.getElementById('set-labour-min-component').value = settings.labourMinutesPerComponent!=null ? settings.labourMinutesPerComponent : 25;
     document.getElementById('set-labour-min-hardware').value = settings.labourMinutesPerHardwareItem!=null ? settings.labourMinutesPerHardwareItem : 8;
     document.getElementById('set-labour-base-hours').value = settings.labourBaseHoursPerJob!=null ? settings.labourBaseHoursPerJob : 3;
+    document.getElementById('set-carcass-species').value = settings.carcassSpeciesName!=null ? settings.carcassSpeciesName : 'Solid Oak';
+    document.getElementById('set-carcass-thickness').value = settings.carcassThicknessMm!=null ? settings.carcassThicknessMm : 25;
     renderSubcategoryManager();
   }
 
@@ -1151,6 +1193,8 @@
     settings.labourMinutesPerComponent = Number(document.getElementById('set-labour-min-component').value)||0;
     settings.labourMinutesPerHardwareItem = Number(document.getElementById('set-labour-min-hardware').value)||0;
     settings.labourBaseHoursPerJob = Number(document.getElementById('set-labour-base-hours').value)||0;
+    settings.carcassSpeciesName = document.getElementById('set-carcass-species').value.trim() || 'Solid Oak';
+    settings.carcassThicknessMm = Number(document.getElementById('set-carcass-thickness').value)||0;
     apiWrite('saveSettings', settings).then(function(){
       var msg = document.getElementById('settings-saved');
       msg.style.display='block'; setTimeout(function(){ msg.style.display='none'; }, 1800);
@@ -1827,6 +1871,56 @@
         lineItems.push({ id: uid(), type:'hardware', description: runnerRate.name, qty: drawerCount, unit: runnerRate.unit||'pair', sku: runnerRate.sku||null, rateId: runnerRate.id, unitPrice: Number(runnerRate.price)||0, suggestedRateId:null, suggestedScore:null });
       }
     });
+
+    // A Carcass line, auto-derived from overall dimensions, ONLY when the drawing didn't
+    // call out its own structural case material (see EXTRACTION_PROMPT's "carcass"
+    // field — most drawings don't). Priced on the species/thickness set in Settings, via
+    // the same stock-thickness-family lookup as everything else in solid timber, so it
+    // still rounds to a real stock size if the exact default thickness isn't on the card.
+    var carcassInfo = data.carcass || {};
+    if(!carcassInfo.shown){
+      var carcassPanels = computeCarcassPanels_(data.overallDimensions, carcassInfo.columns, carcassInfo.rows);
+      if(!carcassPanels){
+        volumeFlags.push('No carcass material was shown on the drawing, and the overall dimensions weren\'t complete enough to work one out automatically — add a carcass material line by hand.');
+      } else {
+        var carcassSpecies = settings.carcassSpeciesName || 'Solid Oak';
+        var carcassThicknessMm = Number(settings.carcassThicknessMm)||25;
+        var carcassExactName = carcassSpecies+' - '+carcassThicknessMm+'mm';
+        var carcassRate = rates.find(function(r){ return r.category==='material' && normalize(r.name)===normalize(carcassExactName); });
+        var carcassRoundedTo = null;
+        if(!carcassRate){
+          // Exact default thickness isn't on the card for this species — fall back to
+          // the same stock-thickness-family rounding used everywhere else in timber.
+          var anySpeciesRate = rates.find(function(r){
+            if(r.category!=='material' || !isVolumeUnit_(r.unit)) return false;
+            var p = parseStockThicknessName_(r.name);
+            return p && normalize(p.species)===normalize(carcassSpecies);
+          });
+          if(anySpeciesRate){
+            var carcassFit = stockThicknessFor_(anySpeciesRate, carcassThicknessMm);
+            if(carcassFit){ carcassRate = carcassFit.rate; carcassRoundedTo = carcassFit.thicknessMm; }
+          }
+        }
+        var carcassEffectiveThicknessMm = carcassRoundedTo || carcassThicknessMm;
+        var carcassVolume = carcassPanels.areaM2 * carcassEffectiveThicknessMm/1000;
+        totalFinishArea += carcassPanels.areaM2; // the carcass is finished too, same as any other visible timber
+        var carcassRateNote = carcassRate
+          ? (carcassRoundedTo ? 'priced on '+carcassRoundedTo+'mm stock (rounded up from the '+carcassThicknessMm+'mm default) — linked to "'+carcassRate.name+'"' : 'linked to "'+carcassRate.name+'"')
+          : 'no rate card entry found for "'+carcassExactName+'" — check the species/thickness default in Settings, or add the rate';
+        if(carcassInfo.columns==null || carcassInfo.rows==null){
+          volumeFlags.push('No carcass material was shown on the drawing — added one automatically from the overall dimensions ('+carcassPanels.parts.slice(0,3).join(', ')+', '+carcassRateNote+'), but the drawer/door grid wasn\'t clear enough to also work out internal dividers — check whether this product needs any and add them by hand.');
+        } else {
+          volumeFlags.push('No carcass material was shown on the drawing — added one automatically ('+carcassPanels.parts.join(', ')+', '+carcassRateNote+') — this is an approximation of Natalie\'s actual construction, not a reading of the drawing, so check it.');
+        }
+        lineItems.push({
+          id: uid(), type:'material', description: 'Carcass (auto-calculated — not shown on drawing)',
+          qty: Math.round(carcassVolume*1000)/1000, unit: carcassRate ? (carcassRate.unit||'m³') : 'm³',
+          wastagePct: Number(settings.defaultWastePct)||0,
+          rateId: carcassRate ? carcassRate.id : null, unitPrice: carcassRate ? Number(carcassRate.price)||0 : 0,
+          suggestedRateId: null, suggestedScore: null
+        });
+      }
+    }
 
     // Every product gets finished, so a finish line is standard on every quote rather than
     // something that has to be added by hand — pre-filled with the total surface area of the
