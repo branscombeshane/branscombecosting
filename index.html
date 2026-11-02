@@ -26,6 +26,12 @@
     --warn:#b23b3b; --warn-soft:#f6dede;
     --good:#3f7d53; --good-soft:#dfeee3;
     --amber:#b2772f; --amber-soft:#f3e4cd;
+    /* Spacing scale — one consistent rhythm instead of ad hoc pixel values scattered
+       through the file. Not every existing margin has been converted (hundreds of
+       inline styles across generated HTML), but every structural, screen-defining rule
+       below (panels, sheet headers, cards, sections) now uses one of these, so the
+       overall "how far apart do things sit" feel is consistent screen to screen. */
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:28px;
   }
   @media (prefers-color-scheme: dark){
     :root:not([data-theme="light"]){
@@ -67,7 +73,7 @@
 
   .sidebar{
     width:216px; flex:none; border-right:1px solid var(--line);
-    display:flex; flex-direction:column; padding:20px 16px; gap:22px;
+    display:flex; flex-direction:column; padding:var(--sp-5) var(--sp-4); gap:var(--sp-6);
     position:sticky; top:0; height:100vh;
   }
   .wordmark{
@@ -132,14 +138,14 @@
   body:not(.authed) .sidebar, body:not(.authed) main{ display:none; }
   body.authed #login-gate{ display:none; }
 
-  main{ flex:1; padding:28px 36px 60px; max-width:980px; }
+  main{ flex:1; padding:var(--sp-6) 36px 60px; max-width:980px; }
   .view[hidden]{ display:none; }
-  .sheet-head{ display:flex; align-items:baseline; justify-content:space-between; gap:16px; margin-bottom:18px; border-bottom:1px solid var(--line-strong); padding-bottom:10px; }
+  .sheet-head{ display:flex; align-items:baseline; justify-content:space-between; gap:var(--sp-4); margin-bottom:var(--sp-5); border-bottom:1px solid var(--line-strong); padding-bottom:var(--sp-3); }
   .sheet-head h1{ font-size:26px; font-weight:600; letter-spacing:.02em; margin:0; text-transform:uppercase; }
   .sheet-head .sub{ color:var(--ink-soft); font-size:13px; }
 
-  .panel{ border:1px solid var(--line); background:var(--paper-raised); padding:20px; margin-bottom:20px; }
-  .panel > h2{ font-size:16px; text-transform:uppercase; letter-spacing:.06em; margin:0 0 14px; font-weight:600; }
+  .panel{ border:1px solid var(--line); background:var(--paper-raised); padding:var(--sp-5); margin-bottom:var(--sp-5); }
+  .panel > h2{ font-size:16px; text-transform:uppercase; letter-spacing:.06em; margin:0 0 var(--sp-3); font-weight:600; }
 
   .dropzone{
     border:2px dashed var(--line); padding:34px 20px; text-align:center; color:var(--ink-soft);
@@ -234,8 +240,8 @@
   .chip-confidence.low{ color:var(--warn); }
 
   /* ================= PRODUCTION BOARD ================= */
-  .prod-group{ margin-bottom:28px; }
-  .prod-group-head{ display:flex; align-items:baseline; gap:10px; margin-bottom:12px; padding-bottom:6px; border-bottom:1px solid var(--line-strong); }
+  .prod-group{ margin-bottom:var(--sp-6); }
+  .prod-group-head{ display:flex; align-items:baseline; gap:var(--sp-3); margin-bottom:var(--sp-3); padding-bottom:6px; border-bottom:1px solid var(--line-strong); }
   .prod-group-head h2{ font-size:18px; text-transform:uppercase; letter-spacing:.04em; margin:0; font-weight:600; }
   .prod-group-head .count{ font-size:12px; color:var(--ink-soft); }
   .prod-group-head.good h2{ color:var(--good); }
@@ -289,8 +295,17 @@
   .prod-drawings .drawing-remove{ background:none; border:none; padding:0; margin-left:6px; color:var(--warn); text-decoration:underline; font-size:11px; cursor:pointer; font-family:inherit; }
   .prod-drawings .drawing-remove:hover{ color:var(--warn); opacity:.8; }
   .prod-drawings .drawing-row{ display:flex; align-items:center; gap:0; margin-bottom:4px; }
-  .pd-modal{ position:fixed; inset:0; z-index:900; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); padding:20px; }
-  .pd-modal-panel{ background:var(--paper-raised); border:1px solid var(--line-strong); padding:22px 24px; max-width:720px; width:100%; max-height:85vh; overflow:auto; }
+  /* One shared modal shell, used by every focused secondary action that shouldn't sit
+     inline competing for space with whatever list is behind it (adding a production
+     drawing, bundling quotes to send to Sage, adding an employee — see each one's own
+     open/close function). A backdrop click or Escape closes whichever modal is open
+     (see the one delegated listener near the bottom of the script), so the behaviour is
+     the same everywhere rather than each modal inventing its own. */
+  .modal-overlay{ position:fixed; inset:0; z-index:900; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); padding:20px; }
+  .modal-panel{ background:var(--paper-raised); border:1px solid var(--line-strong); padding:22px 24px; max-width:720px; width:100%; max-height:85vh; overflow:auto; }
+  /* For a modal whose content is already its own styled box (e.g. .approve-box) — keeps
+     the overlay's centering/sizing/scroll behaviour without drawing a second border. */
+  .modal-panel.modal-panel-plain{ background:none; border:none; padding:0; }
   .approve-box{ border:1px solid var(--line-strong); background:var(--accent-soft); padding:14px 16px; margin-top:14px; }
   .approve-box .field-row{ align-items:center; }
   .chk-label{ display:inline-flex; align-items:center; gap:6px; margin-right:18px; font-size:13px; }
@@ -331,7 +346,18 @@
   .field-row{ display:flex; gap:18px; flex-wrap:wrap; margin-top:14px; }
   .field{ display:flex; flex-direction:column; gap:5px; min-width:150px; }
 
-  .job-card{ border:1px solid var(--line); background:var(--paper-raised); padding:14px 16px; margin-bottom:10px; cursor:pointer; }
+  .job-card{ border:1px solid var(--line); background:var(--paper-raised); padding:14px var(--sp-4); margin-bottom:10px; cursor:pointer; }
+  /* The "which card/row am I currently looking at" rule — applied everywhere a list item
+     expands in place into an editor (Quotes, Payroll Roster, Pay Adjustments, Deduction
+     accounts — all share this same .job-detail expand pattern, see its own comment where
+     it's used). Without this, an expanded item looks identical to its collapsed
+     neighbours and nothing in the list visually says "this one's open" — exactly what
+     made the Send-to-Sage screenshot confusing (see also the new .modal-overlay pattern
+     below, which fixes the OTHER half of that confusion: a picker panel no longer sits
+     inline above the list it's about to act on). */
+  .job-card.active-row{ border-color:var(--accent); background:var(--accent-soft); }
+  tr.active-row{ background:var(--accent-soft); }
+  tr.active-row td:first-child{ box-shadow:inset 3px 0 0 var(--accent); }
   .job-card .row1{ display:flex; justify-content:space-between; align-items:baseline; gap:12px; }
   .job-card .row1 strong{ font-size:15px; }
   .job-card .meta{ color:var(--ink-soft); font-size:12px; margin-top:2px; }
@@ -384,8 +410,8 @@
      already works (see renderThumbs/renderPage below) — opened by the "+ Add drawing"
      button on a Production card, see openProdDrawingModal_. One shared modal, reused for
      whichever job's button was clicked (see pdModalState_). -->
-<div id="prod-drawing-modal" class="pd-modal" hidden>
-  <div class="pd-modal-panel">
+<div id="prod-drawing-modal" class="modal-overlay" hidden>
+  <div class="modal-panel">
     <div class="sheet-head" style="margin-bottom:12px;">
       <h1 style="font-size:18px;">Add production drawing</h1>
     </div>
@@ -401,6 +427,16 @@
       <button type="button" class="btn" id="pd-modal-cancel">Cancel</button>
     </div>
   </div>
+</div>
+
+<!-- Send-to-Sage used to be an inline panel sitting directly above the full Quotes list
+     — on a long list, whatever you'd just picked in the panel and the next unrelated
+     quote card right below it were impossible to tell apart at a glance (that's the
+     confusion Shane flagged). As a modal it's unambiguously a separate, focused action:
+     the list behind it is dimmed, nothing from it can be mistaken for part of the panel,
+     and it closes (Cancel, backdrop click, or Escape) back to exactly the list you had. -->
+<div id="sage-send-panel" class="modal-overlay" hidden>
+  <div class="modal-panel modal-panel-plain" id="sage-send-modal-body"></div>
 </div>
 
 <div class="sidebar">
@@ -481,7 +517,6 @@
       <div><h1>Quotes</h1><div class="sub" id="quotes-count"></div></div>
       <button class="btn" id="btn-open-sage-send">Send to Sage</button>
     </div>
-    <div id="sage-send-panel" hidden></div>
     <div id="quotes-list"></div>
   </section>
 
@@ -612,6 +647,16 @@
       <div id="users-admin-status" class="status-msg" style="display:none;margin-top:12px;"></div>
     </div>
 
+    <div class="panel" style="max-width:440px;">
+      <h2 style="margin:0 0 4px;">Joiners / carpenters</h2>
+      <div class="sub" style="margin-bottom:14px;">Who's available to assign a job to, in the dropdown Natalie sees when approving a quote into a job. Renaming one updates every job already assigned to it; deleting one leaves those jobs Unassigned rather than losing them.</div>
+      <div id="joiner-list-mgr"></div>
+      <div class="field-row" style="margin-top:16px;">
+        <div class="field"><span class="label">New joiner / carpenter</span><input type="text" id="joiner-new-name" placeholder="e.g. Izak"></div>
+        <button class="btn primary" id="btn-add-joiner" style="align-self:flex-end;">Add</button>
+      </div>
+    </div>
+
     <div class="panel" style="max-width:620px;">
       <h2 style="margin:0 0 4px;">Site settings</h2>
       <div class="sub">Nothing else lives here yet — Costing's own defaults stay on the Costing &gt; Settings screen, and Payroll's on Payroll &gt; Settings, since both are specific to that job. Anything that applies across the whole app, rather than to one of those, belongs here going forward.</div>
@@ -707,7 +752,7 @@
   var job = null;
   var view = 'new';
   var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, drawerSideClearanceMm: 10, drawerHeightDeductionMm: 40, drawerRunnerMarginMm: 25, labourMinutesPerComponent: 25, labourMinutesPerHardwareItem: 8, labourBaseHoursPerJob: 3, carcassSpeciesName: 'Solid Oak', carcassThicknessMm: 25, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
-    payrollDepartments: ['Management','Production','Admin'], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
+    payrollDepartments: ['Management','Production','Admin'], joiners: [], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
   var currentFileName = null;
 
   function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
@@ -1552,6 +1597,64 @@
       if(res && res.ok){ settings.payrollDepartments = res.departments; input.value=''; renderDepartmentManager(); }
     });
   });
+
+  // ================= ADMIN — JOINERS / CARPENTERS =================
+  // Same managed-list pattern as Payroll departments above (Admin > Joiners/carpenters) —
+  // Shane: "the joiner/carpenter list must get setup in admin so that there's a drop down
+  // menu to select from when selecting the joiner/carpenter". Used by joinerOptionsHtml_
+  // to build the required dropdown in the Approve box (see renderApproveBox_).
+  function renderJoinerManager(){
+    var wrap = document.getElementById('joiner-list-mgr');
+    if(!wrap) return;
+    var list = settings.joiners || [];
+    if(!list.length){
+      wrap.innerHTML = '<div class="empty">No joiners/carpenters set up yet — add one below.</div>';
+    } else {
+      wrap.innerHTML = list.slice().sort().map(function(name){
+        return '<div class="field-row joiner-row" data-name="'+esc(name)+'" style="margin-top:8px;align-items:center;">' +
+          '<input type="text" class="joiner-rename-input" value="'+esc(name)+'" style="flex:1;min-width:120px;">' +
+          '<button class="btn small joiner-rename">Save</button>' +
+          '<button class="btn small danger joiner-delete">Delete</button>' +
+          '</div>';
+      }).join('');
+    }
+    wrap.querySelectorAll('.joiner-rename').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var row = btn.closest('.joiner-row'); var oldName = row.dataset.name;
+        var newName = row.querySelector('.joiner-rename-input').value.trim();
+        if(!newName || newName===oldName) return;
+        withBusy_(btn, apiRead('renameJoiner', { oldName:oldName, newName:newName })).then(function(res){
+          if(res && res.ok){ settings.joiners = res.joiners; renderJoinerManager(); }
+        });
+      });
+    });
+    wrap.querySelectorAll('.joiner-delete').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var row = btn.closest('.joiner-row'); var name = row.dataset.name;
+        if(!confirm('Delete "'+name+'"? Jobs already assigned to them will show as Unassigned instead — they won\'t be removed.')) return;
+        withBusy_(btn, apiRead('deleteJoiner', { name:name }), 'Deleting…').then(function(res){
+          if(res && res.ok){ settings.joiners = res.joiners; renderJoinerManager(); }
+        });
+      });
+    });
+  }
+  document.getElementById('btn-add-joiner').addEventListener('click', function(){
+    var input = document.getElementById('joiner-new-name');
+    var name = input.value.trim();
+    if(!name){ input.focus(); return; }
+    if((settings.joiners||[]).indexOf(name)!==-1){ input.value=''; return; }
+    withBusy_(this, apiRead('addJoiner', { name:name }), 'Adding…').then(function(res){
+      if(res && res.ok){ settings.joiners = res.joiners; input.value=''; renderJoinerManager(); }
+    });
+  });
+  function joinerOptionsHtml_(selected){
+    var list = (settings.joiners||[]).slice();
+    if(selected && list.indexOf(selected)===-1) list.push(selected);
+    list.sort();
+    return '<option value="">— choose —</option>' + list.map(function(name){
+      return '<option value="'+esc(name)+'"'+(name===selected?' selected':'')+'>'+esc(name)+'</option>';
+    }).join('');
+  }
 
   // ================= SETTINGS — PAYROLL COMPANY DETAILS =================
   function fillCompanyForm(){
@@ -2713,7 +2816,7 @@
   }
 
   function renderSageSendPanel_(){
-    var panel = document.getElementById('sage-send-panel');
+    var panel = document.getElementById('sage-send-modal-body');
     // Every customer name any not-yet-sent quote currently has, as typing suggestions
     // only — doesn't mean they're actually in Sage, "Check Sage" below is what matters.
     var names = {};
@@ -2815,10 +2918,7 @@
       });
     });
 
-    panel.querySelector('#btn-sage-send-cancel').addEventListener('click', function(){
-      panel.hidden = true;
-      panel.innerHTML = '';
-    });
+    panel.querySelector('#btn-sage-send-cancel').addEventListener('click', closeSageSendModal_);
 
     sendBtn.addEventListener('click', function(){
       var name = customerInput.value.trim();
@@ -2839,7 +2939,7 @@
       }).then(function(res){
         sendStatus.textContent = 'Sent — Sage quote '+(res.sageQuoteNumber || res.sageQuoteId || '')+'.';
         setTimeout(function(){
-          panel.hidden = true; panel.innerHTML = '';
+          closeSageSendModal_();
           loadQuotes();
         }, 1200);
       }).catch(function(e){
@@ -2850,11 +2950,31 @@
     });
   }
 
-  document.getElementById('btn-open-sage-send').addEventListener('click', function(){
-    var panel = document.getElementById('sage-send-panel');
-    if(!panel.hidden){ panel.hidden = true; panel.innerHTML = ''; return; }
-    panel.hidden = false;
+  function openSageSendModal_(){
+    document.getElementById('sage-send-panel').hidden = false;
     renderSageSendPanel_();
+  }
+  function closeSageSendModal_(){
+    document.getElementById('sage-send-panel').hidden = true;
+    document.getElementById('sage-send-modal-body').innerHTML = '';
+  }
+  document.getElementById('btn-open-sage-send').addEventListener('click', openSageSendModal_);
+
+  // One rule for every .modal-overlay (currently: add production drawing, send to Sage)
+  // instead of each one inventing its own close behaviour — a backdrop click or Escape
+  // always closes whichever is open, back to exactly the screen you had underneath it.
+  function closeAnyModal_(overlay){
+    if(overlay.id === 'prod-drawing-modal') closeProdDrawingModal_();
+    else if(overlay.id === 'sage-send-panel') closeSageSendModal_();
+    else overlay.hidden = true;
+  }
+  document.addEventListener('click', function(e){
+    if(e.target.classList && e.target.classList.contains('modal-overlay')) closeAnyModal_(e.target);
+  });
+  document.addEventListener('keydown', function(e){
+    if(e.key !== 'Escape') return;
+    var open = document.querySelector('.modal-overlay:not([hidden])');
+    if(open) closeAnyModal_(open);
   });
 
   // ================= QUOTES LIST =================
@@ -2956,10 +3076,12 @@
       if(e.target.closest('.view-drawing-link')) return; // let the drawing link open, don't also toggle
       if(detail.hidden){
         detail.hidden = false;
+        card.classList.add('active-row'); // which card you're on is never ambiguous
         editingJob = JSON.parse(JSON.stringify(j)); // edit a working copy until "Save changes"
         renderEditor();
       } else {
         detail.hidden = true;
+        card.classList.remove('active-row');
       }
     });
     return card;
@@ -3040,6 +3162,9 @@
       '</div>' +
       '<div class="sub" style="margin:8px 0 0;color:var(--ink-soft);">Every job also gets Packaging automatically. These checkboxes (including Woodwork) are only a starting suggestion from the bill of materials — check them over before approving.</div>' +
       '<div class="field-row" style="margin-top:12px;">' +
+        '<div class="field" style="max-width:220px;"><span class="label">Assigned to</span><select class="sec-joiner">'+joinerOptionsHtml_()+'</select></div>' +
+      '</div>' +
+      '<div class="field-row" style="margin-top:12px;">' +
         '<button type="button" class="btn primary btn-approve-confirm">Approve &amp; create job card</button>' +
         '<span class="approve-status sub" style="align-self:center;"></span>' +
       '</div>' +
@@ -3055,7 +3180,8 @@
       var cls = weeksColorClass_(j.manufactureWeeks);
       var when = j.completedAt ? ('Completed '+esc((j.completedAt||'').slice(0,10))) :
         ('<span class="chip '+cls+'">due '+esc(j.dueDate||'')+'</span>');
-      return '<div class="sub" style="margin-top:14px;">Approved by '+esc(j.approvedBy||'')+' on '+esc((j.approvedAt||'').slice(0,10))+' — '+when+'. See the Production board to track progress.</div>';
+      var assigned = j.assignedJoiner ? (' Assigned to '+esc(j.assignedJoiner)+'.') : '';
+      return '<div class="sub" style="margin-top:14px;">Approved by '+esc(j.approvedBy||'')+' on '+esc((j.approvedAt||'').slice(0,10))+' — '+when+'.'+assigned+' See the Production board to track progress.</div>';
     }
     if(currentUser && currentUser.role==='owner'){
       var sug = suggestProductionSections_(j);
@@ -3108,7 +3234,19 @@
       if(finishRadio) sections.push(finishRadio.value);
       var statusEl = box.querySelector('.approve-status');
       var btn = box.querySelector('.btn-approve-confirm');
-      var payload = { id: editingJob.id, sections: sections.join(','), actingUserId: currentUser ? currentUser.id : '' };
+      // Who's building it — Shane: "each job gets assigned to a joiner/carpenter... this
+      // step needs to happen when clicking approved". Required: approveJob_ also rejects
+      // a blank one server-side, but check here first so it's an inline message, not a
+      // round trip.
+      var joinerSelect = box.querySelector('.sec-joiner');
+      var assignedJoiner = joinerSelect ? joinerSelect.value : '';
+      if(!assignedJoiner){
+        statusEl.textContent = (settings.joiners||[]).length
+          ? 'Pick who this job is assigned to.'
+          : 'Add a joiner/carpenter in Admin first, then pick who this job is assigned to.';
+        return;
+      }
+      var payload = { id: editingJob.id, sections: sections.join(','), assignedJoiner: assignedJoiner, actingUserId: currentUser ? currentUser.id : '' };
       if(rushCheckbox.checked){
         if(!rushDateInput.value){
           statusEl.textContent = 'Pick a custom due date, or untick Rush job.';
@@ -3281,10 +3419,18 @@
     }).join('') + '</ul>';
   }
 
+  // Shared by both cards below — drawing #, customer, and who it's assigned to (set once
+  // at approval, see wireApproveBox_/approveJob_). "Unassigned" only shows for a job
+  // approved before this feature existed; every job approved since requires a pick.
+  function prodMetaHtml_(j){
+    return esc(j.drawingNumber||'—')+(j.customerName?' · '+esc(j.customerName):'')+
+      ' · '+(j.assignedJoiner?esc(j.assignedJoiner):'<span style="color:var(--warn);">Unassigned</span>');
+  }
+
   function prodCardHtml_(j, canTick){
     return '<div class="prod-card">' +
       '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
-      '<div class="prod-meta">'+esc(j.drawingNumber||'—')+(j.customerName?' · '+esc(j.customerName):'')+'</div>' +
+      '<div class="prod-meta">'+prodMetaHtml_(j)+'</div>' +
       prodTimelineHtml_(j) +
       prodChecklistHtml_(j, canTick) +
       prodBomHtml_(j) +
@@ -3298,7 +3444,7 @@
   function prodCompletedCardHtml_(j, canTick){
     return '<div class="prod-card prod-card-done">' +
       '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
-      '<div class="prod-meta">'+esc(j.drawingNumber||'—')+(j.customerName?' · '+esc(j.customerName):'')+'</div>' +
+      '<div class="prod-meta">'+prodMetaHtml_(j)+'</div>' +
       '<div class="prod-completed-line">Completed '+esc((j.completedAt||'').slice(0,10))+'</div>' +
       prodChecklistHtml_(j, canTick) +
       prodBomHtml_(j) +
@@ -3612,6 +3758,7 @@
   wireRoleTogglesPermissions_(document.getElementById('user-new-role'), document.getElementById('user-new-permissions'));
   function loadUsersAdmin_(){
     if(!currentUser) return;
+    renderJoinerManager();
     apiRead('getUsers', { actingUserId: currentUser.id }).then(function(res){
       if(res && res.error){
         document.getElementById('users-list-mgr').innerHTML = '<div class="status-msg error">'+esc(res.error)+'</div>';
@@ -3845,7 +3992,7 @@
       ? '<span class="chip warn">Discharged</span>'
       : (e.status==='finalized' ? '<span class="chip good">Finalized</span>' : (e.status==='in_progress' ? '<span class="chip">Saved</span>' : '<span class="chip warn">Not started</span>'));
     var rateStr = e.days ? (e.days+' d/wk · '+money(e.dayRate)+'/day · '+money(e.hourRate)+'/hr') : 'Salaried';
-    return '<tr class="roster-row" data-id="'+e.id+'">' +
+    return '<tr class="roster-row'+(expandedEmployeeId===e.id?' active-row':'')+'" data-id="'+e.id+'">' +
       '<td>'+esc(e.name)+(e.etiEligible?' <span class="chip good" title="Eligible for the Employment Tax Incentive this month">ETI</span>':'')+'</td>' +
       '<td>'+esc(e.department||'—')+'</td>' +
       '<td style="font-size:11.5px;color:var(--ink-soft);">'+esc(rateStr)+'</td>' +
@@ -4171,7 +4318,7 @@
         return sign+money(it.amount)+' '+it.type;
       }).join(', ') : '—';
       var statusChip = e.status==='finalized' ? '<span class="chip good">Finalized</span>' : (e.status==='in_progress' ? '<span class="chip">Saved</span>' : '<span class="chip warn">Not started</span>');
-      return '<tr class="adj-emp-row" data-id="'+e.id+'">' +
+      return '<tr class="adj-emp-row'+(expandedAdjEmployeeId===e.id?' active-row':'')+'" data-id="'+e.id+'">' +
         '<td>'+esc(e.name)+'</td><td>'+esc(e.department||'—')+'</td>' +
         '<td style="font-size:11.5px;">'+esc(summary)+'</td>' +
         '<td>'+statusChip+'</td>' +
@@ -4267,7 +4414,7 @@
 
     var rowsHtml = rows.length ? rows.map(function(a){
       var kindLabel = a.kind==='advance' ? 'Advance' : 'Deduction';
-      return '<tr class="dedacct-row" data-id="'+a.id+'">' +
+      return '<tr class="dedacct-row'+(expandedDedAccountId===a.id?' active-row':'')+'" data-id="'+a.id+'">' +
         '<td>'+esc(a.name)+'</td>' +
         '<td>'+kindLabel+'</td>' +
         '<td>'+esc(a.description||'—')+'</td>' +
@@ -5942,7 +6089,7 @@
       }).join('');
       return '<div class="kiosk-card">' +
         '<div class="kiosk-title">'+esc(j.productName||'Untitled')+'</div>' +
-        '<div class="kiosk-meta">'+esc(j.drawingNumber||'')+(j.customerName?' · '+esc(j.customerName):'')+'</div>' +
+        '<div class="kiosk-meta">'+esc(j.drawingNumber||'')+(j.customerName?' · '+esc(j.customerName):'')+(j.assignedJoiner?' · '+esc(j.assignedJoiner):'')+'</div>' +
         kioskDueBadge_(j) +
         '<ul>'+items+'</ul>' +
       '</div>';
