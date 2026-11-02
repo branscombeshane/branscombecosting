@@ -252,6 +252,11 @@
   .prod-bom summary{ cursor:pointer; font-size:12px; color:var(--ink-soft); font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding-top:10px; border-top:1px solid var(--line); }
   .prod-bom table{ margin-top:8px; }
   .prod-bom th, .prod-bom td{ font-size:12px; padding:4px 6px; }
+  .prod-drawings .drawing-remove{ background:none; border:none; padding:0; margin-left:6px; color:var(--warn); text-decoration:underline; font-size:11px; cursor:pointer; font-family:inherit; }
+  .prod-drawings .drawing-remove:hover{ color:var(--warn); opacity:.8; }
+  .prod-drawings .drawing-row{ display:flex; align-items:center; gap:0; margin-bottom:4px; }
+  .pd-modal{ position:fixed; inset:0; z-index:900; display:flex; align-items:center; justify-content:center; background:rgba(0,0,0,.5); padding:20px; }
+  .pd-modal-panel{ background:var(--paper-raised); border:1px solid var(--line-strong); padding:22px 24px; max-width:720px; width:100%; max-height:85vh; overflow:auto; }
   .approve-box{ border:1px solid var(--line-strong); background:var(--accent-soft); padding:14px 16px; margin-top:14px; }
   .approve-box .field-row{ align-items:center; }
   .chk-label{ display:inline-flex; align-items:center; gap:6px; margin-right:18px; font-size:13px; }
@@ -260,6 +265,7 @@
   .weeks-pick button.sel-good{ background:var(--good); color:#fff; border-color:var(--good); }
   .weeks-pick button.sel-amber{ background:var(--amber); color:#fff; border-color:var(--amber); }
   .weeks-pick button.sel-warn{ background:var(--warn); color:#fff; border-color:var(--warn); }
+  .weeks-pick button:disabled{ opacity:.4; cursor:default; }
   /* ================= KIOSK (factory floor display) ================= */
   body.kiosk-mode .sidebar, body.kiosk-mode #login-gate, body.kiosk-mode main{ display:none !important; }
   #kiosk-board{ display:none; min-height:100vh; background:var(--paper); padding:28px 34px; }
@@ -336,6 +342,30 @@
       <button type="submit" class="btn primary" id="login-submit">Log in</button>
       <div id="login-status" style="margin-top:14px;"></div>
     </form>
+  </div>
+</div>
+
+<!-- Production-drawing upload modal: lets a multi-page PDF be trimmed down to just the
+     page(s) that matter before uploading, the same way the New Quote drawing upload
+     already works (see renderThumbs/renderPage below) — opened by the "+ Add drawing"
+     button on a Production card, see openProdDrawingModal_. One shared modal, reused for
+     whichever job's button was clicked (see pdModalState_). -->
+<div id="prod-drawing-modal" class="pd-modal" hidden>
+  <div class="pd-modal-panel">
+    <div class="sheet-head" style="margin-bottom:12px;">
+      <h1 style="font-size:18px;">Add production drawing</h1>
+    </div>
+    <div class="dropzone" id="pd-modal-dropzone">
+      <strong>Drop a drawing PDF or a photo here</strong>A multi-page PDF can be trimmed down to just the page(s) you need below before uploading
+      <div style="margin-top:14px;"><button type="button" class="btn" id="pd-modal-choose">Choose file</button></div>
+      <input type="file" id="pd-modal-file-input" accept="application/pdf,image/jpeg,image/png,image/jpg" multiple hidden>
+    </div>
+    <div id="pd-modal-status" class="status-msg" style="margin-top:12px;"></div>
+    <div class="thumbs" id="pd-modal-thumbs" style="margin-top:12px;"></div>
+    <div class="field-row" style="margin-top:16px;">
+      <button type="button" class="btn primary" id="pd-modal-upload" disabled>Upload</button>
+      <button type="button" class="btn" id="pd-modal-cancel">Cancel</button>
+    </div>
   </div>
 </div>
 
@@ -2916,6 +2946,12 @@
       '<div class="weeks-pick">' +
         [6,7,8].map(function(w){ return '<button type="button" class="weeks-btn" data-weeks="'+w+'">'+w+' weeks</button>'; }).join('') +
       '</div>' +
+      '<div class="field-row" style="margin-top:8px;align-items:center;">' +
+        '<label class="chk-label"><input type="checkbox" class="sec-rush"> Rush job — needs a custom due date sooner than 6 weeks</label>' +
+      '</div>' +
+      '<div class="field-row rush-date-row" style="margin-top:4px;max-width:220px;display:none;">' +
+        '<div class="field"><span class="label">Custom due date</span><input type="date" class="custom-due-date"></div>' +
+      '</div>' +
       '<div class="field-row" style="margin-top:12px;">' +
         '<label class="chk-label"><input type="checkbox" class="sec-woodwork"'+(sug.woodwork?' checked':'')+'> Woodwork (joinery &amp; carpentry)</label>' +
         '<label class="chk-label"><input type="checkbox" class="sec-steel"'+(sug.steel?' checked':'')+'> Steel shop (welding)</label>' +
@@ -2973,6 +3009,18 @@
         paintWeeks();
       });
     });
+    // Rush job — Shane: "a job that needs to be rushed and completed in a shorter time
+    // than the standard 6-8 weeks". Ticking this swaps the three weeks presets out for an
+    // exact date (can't be earlier than today); the 6/7/8-week buttons are disabled rather
+    // than hidden, so it's obvious at a glance which mode is in effect.
+    var rushCheckbox = box.querySelector('.sec-rush');
+    var rushDateRow = box.querySelector('.rush-date-row');
+    var rushDateInput = box.querySelector('.custom-due-date');
+    rushDateInput.min = new Date().toISOString().slice(0,10);
+    rushCheckbox.addEventListener('change', function(){
+      rushDateRow.style.display = rushCheckbox.checked ? '' : 'none';
+      weeksBtns.forEach(function(b){ b.disabled = rushCheckbox.checked; });
+    });
     box.querySelector('.btn-approve-confirm').addEventListener('click', function(e){
       e.stopPropagation();
       var sections = [];
@@ -2983,18 +3031,25 @@
       if(finishRadio) sections.push(finishRadio.value);
       var statusEl = box.querySelector('.approve-status');
       var btn = box.querySelector('.btn-approve-confirm');
+      var payload = { id: editingJob.id, sections: sections.join(','), actingUserId: currentUser ? currentUser.id : '' };
+      if(rushCheckbox.checked){
+        if(!rushDateInput.value){
+          statusEl.textContent = 'Pick a custom due date, or untick Rush job.';
+          return;
+        }
+        payload.customDueDate = rushDateInput.value;
+      } else {
+        payload.manufactureWeeks = selectedWeeks;
+      }
       statusEl.textContent = 'Approving…';
-      withBusy_(btn, apiRead('approveJob', {
-        id: editingJob.id, manufactureWeeks: selectedWeeks, sections: sections.join(','),
-        actingUserId: currentUser ? currentUser.id : ''
-      }), 'Approving…').then(function(res){
+      withBusy_(btn, apiRead('approveJob', payload), 'Approving…').then(function(res){
         if(res && res.ok){
           statusEl.textContent = 'Approved.';
           setTimeout(loadQuotes, 600);
         } else if(res && res.error==='forbidden'){
           statusEl.textContent = 'Only Natalie\'s login can approve a quote.';
         } else {
-          statusEl.textContent = 'Something went wrong — try again.';
+          statusEl.textContent = (res && res.error) || 'Something went wrong — try again.';
         }
       }).catch(function(){ statusEl.textContent = 'Couldn\'t reach the backend — try again.'; });
     });
@@ -3055,19 +3110,22 @@
   // Shows the original costing drawing (reusing the same drawingFileUrls link the Quotes
   // list already shows) plus any production drawings added since, and the control to add
   // more — Shane: "have the costing drawing available and the ability to upload new
-  // production drawings".
+  // production drawings". Only the production drawings get a "remove" link — the costing
+  // drawing stays the permanent record of what the quote itself was costed against (see
+  // removeProductionDrawing_'s own comment in Code.gs).
   function prodDrawingsHtml_(j){
     var costing = (j.drawingFileUrls && j.drawingFileUrls.length)
       ? '<a class="drawing-link" href="'+esc(j.drawingFileUrls[0])+'" target="_blank" rel="noopener">view costing drawing</a>'
       : '<span class="sub" style="color:var(--ink-soft);display:block;margin-bottom:4px;">No costing drawing saved.</span>';
     var extra = (j.productionDrawingUrls||[]).map(function(d){
-      return '<a class="drawing-link" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.name||'drawing')+'</a>';
+      return '<div class="drawing-row">' +
+        '<a class="drawing-link" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.name||'drawing')+'</a>' +
+        '<button type="button" class="drawing-remove" data-job="'+esc(j.id)+'" data-url="'+esc(d.url)+'">remove</button>' +
+      '</div>';
     }).join('');
     return '<div class="prod-drawings">' +
       costing + extra +
       '<button type="button" class="btn small ghost btn-add-drawing" data-job="'+esc(j.id)+'">+ Add drawing</button>' +
-      '<input type="file" class="drawing-file-input" data-job="'+esc(j.id)+'" accept="application/pdf,image/*" multiple hidden>' +
-      '<span class="drawing-upload-status sub" data-job="'+esc(j.id)+'" style="display:block;margin-top:4px;color:var(--ink-soft);"></span>' +
     '</div>';
   }
 
@@ -3182,42 +3240,169 @@
   // since a real photo/PDF is too big for a doGet/JSONP query string. Re-loads the whole
   // board on success so the new link (and the Materials section it sits next to) reflects
   // the server's own copy rather than guessing at it client-side.
+  // "+ Add drawing" just opens the shared modal (below) for this job; "remove" calls
+  // removeProductionDrawing directly — small enough to be a synchronous apiRead, same as
+  // updateJobProgress_'s own checklist ticks, no need for the write-then-poll dance. Only
+  // production drawings ever get a remove button (see prodDrawingsHtml_) — Shane: "allow
+  // only the production drawing to be removed [not the costing drawing] in case the
+  // incorrect file was uploaded".
   function wireProdDrawingUploads_(container){
     container.querySelectorAll('.btn-add-drawing').forEach(function(btn){
-      btn.addEventListener('click', function(){
-        var jobId = btn.dataset.job;
-        var input = container.querySelector('.drawing-file-input[data-job="'+jobId+'"]');
-        if(input) input.click();
-      });
+      btn.addEventListener('click', function(){ openProdDrawingModal_(btn.dataset.job); });
     });
-    container.querySelectorAll('.drawing-file-input').forEach(function(input){
-      input.addEventListener('change', function(){
-        var jobId = input.dataset.job;
-        var files = Array.prototype.slice.call(input.files||[]);
-        input.value = '';
-        if(!files.length) return;
-        var statusEl = container.querySelector('.drawing-upload-status[data-job="'+jobId+'"]');
-        if(statusEl) statusEl.textContent = 'Uploading…';
-        Promise.all(files.map(function(f){
-          return blobToBase64(f).then(function(data){ return { data:data, mimeType:f.type||'application/octet-stream', name:f.name }; });
-        })).then(function(fileData){
-          var token = uid();
-          return apiWrite('addProductionDrawing', { jobId: jobId, files: fileData, actingUserId: currentUser.id, token: token }).then(function(){
-            return pollTokenResult_('getAddProductionDrawingResult', token);
-          });
-        }).then(function(res){
-          var result = res && res.result;
-          if(result && result.ok){
-            loadProduction();
-          } else if(statusEl){
-            statusEl.textContent = (result && result.error) || 'Upload failed — try again.';
-          }
-        }).catch(function(){
-          if(statusEl) statusEl.textContent = 'Couldn\'t reach the backend — try again.';
-        });
+    container.querySelectorAll('.drawing-remove').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        if(!confirm('Remove this production drawing? This can\'t be undone.')) return;
+        var jobId = btn.dataset.job, url = btn.dataset.url;
+        btn.disabled = true;
+        apiRead('removeProductionDrawing', { jobId: jobId, url: url, actingUserId: currentUser.id }).then(function(res){
+          if(res && res.ok) loadProduction();
+          else { btn.disabled = false; alert((res && res.error) || 'Couldn\'t remove that drawing — try again.'); }
+        }).catch(function(){ btn.disabled = false; alert('Couldn\'t reach the backend — try again.'); });
       });
     });
   }
+
+  // ---- Production drawing upload modal (shared, one at a time) ----
+  // Lets a multi-page PDF be trimmed down to just the page(s) that matter before
+  // uploading — the same ability the New Quote drawing upload already has (handleFile/
+  // renderThumbs/renderPage above) — rather than always sending every page of whatever
+  // was picked. pdModalState_.jobId tracks which card's "+ Add drawing" button opened it;
+  // pages holds the page-canvases still queued to upload, each individually removable via
+  // its thumbnail's × button (reusing the exact same .thumb-wrap/.thumb-remove styling).
+  var pdModalState_ = { jobId: null, pages: [] };
+
+  function openProdDrawingModal_(jobId){
+    pdModalState_ = { jobId: jobId, pages: [] };
+    document.getElementById('pd-modal-status').textContent = '';
+    renderPdModalThumbs_();
+    document.getElementById('prod-drawing-modal').hidden = false;
+  }
+
+  function closeProdDrawingModal_(){
+    document.getElementById('prod-drawing-modal').hidden = true;
+    pdModalState_ = { jobId: null, pages: [] };
+    document.getElementById('pd-modal-file-input').value = '';
+  }
+
+  function renderPdModalThumbs_(){
+    var wrap = document.getElementById('pd-modal-thumbs');
+    var uploadBtn = document.getElementById('pd-modal-upload');
+    wrap.innerHTML = '';
+    pdModalState_.pages.forEach(function(p){
+      var wrapEl = document.createElement('div');
+      wrapEl.className = 'thumb-wrap';
+      wrapEl.appendChild(p.canvas);
+      var label = document.createElement('span');
+      label.className = 'thumb-page-label';
+      label.textContent = p.label;
+      wrapEl.appendChild(label);
+      var rm = document.createElement('button');
+      rm.type = 'button'; rm.className = 'thumb-remove'; rm.title = 'Remove this page';
+      rm.textContent = '×';
+      rm.addEventListener('click', function(e){
+        e.stopPropagation();
+        pdModalState_.pages = pdModalState_.pages.filter(function(x){ return x!==p; });
+        renderPdModalThumbs_();
+      });
+      wrapEl.appendChild(rm);
+      wrap.appendChild(wrapEl);
+    });
+    uploadBtn.disabled = !pdModalState_.pages.length;
+  }
+
+  // Same PDF-page-rendering / photo-reading path as handleFile() above (renderPage,
+  // renderImageFile — both reused as-is), just pushing into pdModalState_.pages instead
+  // of the New Quote screen's own pdfImages, since the two uploads can be mid-flight at
+  // the same time (e.g. starting a new quote while also fixing a production drawing).
+  function addPdModalFile_(file){
+    var statusEl = document.getElementById('pd-modal-status');
+    var isPdf = file.type === 'application/pdf' || /\.pdf$/i.test(file.name);
+    var isImage = /^image\//.test(file.type) || /\.(jpe?g|png)$/i.test(file.name);
+    var base = file.name.replace(/\.[^.]+$/, '');
+    if(isPdf){
+      statusEl.textContent = 'Reading pages of ' + file.name + '…';
+      var reader = new FileReader();
+      reader.onload = function(){
+        var typedArray = new Uint8Array(reader.result);
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+        pdfjsLib.getDocument({ data: typedArray }).promise.then(function(pdf){
+          var RENDER_CAP = 20;
+          var maxPages = Math.min(pdf.numPages, RENDER_CAP);
+          var pagePromises = [];
+          for(var i=1;i<=maxPages;i++) pagePromises.push(renderPage(pdf, i));
+          return Promise.all(pagePromises);
+        }).then(function(results){
+          results.forEach(function(r, idx){
+            pdModalState_.pages.push({ canvas:r.canvas, blob:r.blob, name: base+'_p'+(idx+1)+'.png', label: 'p'+(idx+1) });
+          });
+          statusEl.textContent = '';
+          renderPdModalThumbs_();
+        }).catch(function(e){
+          statusEl.textContent = 'Couldn\'t read that PDF (' + (e.message||'unknown error') + ').';
+        });
+      };
+      reader.readAsArrayBuffer(file);
+    } else if(isImage){
+      statusEl.textContent = 'Reading ' + file.name + '…';
+      renderImageFile(file).then(function(r){
+        pdModalState_.pages.push({ canvas:r.canvas, blob:r.blob, name:file.name, label:file.name });
+        statusEl.textContent = '';
+        renderPdModalThumbs_();
+      }).catch(function(){
+        statusEl.textContent = 'Couldn\'t read that photo.';
+      });
+    } else {
+      statusEl.textContent = 'That file type isn\'t supported — use a PDF or a JPEG/PNG photo.';
+    }
+  }
+
+  // Wired once at boot (the modal markup lives outside #production-board, so it never
+  // gets torn down/re-rendered the way the cards do) — see the call just below.
+  function initProdDrawingModal_(){
+    var dz = document.getElementById('pd-modal-dropzone');
+    var fi = document.getElementById('pd-modal-file-input');
+    var chooseBtn = document.getElementById('pd-modal-choose');
+    dz.addEventListener('click', function(){ fi.click(); });
+    chooseBtn.addEventListener('click', function(e){ e.stopPropagation(); fi.click(); });
+    dz.addEventListener('dragover', function(e){ e.preventDefault(); dz.classList.add('drag'); });
+    dz.addEventListener('dragleave', function(){ dz.classList.remove('drag'); });
+    dz.addEventListener('drop', function(e){
+      e.preventDefault(); dz.classList.remove('drag');
+      Array.prototype.forEach.call((e.dataTransfer&&e.dataTransfer.files)||[], addPdModalFile_);
+    });
+    fi.addEventListener('change', function(){
+      Array.prototype.forEach.call(fi.files||[], addPdModalFile_);
+    });
+    document.getElementById('pd-modal-cancel').addEventListener('click', closeProdDrawingModal_);
+    document.getElementById('pd-modal-upload').addEventListener('click', function(){
+      var jobId = pdModalState_.jobId;
+      var pages = pdModalState_.pages.slice();
+      if(!jobId || !pages.length) return;
+      var statusEl = document.getElementById('pd-modal-status');
+      var btn = document.getElementById('pd-modal-upload');
+      statusEl.textContent = 'Uploading…';
+      withBusy_(btn, Promise.all(pages.map(function(p){
+        return blobToBase64(p.blob).then(function(data){ return { data:data, mimeType:'image/png', name:p.name }; });
+      })).then(function(fileData){
+        var token = uid();
+        return apiWrite('addProductionDrawing', { jobId: jobId, files: fileData, actingUserId: currentUser.id, token: token }).then(function(){
+          return pollTokenResult_('getAddProductionDrawingResult', token);
+        });
+      }), 'Uploading…').then(function(res){
+        var result = res && res.result;
+        if(result && result.ok){
+          closeProdDrawingModal_();
+          loadProduction();
+        } else {
+          statusEl.textContent = (result && result.error) || 'Upload failed — try again.';
+        }
+      }).catch(function(){
+        statusEl.textContent = 'Couldn\'t reach the backend — try again.';
+      });
+    });
+  }
+  initProdDrawingModal_();
 
   var prodSearchInput_ = document.getElementById('prod-search');
   if(prodSearchInput_) prodSearchInput_.addEventListener('input', function(){ renderProductionBoard_(); });
