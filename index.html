@@ -635,8 +635,9 @@
       </div>
       <div class="field-row">
         <div class="field"><span class="label">Default waste % for round/turned parts</span><input type="number" id="set-cylinder-waste" step="1" min="0"></div>
+        <div class="field"><span class="label">Finish coats</span><input type="number" id="set-finish-coats" step="1" min="1"></div>
       </div>
-      <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Cylinder legs and other turned parts are cut from staves and lathed round, which uses up a lot more stock than the finished piece itself — this default applies only to material lines the drawing-reader tags as a round/turned shape, not flat panels.</div>
+      <div class="sub" style="margin:-6px 0 14px;color:var(--ink-soft);">Cylinder legs and other turned parts are cut from staves and lathed round, which uses up a lot more stock than the finished piece itself — this default applies only to material lines the drawing-reader tags as a round/turned shape, not flat panels. Finish coats multiplies the auto-filled Finish line's m² by this number — oiling/varnishing a surface twice (the default) needs roughly twice the product of doing it once.</div>
       <div class="field-row">
         <div class="field"><span class="label">Drawer runner clearance per side (mm)</span><input type="number" id="set-drawer-side-clearance" step="1" min="0"></div>
         <div class="field"><span class="label">Drawer box height deduction (mm)</span><input type="number" id="set-drawer-height-deduction" step="1" min="0"></div>
@@ -806,7 +807,7 @@
   var pdfImages = [];
   var job = null;
   var view = 'new';
-  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, drawerSideClearanceMm: 10, drawerHeightDeductionMm: 40, drawerRunnerMarginMm: 25, labourMinutesPerComponent: 25, labourMinutesPerHardwareItem: 8, labourBaseHoursPerJob: 3, carcassSpeciesName: 'Solid Oak', carcassThicknessMm: 25, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
+  var settings = { markupPct: 35, labourRate: 220, defaultWastePct: 0, cylinderWastePct: 0, finishCoats: 2, drawerSideClearanceMm: 10, drawerHeightDeductionMm: 40, drawerRunnerMarginMm: 25, labourMinutesPerComponent: 25, labourMinutesPerHardwareItem: 8, labourBaseHoursPerJob: 3, carcassSpeciesName: 'Solid Oak', carcassThicknessMm: 25, materialSubcategories: ['Wood','Steel','Veneer','Glass','Laminate'],
     payrollDepartments: ['Management','Production','Admin'], joiners: [], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
   var currentFileName = null;
 
@@ -1131,6 +1132,15 @@
     // dropdown offers) silently collapses to "m" and is never recognised as volume-based.
     var n = (u||'').toString().toLowerCase().replace(/³/g,'3').replace(/[^a-z0-9]/g,'');
     return n==='m3' || n==='cubicmetre' || n==='cubicmetres' || n==='cubicmeter' || n==='cubicmeters';
+  }
+  // Round STOCK bought by the linear metre it comes in — steel tube, round bar, dowel —
+  // as opposed to isVolumeUnit_ above (round TIMBER turned from a stock blank, priced by
+  // volume). "m" is the only linear-metre spelling the Unit field's own datalist offers
+  // (see <datalist id="unit-list">), so that's the one this actually needs to catch —
+  // kept as its own function so a future spelling (e.g. "lm") has one place to add.
+  function isLinearUnit_(u){
+    var n = (u||'').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
+    return n==='m' || n==='lm' || n==='linearm' || n==='linearmetre' || n==='linearmetres' || n==='linearmeter' || n==='linearmeters';
   }
   // Solid-timber rate card entries that come in more than one stock thickness are
   // named "<species> - <N>mm" (e.g. "Solid Oak - 25mm", "Solid Oak - 38mm") — this
@@ -1507,6 +1517,7 @@
     document.getElementById('set-labour').value = settings.labourRate;
     document.getElementById('set-waste').value = settings.defaultWastePct||0;
     document.getElementById('set-cylinder-waste').value = settings.cylinderWastePct||0;
+    document.getElementById('set-finish-coats').value = settings.finishCoats!=null ? settings.finishCoats : 2;
     document.getElementById('set-drawer-side-clearance').value = settings.drawerSideClearanceMm!=null ? settings.drawerSideClearanceMm : 10;
     document.getElementById('set-drawer-height-deduction').value = settings.drawerHeightDeductionMm!=null ? settings.drawerHeightDeductionMm : 40;
     document.getElementById('set-drawer-runner-margin').value = settings.drawerRunnerMarginMm!=null ? settings.drawerRunnerMarginMm : 25;
@@ -1588,6 +1599,7 @@
     settings.labourRate = Number(document.getElementById('set-labour').value)||0;
     settings.defaultWastePct = Number(document.getElementById('set-waste').value)||0;
     settings.cylinderWastePct = Number(document.getElementById('set-cylinder-waste').value)||0;
+    settings.finishCoats = Number(document.getElementById('set-finish-coats').value)||1;
     settings.drawerSideClearanceMm = Number(document.getElementById('set-drawer-side-clearance').value)||0;
     settings.drawerHeightDeductionMm = Number(document.getElementById('set-drawer-height-deduction').value)||0;
     settings.drawerRunnerMarginMm = Number(document.getElementById('set-drawer-runner-margin').value)||0;
@@ -2186,6 +2198,15 @@
               stockSizesUsed[stockR.thicknessMm] = rEntry;
               total += cylVolume; // the rate linked is what changes with diameter, not the volume formula itself
             }
+          } else if(isLinearUnit_(basisRate && basisRate.unit)){
+            // Tube/round bar bought by the linear metre at the diameter actually called
+            // out (e.g. "Ø19mm Hollow Mild Steel Tube") — unlike turned solid timber
+            // above, it isn't cut from a bigger stock blank, so no stock-size rounding
+            // applies; the quantity is simply each length run end to end. Before this
+            // branch existed, anything priced in plain "m" fell into the circle-area
+            // fallback below instead, which costed a few square millimetres of cross-
+            // section rather than the metres of tube actually needed.
+            total += (c.height_mm/1000)*qtyN;
           } else {
             total += Math.PI*c.diameter_mm*c.diameter_mm/4e6*qtyN; // area-priced fallback: circle's own area
           }
@@ -2237,7 +2258,13 @@
         hasAny = true;
         totalWeightedComponents += (c.quantity||1);
         var area = (c.length_mm*c.width_mm)/1e6*(c.quantity||1);
-        totalFinishArea += area;
+        // Finish covers both faces of a flat part (a tabletop gets oiled top AND
+        // underside, same for a shelf/apron/rail) — the material itself is only priced
+        // on its one drawn face/volume (`total` below, unchanged), but the Finish line
+        // needs both. Round/turned parts above already use their full cylindrical
+        // surface, and drawerBox panels above already enumerate every face, so this
+        // ×2 is specific to the plain "flat" shape here.
+        totalFinishArea += area*2;
         if(volumeBased){
           if(c.thickness_mm){
             var stock = stockThicknessFor_(basisRate, c.thickness_mm);
@@ -2409,10 +2436,14 @@
     // Every product gets finished, so a finish line is standard on every quote rather than
     // something that has to be added by hand — pre-filled with the total surface area of the
     // materials above (see totalFinishArea note), ready for the person costing the job to
-    // pick the actual product (oil, varnish, paint...) from the rate card.
+    // pick the actual product (oil, varnish, paint...) from the rate card. Multiplied by
+    // Settings' "Finish coats" (default 2, per Shane: "make oil/finish always 2 coats so
+    // always double the m²") — a second coat covers the same area again, so it roughly
+    // doubles the product used, not the area itself.
+    var finishCoats = Number(settings.finishCoats)||1;
     lineItems.push({
-      id: uid(), type:'finish', description:'Finish',
-      qty: Math.round(totalFinishArea*100)/100, unit:'m²',
+      id: uid(), type:'finish', description:'Finish ('+finishCoats+' coat'+(finishCoats===1?'':'s')+')',
+      qty: Math.round(totalFinishArea*finishCoats*100)/100, unit:'m²',
       wastagePct: Number(settings.defaultWastePct)||0,
       rateId: null, unitPrice: 0
     });
