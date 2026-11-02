@@ -1994,6 +1994,43 @@
     });
   }
 
+  // A dense multi-view sheet (A3 or bigger — several views plus a title block crammed
+  // onto one page, like a "Top/Front/Side/Callout" set) rendered at the normal ~1600px
+  // overview width leaves each individual view only a few hundred pixels across, with
+  // dimension text too small for the model to read reliably — not a prompt-wording
+  // problem, a legibility one: Claude's vision input gets resized down to ~1568px on its
+  // longest edge regardless, so a single image can only ever carry so much genuinely
+  // readable detail no matter how it's worded. PDFs are vector, so rendering BIGGER
+  // stays crisp (no blur the way upscaling a photo would) — this renders the page a
+  // second time at a much higher true resolution and slices it into 4 heavily-
+  // overlapping quadrant crops (60% of the page each way, so nothing sitting near the
+  // middle gets cut in half at a hard boundary), each still comfortably under that
+  // ~1568px resize limit. Returns [] for an ordinary single-view A4-ish drawing, where
+  // the normal overview is already plenty legible and this would just be extra cost for
+  // no benefit.
+  var DENSE_PAGE_AREA_PT2 = 560000; // a little over one A4 sheet's worth, in PDF points² (72pt/inch) — trips for A3 and bigger, not a normal single-view A4
+  function renderPageDetailCrops_(page, vp0){
+    if(vp0.width*vp0.height <= DENSE_PAGE_AREA_PT2) return Promise.resolve([]);
+    var hiScale = Math.min(4, 2500/vp0.width);
+    var viewport = page.getViewport({ scale: hiScale });
+    var full = document.createElement('canvas');
+    full.width = viewport.width; full.height = viewport.height;
+    var ctx = full.getContext('2d');
+    return page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function(){
+      var W = full.width, H = full.height;
+      var qw = Math.round(W*0.6), qh = Math.round(H*0.6);
+      var positions = [ {x:0,y:0}, {x:W-qw,y:0}, {x:0,y:H-qh}, {x:W-qw,y:H-qh} ];
+      return Promise.all(positions.map(function(pos){
+        return new Promise(function(resolve){
+          var crop = document.createElement('canvas');
+          crop.width = qw; crop.height = qh;
+          crop.getContext('2d').drawImage(full, pos.x, pos.y, qw, qh, 0, 0, qw, qh);
+          crop.toBlob(function(blob){ resolve(blob); }, 'image/png');
+        });
+      }));
+    });
+  }
+
   function renderPage(pdf, num){
     return pdf.getPage(num).then(function(page){
       var vp0 = page.getViewport({ scale:1 });
@@ -2003,9 +2040,17 @@
       canvas.width = viewport.width; canvas.height = viewport.height;
       var ctx = canvas.getContext('2d');
       return page.render({ canvasContext: ctx, viewport: viewport }).promise.then(function(){
-        return new Promise(function(resolve){
-          canvas.toBlob(function(blob){ resolve({ canvas: canvas, blob: blob }); }, 'image/png');
-        });
+        return Promise.all([
+          new Promise(function(resolve){ canvas.toBlob(function(blob){ resolve(blob); }, 'image/png'); }),
+          renderPageDetailCrops_(page, vp0)
+        ]);
+      }).then(function(results){
+        // detailBlobs stays OUT of the thumbnail UI deliberately (renderThumbs only ever
+        // draws .canvas) — a person removing/reviewing pages shouldn't have to look at 4
+        // extra cropped tiles per dense page; they only ever travel along for extraction
+        // (btn-extract) and get saved separately for later re-analysis (saveJob), never
+        // shown as "the drawing" anywhere a human looks.
+        return { canvas: canvas, blob: results[0], detailBlobs: results[1] };
       });
     });
   }
@@ -2023,7 +2068,13 @@
   // #think-msg; reExtractJob (re-analyzing a saved quote) passes its own callback so
   // the two status areas never fight over the same element id.
   function pollExtraction(token, onProgress){
-    var attempts = 0, maxAttempts = 45; // ~90s at 2s each
+    // 140 x 2s = ~280s — raised from the original ~90s once a dense multi-view sheet
+    // started sending its higher-res quadrant crops too (see renderPageDetailCrops_):
+    // more images to read genuinely takes Claude longer, and a client-side "timeout"
+    // bailing out while the backend call is still legitimately running (it has up to the
+    // cache's own 300s TTL — see runExtraction_/runReExtraction_ in Code.gs — well within
+    // Apps Script's own ~6-minute execution ceiling) is a worse failure than just waiting.
+    var attempts = 0, maxAttempts = 140;
     return new Promise(function(resolve, reject){
       function tick(){
         attempts++;
@@ -2049,8 +2100,15 @@
     var btn = document.getElementById('btn-extract');
     var notes = document.getElementById('drawing-notes').value.trim();
     btn.disabled = true;
-    statusEl.innerHTML = '<div class="status-msg thinking" id="think-msg">Reading the drawing… (usually 10–30 seconds)</div>';
-    Promise.all(pdfImages.map(function(p){ return blobToBase64(p.blob); })).then(function(b64s){
+    var hasDetail = pdfImages.some(function(p){ return p.detailBlobs && p.detailBlobs.length; });
+    statusEl.innerHTML = '<div class="status-msg thinking" id="think-msg">Reading the drawing… (usually '+(hasDetail?'30–90':'10–30')+' seconds)</div>';
+    // Every page's own blob, PLUS any higher-res quadrant crops renderPage made for a
+    // dense sheet (see renderPageDetailCrops_) — flattened into one list so extraction
+    // sees the same detail a person zooming into the PDF themselves would. Order doesn't
+    // matter to the model (see EXTRACTION_PROMPT's note on overview-vs-crop images).
+    var allBlobs = [];
+    pdfImages.forEach(function(p){ allBlobs.push(p.blob); (p.detailBlobs||[]).forEach(function(b){ allBlobs.push(b); }); });
+    Promise.all(allBlobs.map(blobToBase64)).then(function(b64s){
       var token = uid();
       // Notes travel with the images so the drawing is read taking them into account
       // (see EXTRACTION_PROMPT in Code.gs) — not just tacked onto the quote afterwards.
@@ -2818,13 +2876,20 @@
     // manually" was used instead) travel with the save so the drawing stays viewable
     // from the saved quote — see saveDrawingImages_ in Code.gs. Sent only on this first
     // save; editing an existing quote later doesn't re-send it (no re-upload control yet).
+    // detailImages (the higher-res quadrant crops — see renderPageDetailCrops_) go up
+    // separately from images: Code.gs keeps them in their own drawingDetailUrls column
+    // specifically so they never show up as extra "View drawing" pages, only getting
+    // pulled back in if this quote's drawing is ever Re-analyzed later.
     var imagesPromise = pdfImages.length
       ? Promise.all(pdfImages.map(function(p){ return blobToBase64(p.blob); }))
       : Promise.resolve([]);
+    var detailImagesPromise = pdfImages.length
+      ? Promise.all([].concat.apply([], pdfImages.map(function(p){ return p.detailBlobs||[]; })).map(blobToBase64))
+      : Promise.resolve([]);
     var el = document.querySelector('#review-panel .save-confirm');
     if(el) el.textContent = 'Saving…';
-    imagesPromise.then(function(images){
-      return apiWrite('addJob', { job: payload, images: images });
+    Promise.all([imagesPromise, detailImagesPromise]).then(function(both){
+      return apiWrite('addJob', { job: payload, images: both[0], detailImages: both[1] });
     }).then(function(){
       // addJob now also saves the drawing to Drive, a real network round trip the
       // hidden-iframe POST can't report back on directly — so wait for the actual
@@ -3163,7 +3228,11 @@
           if(!confirm('Re-read the drawing and rebuild the bill of materials using the current rate card?\n\nThis replaces the line items and warnings below with a fresh read. Customer, product name, drawing number and other details stay as they are. Any manual edits you\'ve made to individual line items will be lost — click Save changes afterwards once you\'re happy with it.')) return;
           var statusEl = detail.querySelector('.reanalyze-status');
           reanalyzeBtn.disabled = true;
-          statusEl.innerHTML = '<div class="status-msg thinking">Reading the drawing… (usually 10–30 seconds)</div>';
+          // See renderPageDetailCrops_'s comment — a dense multi-view sheet's saved
+          // drawingDetailUrls get pulled in automatically (runReExtraction_ in Code.gs),
+          // which takes Claude noticeably longer to read than a single overview image.
+          var hasDetail = (editingJob.drawingDetailUrls||[]).length>0;
+          statusEl.innerHTML = '<div class="status-msg thinking">Reading the drawing… (usually '+(hasDetail?'30–90':'10–30')+' seconds)</div>';
           var token = uid();
           apiWrite('reExtractJob', { token: token, jobId: editingJob.id, notes: editingJob.notes || '' }).then(function(){
             return pollExtraction(token, function(secs){
