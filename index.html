@@ -3044,8 +3044,37 @@
       statusEl.textContent = 'Approving…';
       withBusy_(btn, apiRead('approveJob', payload), 'Approving…').then(function(res){
         if(res && res.ok){
-          statusEl.textContent = 'Approved.';
-          setTimeout(loadQuotes, 600);
+          // If this quote was already sent to Sage (sageQuoteNumber set), also push a
+          // matching Sage Invoice right now, tagged back to that Quote — Shane's request
+          // (2026-11-02): approve in Batten, and have that also create the Sage invoice.
+          // Not a true conversion (see sageInvoicePushCore_'s own comment in Code.gs) —
+          // just a same-amount Invoice that carries the Quote's document number. Skipped
+          // silently (no status shown) when the job was never sent to Sage as a quote.
+          if(editingJob.sageQuoteNumber){
+            statusEl.textContent = 'Approved. Pushing invoice to Sage…';
+            var t = computeTotals(editingJob);
+            var rows = [{ battenQuoteId: editingJob.id, description: (editingJob.productName||'Untitled')+(editingJob.drawingNumber?' ('+editingJob.drawingNumber+')':''), total: t.total }];
+            var token = uid();
+            apiWrite('sageInvoicePush', { jobId: editingJob.id, rows: rows, byName: currentUser ? currentUser.name : '', token: token }).then(function(){
+              return pollTokenResult_('getSageInvoicePushResult', token);
+            }).then(function(pres){
+              var result = pres && pres.result;
+              if(result && result.skipped){
+                statusEl.textContent = 'Approved.';
+              } else if(result && result.sageInvoiceNumber){
+                statusEl.textContent = 'Approved — Sage invoice ' + result.sageInvoiceNumber + (result.dryRun ? ' (dry run — nothing actually sent to Sage).' : '.');
+              } else {
+                statusEl.textContent = 'Approved, but the Sage invoice push failed: ' + ((result && result.error) || 'something went wrong.');
+              }
+              setTimeout(loadQuotes, result && result.dryRun ? 2200 : 1400);
+            }).catch(function(){
+              statusEl.textContent = 'Approved, but couldn\'t reach the backend to push the Sage invoice.';
+              setTimeout(loadQuotes, 1400);
+            });
+          } else {
+            statusEl.textContent = 'Approved.';
+            setTimeout(loadQuotes, 600);
+          }
         } else if(res && res.error==='forbidden'){
           statusEl.textContent = 'Only Natalie\'s login can approve a quote.';
         } else {
