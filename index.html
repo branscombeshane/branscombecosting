@@ -1148,6 +1148,22 @@
     var n = (u||'').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
     return n==='m' || n==='lm' || n==='linearm' || n==='linearmetre' || n==='linearmetres' || n==='linearmeter' || n==='linearmeters';
   }
+  // Classifies a material as needing a wood finish (oil/varnish) or a steel finish
+  // (spray/powder-coat), so buildBomFromExtraction_ can split its one auto-generated
+  // "Finish" line into the right line(s) per material, instead of lumping every surface
+  // into a single line pointing at one rate-card product. Checked against the matched/
+  // suggested rate card entry's own Subcategory first — the most reliable signal, since
+  // that's exactly how the Materials rate card is already organised (Wood, Steel, Veneer,
+  // Glass, Laminate...) — then against the material's own description/colour text as a
+  // fallback for anything not yet on the rate card at all. Returns null (unclassified) for
+  // anything that isn't recognisably wood or steel — glass, laminate, an unmatched
+  // material — which keeps going through the old undifferentiated Finish line, unchanged.
+  function materialFinishCategory_(description, colour, subcategory){
+    var text = [subcategory||'', description||'', colour||''].join(' ').toLowerCase();
+    if(/\b(steel|stainless|aluminium|aluminum|metal|iron)\b/.test(text)) return 'steel';
+    if(/\b(wood|timber|oak|pine|meranti|beech|walnut|mahogany|teak|maple|birch|ash|cherry|elm|iroko|balau|saligna|kiaat|stinkwood|plywood|veneer)\b/.test(text)) return 'wood';
+    return null;
+  }
   // Solid-timber rate card entries that come in more than one stock thickness are
   // named "<species> - <N>mm" (e.g. "Solid Oak - 25mm", "Solid Oak - 38mm") — this
   // pulls the species name and thickness back out of that naming convention.
@@ -2177,12 +2193,21 @@
     });
 
     var volumeFlags = [];
-    // Finish (oil/varnish/paint) is applied to a surface, not a volume, so it's tracked
-    // separately in m² regardless of what basis each material itself prices on — a solid
-    // timber component contributes its face area (length × width) here even though its own
-    // line costs by volume (length × width × thickness), while an area-priced board material
-    // contributes the exact same number to both, since its own basis already is that area.
+    // Finish (oil/varnish/paint/spray) is applied to a surface, not a volume, so it's
+    // tracked separately in m² regardless of what basis each material itself prices on — a
+    // solid timber component contributes its face area (length × width) here even though
+    // its own line costs by volume (length × width × thickness), while an area-priced board
+    // material contributes the exact same number to both, since its own basis already is
+    // that area. Split into three buckets — wood, steel, and everything else — per Shane:
+    // "if there's a wood component then there will [be] a wood finish (eg. oil) and if
+    // there is a steel component there will [be] a steel finish (eg. spray)" — a single
+    // undifferentiated line was forcing one rate-card product onto a job's entire surface
+    // area even when wood and steel were both present. totalFinishArea remains the
+    // catch-all for anything that isn't recognisably wood or steel (glass, laminate, an
+    // unmatched material...), same behaviour as before this split existed.
     var totalFinishArea = 0;
+    var totalWoodFinishArea = 0;
+    var totalSteelFinishArea = 0;
     (data.materials||[]).forEach(function(m){
       var matchInfo = matchRateWithConfidence_('material', m.description, null);
       var match = matchInfo && matchInfo.exact ? matchInfo.rate : null;
@@ -2200,6 +2225,17 @@
       // basis. Bounding-box area/volume is still only a rough estimate for anything that
       // isn't a simple rectangle (an organic or contour shape) — check it against the drawing.
       var volumeBased = basisRate && isVolumeUnit_(basisRate.unit);
+      // Which Finish bucket this material's surface area feeds — see
+      // materialFinishCategory_ above. addFinishArea_ below is what every "this component
+      // contributes N m² to the Finish line" spot in this material's components loop
+      // actually calls, so the wood/steel/other split only has to be decided once per
+      // material, not re-checked at every component.
+      var finishCat = materialFinishCategory_(m.description, m.colour, basisRate && basisRate.subcategory);
+      function addFinishArea_(areaM2){
+        if(finishCat==='wood') totalWoodFinishArea += areaM2;
+        else if(finishCat==='steel') totalSteelFinishArea += areaM2;
+        else totalFinishArea += areaM2;
+      }
       var components = m.components || [];
       var total = 0, hasAny = false, missingThickness = false;
       // Solid timber is bought at standard stock thicknesses, and what "stock
@@ -2245,7 +2281,7 @@
           totalWeightedComponents += qtyN*2;
           // Lateral (side) surface area of the finished cylinder — it gets finished
           // (oiled/painted) just like a flat face would.
-          totalFinishArea += Math.PI*c.diameter_mm*c.height_mm/1e6*qtyN;
+          addFinishArea_(Math.PI*c.diameter_mm*c.height_mm/1e6*qtyN);
           if(volumeBased){
             var radiusM = c.diameter_mm/2000;
             var cylVolume = Math.PI*radiusM*radiusM*(c.height_mm/1000)*qtyN;
@@ -2291,7 +2327,7 @@
           // "drawer box / internals" material line rather than separate side/back/
           // bottom lines.
           var panelAreaM2 = (2*(box.boxDepthMm*box.boxHeightMm) + (box.boxWidthMm*box.boxHeightMm) + (box.boxWidthMm*box.boxDepthMm))/1e6;
-          totalFinishArea += panelAreaM2*qtyN;
+          addFinishArea_(panelAreaM2*qtyN);
           if(!box.runnerFits){
             volumeFlags.push('"'+m.description+'" — the available depth behind this drawer opening ('+Math.round(c.availableDepth_mm)+'mm) is too shallow for even the shortest standard Blum runner ('+BLUM_RUNNER_LENGTHS_MM[0]+'mm) once the fitting margin is allowed for — check this drawer by hand.');
           } else {
@@ -2328,7 +2364,7 @@
         // needs both. Round/turned parts above already use their full cylindrical
         // surface, and drawerBox panels above already enumerate every face, so this
         // ×2 is specific to the plain "flat" shape here.
-        totalFinishArea += area*2;
+        addFinishArea_(area*2);
         if(volumeBased){
           if(c.thickness_mm){
             var stock = stockThicknessFor_(basisRate, c.thickness_mm);
@@ -2478,7 +2514,11 @@
         }
         var carcassEffectiveThicknessMm = carcassRoundedTo || carcassThicknessMm;
         var carcassVolume = carcassPanels.areaM2 * carcassEffectiveThicknessMm/1000;
-        totalFinishArea += carcassPanels.areaM2; // the carcass is finished too, same as any other visible timber
+        // The carcass is always timber (built from settings.carcassSpeciesName) and gets
+        // finished too, same as any other visible timber — goes straight to the wood
+        // bucket rather than through materialFinishCategory_, since there's no steel-
+        // carcass concept in this app to classify against.
+        totalWoodFinishArea += carcassPanels.areaM2;
         var carcassRateNote = carcassRate
           ? (carcassRoundedTo ? 'priced on '+carcassRoundedTo+'mm stock (rounded up from the '+carcassThicknessMm+'mm default) — linked to "'+carcassRate.name+'"' : 'linked to "'+carcassRate.name+'"')
           : 'no rate card entry found for "'+carcassExactName+'" — check the species/thickness default in Settings, or add the rate';
@@ -2499,18 +2539,41 @@
 
     // Every product gets finished, so a finish line is standard on every quote rather than
     // something that has to be added by hand — pre-filled with the total surface area of the
-    // materials above (see totalFinishArea note), ready for the person costing the job to
-    // pick the actual product (oil, varnish, paint...) from the rate card. Multiplied by
-    // Settings' "Finish coats" (default 2, per Shane: "make oil/finish always 2 coats so
-    // always double the m²") — a second coat covers the same area again, so it roughly
-    // doubles the product used, not the area itself.
+    // materials above, ready for the person costing the job to pick the actual product from
+    // the rate card. Multiplied by Settings' "Finish coats" (default 2, per Shane: "make
+    // oil/finish always 2 coats so always double the m²") — a second coat covers the same
+    // area again, so it roughly doubles the product used, not the area itself. Split into up
+    // to three separate lines — Wood finish, Steel finish, and a catch-all Finish for
+    // anything else — per Shane: "if there's a wood component then there will [be] a wood
+    // finish (eg. oil) and if there is a steel component there will [be] a steel finish (eg.
+    // spray)"; each line is only added when that bucket actually has area in it, so a
+    // steel-only or wood-only job still gets just the one line it needs.
     var finishCoats = Number(settings.finishCoats)||1;
-    lineItems.push({
-      id: uid(), type:'finish', description:'Finish ('+finishCoats+' coat'+(finishCoats===1?'':'s')+')',
-      qty: Math.round(totalFinishArea*finishCoats*100)/100, unit:'m²',
-      wastagePct: Number(settings.defaultWastePct)||0,
-      rateId: null, unitPrice: 0
-    });
+    var finishCoatsLabel = finishCoats+' coat'+(finishCoats===1?'':'s');
+    if(totalWoodFinishArea>0){
+      lineItems.push({
+        id: uid(), type:'finish', description:'Wood finish — oil/varnish ('+finishCoatsLabel+')',
+        qty: Math.round(totalWoodFinishArea*finishCoats*100)/100, unit:'m²',
+        wastagePct: Number(settings.defaultWastePct)||0,
+        rateId: null, unitPrice: 0
+      });
+    }
+    if(totalSteelFinishArea>0){
+      lineItems.push({
+        id: uid(), type:'finish', description:'Steel finish — spray/powder-coat ('+finishCoatsLabel+')',
+        qty: Math.round(totalSteelFinishArea*finishCoats*100)/100, unit:'m²',
+        wastagePct: Number(settings.defaultWastePct)||0,
+        rateId: null, unitPrice: 0
+      });
+    }
+    if(totalFinishArea>0 || (totalWoodFinishArea<=0 && totalSteelFinishArea<=0)){
+      lineItems.push({
+        id: uid(), type:'finish', description:'Finish ('+finishCoatsLabel+')',
+        qty: Math.round(totalFinishArea*finishCoats*100)/100, unit:'m²',
+        wastagePct: Number(settings.defaultWastePct)||0,
+        rateId: null, unitPrice: 0
+      });
+    }
 
     // Auto-estimates labour hours from the bill of materials just built, rather than
     // leaving the Labour line at 0 for someone to fill in from scratch every time:
