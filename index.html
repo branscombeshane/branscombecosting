@@ -97,7 +97,11 @@
   .mode-btn:hover{ color:var(--ink); }
   .mode-btn.active{ background:var(--accent); color:#fff; }
   .mode-btn .chev{ font-size:10px; opacity:.7; transition:transform .15s ease; }
-  .mode-btn.active .chev{ transform:rotate(180deg); }
+  /* .expanded (submenu currently shown) is separate from .active (currently open
+     screen lives in this mode) — clicking an already-active header folds its submenu
+     away without navigating off the page, so the chevron needs its own state to track
+     that independently of the accent fill. See setAccordionOpen_. */
+  .mode-btn.expanded .chev{ transform:rotate(180deg); }
   .nav-section-body{ display:flex; flex-direction:column; border-top:1px solid var(--line-strong); background:var(--paper); }
   .nav-section-body[hidden]{ display:none; }
   .navbtn{
@@ -254,10 +258,21 @@
   .prod-timeline .bar.overdue .fill{ background:var(--warn); }
   .prod-timeline .timeline-label{ font-size:11px; color:var(--ink-soft); margin-top:4px; }
   .prod-checklist{ list-style:none; margin:0; padding:0; }
-  .prod-checklist li{ display:flex; align-items:center; gap:9px; padding:5px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  .prod-checklist li{ display:flex; flex-direction:column; gap:4px; padding:6px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .prod-checklist li:last-child{ border-bottom:none; }
+  .prod-check-row{ display:flex; align-items:center; gap:9px; }
   .prod-checklist input[type="checkbox"]{ width:17px; height:17px; flex:none; }
-  .prod-checklist li.done{ color:var(--ink-soft); text-decoration:line-through; }
+  /* Strikethrough stays on the checklist line itself, not the note below it — a note
+     explaining why a section was redone shouldn't read as struck-through too. */
+  .prod-checklist li.done .prod-check-row{ color:var(--ink-soft); text-decoration:line-through; }
+  .prod-note-input{
+    margin-left:26px; max-width:calc(100% - 26px); box-sizing:border-box;
+    font-size:12px; padding:4px 6px; border:1px solid var(--line); background:var(--paper); color:var(--ink);
+  }
+  .prod-note-input::placeholder{ color:var(--ink-soft); }
+  /* Read-only means someone without tickProgress is just seeing a left-behind comment —
+     render it as plain text, not an editable-looking box. */
+  .prod-note-input[readonly]{ border-color:transparent; background:none; padding-left:0; color:var(--ink-soft); font-style:italic; }
   .prod-drawings{ margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:12px; }
   .prod-drawings .drawing-link{ display:block; margin-bottom:4px; }
   .prod-drawings .btn-add-drawing{ margin-top:4px; }
@@ -940,14 +955,24 @@
   // buttons rather than an in-page tab strip — each just sets payrollTab and shows the
   // one 'payroll' view.
   var appMode = 'costing';
+  // Sets whether an accordion mode's submenu is shown (independent of which mode's
+  // *page* is currently open — see the click handler below, which lets the active
+  // mode's own header fold its submenu away without navigating off the page). A mode
+  // with no .nav-section-body (Production, Admin) has nothing to toggle, so this is a
+  // no-op for those.
+  function setAccordionOpen_(mode, open){
+    var body = document.querySelector('.nav-section-body[data-mode-group="'+mode+'"]');
+    var btn = document.querySelector('.mode-btn[data-mode="'+mode+'"]');
+    if(!body || !btn) return;
+    body.hidden = !open;
+    btn.classList.toggle('expanded', open);
+  }
   function setAppMode(mode){
     appMode = mode;
     Array.prototype.forEach.call(document.querySelectorAll('.mode-btn'), function(b){
       b.classList.toggle('active', b.dataset.mode===mode);
     });
-    Array.prototype.forEach.call(document.querySelectorAll('.nav-section-body'), function(g){
-      g.hidden = (g.dataset.modeGroup !== mode);
-    });
+    ['costing','payroll'].forEach(function(m){ setAccordionOpen_(m, m===mode); });
     if(mode==='payroll') showView('payroll');
     else if(mode==='production') showView('production');
     else if(mode==='admin') showView('admin');
@@ -958,14 +983,26 @@
   // sub-screen buttons inside each expanded .nav-section-body.
   document.querySelector('.sidebar').addEventListener('click', function(e){
     var modeBtn = e.target.closest('.mode-btn');
-    if(modeBtn){ setAppMode(modeBtn.dataset.mode); return; }
+    if(modeBtn){
+      var mode = modeBtn.dataset.mode;
+      var hasSubmenu = !!document.querySelector('.nav-section-body[data-mode-group="'+mode+'"]');
+      if(hasSubmenu && mode === appMode){
+        // Already the open mode — a second click on its own header just folds the
+        // submenu away to save space; the page you're on doesn't change. Clicking it
+        // again (or any other mode header) reopens/switches as usual.
+        setAccordionOpen_(mode, !modeBtn.classList.contains('expanded'));
+        return;
+      }
+      setAppMode(mode);
+      return;
+    }
     var navBtn = e.target.closest('.navbtn');
     if(!navBtn) return;
     if(navBtn.dataset.tab){ payrollTab = navBtn.dataset.tab; showView('payroll'); return; }
     showView(navBtn.dataset.view);
   });
   document.querySelector('.mode-btn[data-mode="costing"]').classList.add('active');
-  document.querySelector('.nav-section-body[data-mode-group="costing"]').hidden = false;
+  setAccordionOpen_('costing', true);
   function showView(v){
     view = v;
     ['new','quotes','rates','payroll','payroll-settings','settings','production','admin'].forEach(function(name){
@@ -3227,9 +3264,19 @@
     var sections = j.productionSections || [];
     var progress = j.sectionProgress || {};
     return '<ul class="prod-checklist">' + sections.map(function(s){
-      var done = progress[s] && progress[s].done;
+      var entry = progress[s] || {};
+      var done = entry.done;
+      var note = entry.note || '';
+      // A note is always shown once one exists — "so that anyone can see comments
+      // about the progress" — but the empty input box (the invitation to add one) is
+      // only rendered for whoever can actually tick off progress; a view-only visitor
+      // with nothing to say just sees the checklist line and no empty box underneath.
+      var showNoteField = canTick || note;
       return '<li class="'+(done?'done':'')+'" data-job="'+esc(j.id)+'" data-section="'+esc(s)+'">' +
-        '<input type="checkbox"'+(done?' checked':'')+(canTick?'':' disabled')+'> '+esc(productionSectionLabel_(s)) +
+        '<div class="prod-check-row">' +
+          '<input type="checkbox"'+(done?' checked':'')+(canTick?'':' disabled')+'> '+esc(productionSectionLabel_(s)) +
+        '</div>' +
+        (showNoteField ? '<input type="text" class="prod-note-input" data-job="'+esc(j.id)+'" data-section="'+esc(s)+'" placeholder="Add a note…" value="'+esc(note)+'"'+(canTick?'':' readonly') + '>' : '') +
       '</li>';
     }).join('') + '</ul>';
   }
@@ -3348,12 +3395,40 @@
           cb.disabled = false;
           if(res && res.ok){
             li.classList.toggle('done', cb.checked);
-            if(res.allDone) setTimeout(loadProduction, 800);
+            // Reload the whole board whenever this tick could have flipped the job
+            // between complete and not-complete — not just on completing it. Unticking
+            // a box on an already-completed job (redo for quality, or ticked in error —
+            // Shane) needs the same refresh so the job moves back out of Completed and
+            // into the active groups, instead of sitting there with a stale date.
+            var jobInCache = productionJobsCache.filter(function(x){ return x.id === jobId; })[0];
+            var wasCompleted = !!(jobInCache && jobInCache.completedAt);
+            if(!!res.allDone !== wasCompleted) setTimeout(loadProduction, 800);
           } else {
             cb.checked = wasChecked;
           }
         }).catch(function(){ cb.disabled = false; cb.checked = wasChecked; });
       });
+    });
+    // Per-section notes — "so that anyone can see comments about the progress" (Shane).
+    // Saves on blur (or Enter) rather than on every keystroke, same as most of this app's
+    // other inline-edit fields. Doesn't touch done/at/by server-side (see
+    // updateJobProgressNote_ in Code.gs), so it's safe to fire independently of the
+    // checkbox handler above.
+    container.querySelectorAll('.prod-note-input:not([readonly])').forEach(function(input){
+      var lastSaved = input.value;
+      function save(){
+        var val = input.value;
+        if(val === lastSaved) return;
+        var jobId = input.dataset.job, section = input.dataset.section;
+        input.disabled = true;
+        apiRead('updateJobProgressNote', { id: jobId, section: section, note: val, actingUserId: currentUser.id }).then(function(res){
+          input.disabled = false;
+          if(res && res.ok) lastSaved = val;
+          else input.value = lastSaved;
+        }).catch(function(){ input.disabled = false; input.value = lastSaved; });
+      }
+      input.addEventListener('blur', save);
+      input.addEventListener('keydown', function(e){ if(e.key === 'Enter'){ e.preventDefault(); input.blur(); } });
     });
   }
 
