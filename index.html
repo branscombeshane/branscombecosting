@@ -3116,16 +3116,21 @@
   function prodDrawingsHtml_(j){
     var costing = (j.drawingFileUrls && j.drawingFileUrls.length)
       ? '<a class="drawing-link" href="'+esc(j.drawingFileUrls[0])+'" target="_blank" rel="noopener">view costing drawing</a>'
-      : '<span class="sub" style="color:var(--ink-soft);display:block;margin-bottom:4px;">No costing drawing saved.</span>';
-    var extra = (j.productionDrawingUrls||[]).map(function(d){
-      return '<div class="drawing-row">' +
-        '<a class="drawing-link" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.name||'drawing')+'</a>' +
-        '<button type="button" class="drawing-remove" data-job="'+esc(j.id)+'" data-url="'+esc(d.url)+'">remove</button>' +
-      '</div>';
-    }).join('');
+      : '<span class="sub" style="color:var(--ink-soft);display:block;">No costing drawing saved.</span>';
+    var extra = (j.productionDrawingUrls||[]).length
+      ? j.productionDrawingUrls.map(function(d){
+          return '<div class="drawing-row">' +
+            '<a class="drawing-link" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.name||'drawing')+'</a>' +
+            '<button type="button" class="drawing-remove" data-job="'+esc(j.id)+'" data-url="'+esc(d.url)+'">remove</button>' +
+          '</div>';
+        }).join('')
+      : '<span class="sub" style="color:var(--ink-soft);display:block;">None uploaded yet.</span>';
     return '<div class="prod-drawings">' +
-      costing + extra +
-      '<button type="button" class="btn small ghost btn-add-drawing" data-job="'+esc(j.id)+'">+ Add drawing</button>' +
+      '<div class="label" style="margin-bottom:4px;">Costing drawing</div>' +
+      costing +
+      '<div class="label" style="margin:12px 0 4px;">Production drawings</div>' +
+      extra +
+      '<button type="button" class="btn small ghost btn-add-drawing" data-job="'+esc(j.id)+'" style="margin-top:6px;">+ Add drawing</button>' +
     '</div>';
   }
 
