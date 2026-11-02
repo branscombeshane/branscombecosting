@@ -225,6 +225,42 @@
   .bom-table .cell-desc{ position:sticky; left:0; z-index:1; background:var(--paper-raised); box-shadow:1px 0 0 var(--line-strong); }
   .bom-table thead .cell-desc{ z-index:2; background:var(--paper-raised); }
   .bom-table tr.li-size-missing .cell-desc{ background:var(--warn-soft); }
+  /* Phone-width BOM table — Shane: "this scroll thing is not working... make everything
+     fit on the page with no scroll even if you have to move line items onto 2 lines".
+     Below 720px the table stops being a table at all: each line item becomes its own
+     card (Description full width, Qty/Unit paired, Waste %/Rate paired, then Line total,
+     Rate card and the remove button each on their own line) via data-label attributes
+     set in lineRow() standing in for the now-hidden header row. Nothing scrolls
+     sideways — it only ever grows taller. */
+  @media (max-width:720px){
+    .bom-table{ table-layout:auto; width:100%; }
+    .bom-table thead{ display:none; }
+    .bom-table tbody{ display:block; }
+    .bom-table tr{ display:block; }
+    .bom-table tr:not([data-id]) td{ display:block; width:auto; overflow:visible; }
+    .bom-table tr[data-id]{
+      display:grid; grid-template-columns:1fr 1fr; gap:2px 10px;
+      border:1px solid var(--line); background:var(--paper-raised);
+      padding:10px; margin-bottom:8px;
+    }
+    .bom-table tr.li-size-missing{ background:var(--warn-soft); border-color:var(--warn); }
+    .bom-table tr[data-id] td{
+      display:block; width:auto!important; overflow:visible; text-overflow:clip;
+      position:static; background:none; box-shadow:none; padding:4px 0 0; border-bottom:none;
+    }
+    .bom-table td.cell-desc{ grid-column:1 / -1; padding-top:0; }
+    .bom-table td.cell-qty{ grid-column:1; }
+    .bom-table td.cell-unit{ grid-column:2; }
+    .bom-table td.cell-waste{ grid-column:1; }
+    .bom-table td.cell-rate{ grid-column:2; }
+    .bom-table td.cell-total{ grid-column:1 / -1; }
+    .bom-table td.cell-ratecard{ grid-column:1 / -1; }
+    .bom-table td.cell-actions{ grid-column:1 / -1; text-align:right; }
+    .bom-table td[data-label]::before{
+      content:attr(data-label); display:block; font-size:10px; text-transform:uppercase;
+      letter-spacing:.04em; color:var(--ink-soft); margin-bottom:2px;
+    }
+  }
   .input-affix{ position:relative; display:block; }
   .input-affix .affix{ position:absolute; left:7px; top:50%; transform:translateY(-50%); color:var(--ink-soft); font-size:13px; font-family:"IBM Plex Mono",monospace; pointer-events:none; }
   .input-affix input{ padding-left:18px; }
@@ -2515,13 +2551,13 @@
     var warnRow = item.sizeMissing ? ' class="li-size-missing"' : '';
     var badge = item.sizeMissing ? ' <span class="chip warn" title="Couldn\'t size this from the drawing — check it by hand">size needed</span>' : '';
     return '<tr data-id="'+item.id+'"'+warnRow+'>' +
-      '<td class="cell-desc"><input type="text" class="li-desc" value="'+esc(item.description)+'">'+badge+'</td>' +
-      '<td class="cell-qty"><input type="number" class="li-qty num" step="0.01" value="'+item.qty+'"></td>' +
-      '<td class="cell-unit"><input type="text" class="li-unit" value="'+esc(item.unit)+'"></td>' +
-      '<td class="cell-waste num"><input type="number" class="li-waste num" step="1" min="0" value="'+(item.wastagePct||0)+'"></td>' +
-      '<td class="cell-rate num"><div class="input-affix"><span class="affix">R</span><input type="number" class="li-price num" step="0.01" value="'+item.unitPrice+'"></div></td>' +
-      '<td class="cell-total num li-total">'+money(lineTotal(item))+'</td>' +
-      '<td class="cell-ratecard">'+rateChip(item)+ratePickerHtml(item)+'</td>' +
+      '<td class="cell-desc" data-label="Description"><input type="text" class="li-desc" value="'+esc(item.description)+'">'+badge+'</td>' +
+      '<td class="cell-qty" data-label="Qty"><input type="number" class="li-qty num" step="0.01" value="'+item.qty+'"></td>' +
+      '<td class="cell-unit" data-label="Unit"><input type="text" class="li-unit" value="'+esc(item.unit)+'"></td>' +
+      '<td class="cell-waste num" data-label="Waste %"><input type="number" class="li-waste num" step="1" min="0" value="'+(item.wastagePct||0)+'"></td>' +
+      '<td class="cell-rate num" data-label="Rate (excl. VAT)"><div class="input-affix"><span class="affix">R</span><input type="number" class="li-price num" step="0.01" value="'+item.unitPrice+'"></div></td>' +
+      '<td class="cell-total num li-total" data-label="Line total (excl. VAT)">'+money(lineTotal(item))+'</td>' +
+      '<td class="cell-ratecard" data-label="Rate card">'+rateChip(item)+ratePickerHtml(item)+'</td>' +
       '<td class="cell-actions"><button class="btn ghost li-del" title="Remove line">✕</button></td>' +
       '</tr>';
   }
