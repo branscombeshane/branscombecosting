@@ -78,6 +78,7 @@
   .wordmark small{ display:block; font-family:"IBM Plex Sans",sans-serif; letter-spacing:0; text-transform:none;
     font-size:10px; color:var(--ink-soft); font-weight:400; margin-top:10px; margin-right:.32em; }
   .mode-switch{ display:flex; flex-direction:column; border:1px solid var(--line-strong); }
+  .mode-switch-payroll{ margin-top:18px; }
   .mode-btn{ background:none; border:none; padding:9px 12px; font-family:"Barlow Condensed","Arial Narrow",sans-serif;
     font-size:13px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); cursor:pointer; text-align:left; }
   .mode-btn:not(:last-child){ border-bottom:1px solid var(--line-strong); }
@@ -252,6 +253,12 @@
   .prod-bom summary{ cursor:pointer; font-size:12px; color:var(--ink-soft); font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding-top:10px; border-top:1px solid var(--line); }
   .prod-bom table{ margin-top:8px; }
   .prod-bom th, .prod-bom td{ font-size:12px; padding:4px 6px; }
+  /* Completed section: a collapsed-by-default <details> (same pattern as .prod-bom) so
+     finished jobs stay reachable for reference without cluttering the day-to-day board. */
+  .prod-group-completed{ margin-top:8px; }
+  .prod-group-completed summary{ cursor:pointer; list-style:revert; }
+  .prod-group-completed summary::marker{ color:var(--ink-soft); }
+  .prod-card-done .prod-completed-line{ font-size:11px; color:var(--good); font-weight:600; text-transform:uppercase; letter-spacing:.03em; margin-bottom:10px; }
   .prod-drawings .drawing-remove{ background:none; border:none; padding:0; margin-left:6px; color:var(--warn); text-decoration:underline; font-size:11px; cursor:pointer; font-family:inherit; }
   .prod-drawings .drawing-remove:hover{ color:var(--warn); opacity:.8; }
   .prod-drawings .drawing-row{ display:flex; align-items:center; gap:0; margin-bottom:4px; }
@@ -373,9 +380,16 @@
   <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
   <div class="mode-switch" id="mode-switch">
     <button class="mode-btn" data-mode="costing">Costing</button>
-    <button class="mode-btn" data-mode="payroll">Payroll</button>
     <button class="mode-btn" data-mode="production">Production</button>
     <button class="mode-btn" data-mode="admin">Admin</button>
+  </div>
+  <!-- Payroll is its own thing, not another factory-ops screen — kept in a visually
+       separate box (its own border, a gap above it) rather than stacked in with
+       Costing/Production/Admin, even though it's wired through the exact same
+       setAppMode()/mode-btn mechanism (see the delegated click listener on .sidebar
+       below, which covers both boxes). -->
+  <div class="mode-switch mode-switch-payroll" id="mode-switch-payroll">
+    <button class="mode-btn" data-mode="payroll">Payroll</button>
   </div>
   <nav id="nav">
     <div class="nav-group" data-mode-group="costing">
@@ -830,6 +844,11 @@
     Array.prototype.forEach.call(document.querySelectorAll('.mode-btn'), function(b){
       b.hidden = allowed.indexOf(b.dataset.mode) === -1;
     });
+    // Payroll sits in its own separate box (#mode-switch-payroll) now, not stacked in
+    // with Costing/Production/Admin — hide the whole box, not just its one button,
+    // when someone doesn't have Payroll, so it never shows as an empty bordered gap.
+    var payrollBox = document.getElementById('mode-switch-payroll');
+    if(payrollBox) payrollBox.hidden = allowed.indexOf('payroll') === -1;
     if(allowed.indexOf(appMode) === -1) setAppMode(allowed[0] || 'costing');
     var userEl = document.getElementById('sidebar-user');
     if(userEl) userEl.textContent = currentUser ? (currentUser.name + ' · ' + (ROLE_LABELS[currentUser.role]||currentUser.role)) : '';
@@ -915,7 +934,9 @@
     else if(mode==='admin') showView('admin');
     else showView('new');
   }
-  document.getElementById('mode-switch').addEventListener('click', function(e){
+  // Delegated from .sidebar (not just #mode-switch) so this still catches clicks from
+  // the separate #mode-switch-payroll box too — see the markup comment above it.
+  document.querySelector('.sidebar').addEventListener('click', function(e){
     var b = e.target.closest('.mode-btn'); if(!b) return;
     setAppMode(b.dataset.mode);
   });
@@ -3178,20 +3199,42 @@
     '</details>';
   }
 
-  function prodCardHtml_(j, canTick){
+  // Shared by both prodCardHtml_ and prodCompletedCardHtml_ — the checklist itself stays
+  // live either way (checkboxes still fire the same updateJobProgress_ click handler), so
+  // un-ticking a box on a completed job's card un-completes it (Code.gs's
+  // updateJobProgress_ already clears completedAt the moment any section goes back to
+  // not-done) and it reappears in the active groups above on the next refresh.
+  function prodChecklistHtml_(j, canTick){
     var sections = j.productionSections || [];
     var progress = j.sectionProgress || {};
-    var items = sections.map(function(s){
+    return '<ul class="prod-checklist">' + sections.map(function(s){
       var done = progress[s] && progress[s].done;
       return '<li class="'+(done?'done':'')+'" data-job="'+esc(j.id)+'" data-section="'+esc(s)+'">' +
         '<input type="checkbox"'+(done?' checked':'')+(canTick?'':' disabled')+'> '+esc(productionSectionLabel_(s)) +
       '</li>';
-    }).join('');
+    }).join('') + '</ul>';
+  }
+
+  function prodCardHtml_(j, canTick){
     return '<div class="prod-card">' +
       '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
       '<div class="prod-meta">'+esc(j.drawingNumber||'—')+(j.customerName?' · '+esc(j.customerName):'')+'</div>' +
       prodTimelineHtml_(j) +
-      '<ul class="prod-checklist">'+items+'</ul>' +
+      prodChecklistHtml_(j, canTick) +
+      prodBomHtml_(j) +
+      prodDrawingsHtml_(j) +
+    '</div>';
+  }
+
+  // A completed job's card — same shape as prodCardHtml_ (checklist, materials, drawings
+  // all still here "to reference if needed", per Shane) but with the due-date timeline
+  // swapped for a plain "Completed <date>" line, since urgency no longer applies.
+  function prodCompletedCardHtml_(j, canTick){
+    return '<div class="prod-card prod-card-done">' +
+      '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
+      '<div class="prod-meta">'+esc(j.drawingNumber||'—')+(j.customerName?' · '+esc(j.customerName):'')+'</div>' +
+      '<div class="prod-completed-line">Completed '+esc((j.completedAt||'').slice(0,10))+'</div>' +
+      prodChecklistHtml_(j, canTick) +
       prodBomHtml_(j) +
       prodDrawingsHtml_(j) +
     '</div>';
@@ -3210,36 +3253,64 @@
     }).catch(function(e){ container.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
   }
 
+  function prodMatchesQuery_(j, query){
+    if(!query) return true;
+    return normalize(j.productName||'').indexOf(query)!==-1 ||
+      normalize(j.drawingNumber||'').indexOf(query)!==-1 ||
+      normalize(j.customerName||'').indexOf(query)!==-1;
+  }
+
   function renderProductionBoard_(){
     var container = document.getElementById('production-board');
     var searchInput = document.getElementById('prod-search');
     var rawQuery = (searchInput && searchInput.value) || '';
     var query = normalize(rawQuery);
-    var allActive = productionJobsCache.filter(function(j){ return j.approved && !j.completedAt; });
-    if(!allActive.length){
+
+    var allActiveJobs = productionJobsCache.filter(function(j){ return j.approved && !j.completedAt; });
+    var allCompletedJobs = productionJobsCache.filter(function(j){ return j.approved && j.completedAt; });
+
+    if(!allActiveJobs.length && !allCompletedJobs.length){
       container.innerHTML = '<div class="empty">No jobs in production right now — approve a quote from the Quotes screen to add one.</div>';
       return;
     }
-    var active = !query ? allActive : allActive.filter(function(j){
-      return normalize(j.productName||'').indexOf(query)!==-1 ||
-        normalize(j.drawingNumber||'').indexOf(query)!==-1 ||
-        normalize(j.customerName||'').indexOf(query)!==-1;
-    });
-    if(!active.length){
+
+    var active = allActiveJobs.filter(function(j){ return prodMatchesQuery_(j, query); });
+    var completed = allCompletedJobs.filter(function(j){ return prodMatchesQuery_(j, query); });
+
+    if(!active.length && !completed.length){
       container.innerHTML = '<div class="empty">No jobs in production match &ldquo;'+esc(rawQuery)+'&rdquo;.</div>';
       return;
     }
+
     var canTick = canTickProgress_(currentUser);
     var buckets = {};
     PROD_GROUPS.forEach(function(g){ buckets[g.key] = []; });
     active.forEach(function(j){ buckets[prodBucketFor_(prodTimelineInfo_(j))].push(j); });
 
-    container.innerHTML = PROD_GROUPS.filter(function(g){ return buckets[g.key].length; }).map(function(g){
-      return '<div class="prod-group">' +
-        '<div class="prod-group-head '+g.cls+'"><h2>'+g.label+'</h2><span class="count">'+plural_(buckets[g.key].length,'job')+'</span></div>' +
-        '<div class="prod-board">'+buckets[g.key].map(function(j){ return prodCardHtml_(j, canTick); }).join('')+'</div>' +
-      '</div>';
-    }).join('') +
+    var activeHtml = active.length
+      ? PROD_GROUPS.filter(function(g){ return buckets[g.key].length; }).map(function(g){
+          return '<div class="prod-group">' +
+            '<div class="prod-group-head '+g.cls+'"><h2>'+g.label+'</h2><span class="count">'+plural_(buckets[g.key].length,'job')+'</span></div>' +
+            '<div class="prod-board">'+buckets[g.key].map(function(j){ return prodCardHtml_(j, canTick); }).join('')+'</div>' +
+          '</div>';
+        }).join('')
+      : '<div class="empty">No jobs currently in production'+(query?' match that search':'')+' — see Completed below.</div>';
+
+    // Completed jobs no longer vanish once every checklist item is ticked — they stay
+    // here to reference if needed. Collapsed by default since it's reference material,
+    // not day-to-day work (open automatically while searching, so a search doesn't hide
+    // a completed match behind a closed <details>). The checklist inside each card is
+    // still live: unticking a box un-completes the job and it reappears above on the
+    // next refresh, since Code.gs's updateJobProgress_ already clears completedAt the
+    // moment any section goes back to not-done.
+    var completedHtml = completed.length
+      ? '<details class="prod-group prod-group-completed"'+(query?' open':'')+'>' +
+          '<summary class="prod-group-head good"><h2>Completed</h2><span class="count">'+plural_(completed.length,'job')+'</span></summary>' +
+          '<div class="prod-board">'+completed.slice().sort(function(a,b){ return (b.completedAt||'').localeCompare(a.completedAt||''); }).map(function(j){ return prodCompletedCardHtml_(j, canTick); }).join('')+'</div>' +
+        '</details>'
+      : '';
+
+    container.innerHTML = activeHtml + completedHtml +
     (!canTick ? '<div class="sub" style="margin-top:14px;color:var(--ink-soft);">Your login can view progress here but not tick it off.</div>' : '');
 
     wireProdChecklists_(container, canTick);
