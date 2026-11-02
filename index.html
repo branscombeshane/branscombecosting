@@ -2420,6 +2420,17 @@
             }
           }
           else { missingThickness = true; }
+        } else if(isLinearUnit_(basisRate && basisRate.unit)){
+          // Priced by the linear metre of bar/strip stock (e.g. "Flat Bar - 20mm x
+          // 5mm") — same idea as the round/tube branch above: the material itself is
+          // costed on the bar's own LENGTH, not its face area, even though the Finish
+          // line above still needs the full face area regardless of how the material
+          // is priced (see the totalFinishArea comment near the top of this function).
+          // Before this branch existed, any flat component matched to a plain "m" rate
+          // fell into the area branch below instead, costing a few hundredths of a
+          // square metre as if it were metres of bar — a handful of brackets totalling
+          // "0.075 m" rather than the actual metres of bar stock needed.
+          total += (c.length_mm/1000)*(c.quantity||1);
         } else {
           total += area;
         }
