@@ -217,15 +217,41 @@
   .chip-confidence.low{ color:var(--warn); }
 
   /* ================= PRODUCTION BOARD ================= */
+  .prod-group{ margin-bottom:28px; }
+  .prod-group-head{ display:flex; align-items:baseline; gap:10px; margin-bottom:12px; padding-bottom:6px; border-bottom:1px solid var(--line-strong); }
+  .prod-group-head h2{ font-size:18px; text-transform:uppercase; letter-spacing:.04em; margin:0; font-weight:600; }
+  .prod-group-head .count{ font-size:12px; color:var(--ink-soft); }
+  .prod-group-head.good h2{ color:var(--good); }
+  .prod-group-head.amber h2{ color:var(--amber); }
+  .prod-group-head.warn h2{ color:var(--warn); }
   .prod-board{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
   .prod-card{ border:1px solid var(--line); background:var(--paper-raised); padding:16px; }
   .prod-card .prod-title{ font-weight:600; font-size:16px; margin-bottom:2px; }
   .prod-card .prod-meta{ font-size:12px; color:var(--ink-soft); margin-bottom:10px; }
+  /* A tiny inline progress bar: elapsed-since-approval vs the manufacture window, with a
+     "today" position implicit in how far the fill reaches — Shane asked for something
+     "all users can see" at a glance, so this sits right on the card rather than behind a
+     click. Colour matches weeksColorClass_, same scheme as everywhere else production. */
+  .prod-timeline{ margin-bottom:10px; }
+  .prod-timeline .bar{ height:6px; background:var(--line); position:relative; overflow:hidden; }
+  .prod-timeline .bar .fill{ position:absolute; left:0; top:0; bottom:0; }
+  .prod-timeline .bar .fill.good{ background:var(--good); }
+  .prod-timeline .bar .fill.amber{ background:var(--amber); }
+  .prod-timeline .bar .fill.warn{ background:var(--warn); }
+  .prod-timeline .bar.overdue .fill{ background:var(--warn); }
+  .prod-timeline .timeline-label{ font-size:11px; color:var(--ink-soft); margin-top:4px; }
   .prod-checklist{ list-style:none; margin:0; padding:0; }
   .prod-checklist li{ display:flex; align-items:center; gap:9px; padding:5px 0; border-bottom:1px solid var(--line); font-size:13px; }
   .prod-checklist li:last-child{ border-bottom:none; }
   .prod-checklist input[type="checkbox"]{ width:17px; height:17px; flex:none; }
   .prod-checklist li.done{ color:var(--ink-soft); text-decoration:line-through; }
+  .prod-drawings{ margin-top:12px; padding-top:10px; border-top:1px solid var(--line); font-size:12px; }
+  .prod-drawings .drawing-link{ display:block; margin-bottom:4px; }
+  .prod-drawings .btn-add-drawing{ margin-top:4px; }
+  .prod-bom{ margin-top:10px; }
+  .prod-bom summary{ cursor:pointer; font-size:12px; color:var(--ink-soft); font-weight:600; text-transform:uppercase; letter-spacing:.04em; padding-top:10px; border-top:1px solid var(--line); }
+  .prod-bom table{ margin-top:8px; }
+  .prod-bom th, .prod-bom td{ font-size:12px; padding:4px 6px; }
   .approve-box{ border:1px solid var(--line-strong); background:var(--accent-soft); padding:14px 16px; margin-top:14px; }
   .approve-box .field-row{ align-items:center; }
   .chk-label{ display:inline-flex; align-items:center; gap:6px; margin-right:18px; font-size:13px; }
@@ -423,6 +449,9 @@
     <div class="sheet-head">
       <h1>Production</h1>
       <div class="sub">Approved jobs currently in the workshop, 6&ndash;8 weeks to completion</div>
+    </div>
+    <div class="field" style="max-width:360px;margin-bottom:16px;">
+      <input type="text" id="prod-search" placeholder="Search by name, drawing #, or customer&hellip;">
     </div>
     <div id="production-board"></div>
   </section>
@@ -2978,59 +3007,220 @@
     return !!user && (user.role==='owner' || (user.permissions||[]).indexOf('tickProgress')!==-1);
   }
 
+  // Elapsed-since-approval vs the manufacture window, plus days left/overdue against the
+  // due date — the numbers behind both the per-card progress bar and which group (Overdue/
+  // Due this week/etc.) a job lands in below. dueDate arrives as a plain 'yyyy-MM-dd'
+  // string from Code.gs (see formatDateOnly_ server-side), so it's parsed as local
+  // midnight here rather than through Date's own UTC-leaning ISO parsing.
+  function prodTimelineInfo_(j){
+    var totalDays = (Number(j.manufactureWeeks)||6) * 7;
+    var start = j.approvedAt ? new Date(j.approvedAt) : null;
+    var due = j.dueDate ? new Date(j.dueDate+'T00:00:00') : null;
+    var now = new Date();
+    var elapsedDays = start ? Math.max(0, Math.floor((now - start) / 86400000)) : 0;
+    var remainingDays = due ? Math.ceil((due - now) / 86400000) : null;
+    var pct = totalDays ? Math.max(0, Math.min(100, (elapsedDays/totalDays)*100)) : 0;
+    return { elapsedDays: elapsedDays, remainingDays: remainingDays, pct: pct, overdue: remainingDays!=null && remainingDays<0, totalDays: totalDays };
+  }
+
+  // The board's own grouping — Shane: "grouped into an easily visible timeline so that
+  // all users can see how long its been in production and how close it's getting to
+  // delivery date". Checked in this order so each job lands in exactly one bucket.
+  var PROD_GROUPS = [
+    { key:'overdue',   label:'Overdue',          cls:'warn'  },
+    { key:'week',      label:'Due this week',    cls:'warn'  },
+    { key:'fortnight', label:'Due in 2 weeks',   cls:'amber' },
+    { key:'ontrack',   label:'On track',         cls:'good'  }
+  ];
+  function prodBucketFor_(info){
+    if(info.overdue) return 'overdue';
+    if(info.remainingDays!=null && info.remainingDays<=7) return 'week';
+    if(info.remainingDays!=null && info.remainingDays<=14) return 'fortnight';
+    return 'ontrack';
+  }
+  function plural_(n, word){ return n+' '+word+(n===1?'':'s'); }
+
+  function prodTimelineHtml_(j){
+    var info = prodTimelineInfo_(j);
+    var cls = info.overdue ? 'warn' : weeksColorClass_(j.manufactureWeeks);
+    var dueLabel = j.dueDate ? ('due '+esc(j.dueDate)) : 'no due date set';
+    var remainLabel = info.overdue ? ('<strong>'+plural_(Math.abs(info.remainingDays),'day')+' overdue</strong>')
+      : (info.remainingDays!=null ? (plural_(info.remainingDays,'day')+' left') : '');
+    return '<div class="prod-timeline">' +
+      '<div class="bar'+(info.overdue?' overdue':'')+'"><div class="fill '+cls+'" style="width:'+Math.round(info.pct)+'%;"></div></div>' +
+      '<div class="timeline-label">'+plural_(info.elapsedDays,'day')+' in production'+(remainLabel?' &middot; '+remainLabel:'')+' &middot; '+dueLabel+'</div>' +
+    '</div>';
+  }
+
+  // Shows the original costing drawing (reusing the same drawingFileUrls link the Quotes
+  // list already shows) plus any production drawings added since, and the control to add
+  // more — Shane: "have the costing drawing available and the ability to upload new
+  // production drawings".
+  function prodDrawingsHtml_(j){
+    var costing = (j.drawingFileUrls && j.drawingFileUrls.length)
+      ? '<a class="drawing-link" href="'+esc(j.drawingFileUrls[0])+'" target="_blank" rel="noopener">view costing drawing</a>'
+      : '<span class="sub" style="color:var(--ink-soft);display:block;margin-bottom:4px;">No costing drawing saved.</span>';
+    var extra = (j.productionDrawingUrls||[]).map(function(d){
+      return '<a class="drawing-link" href="'+esc(d.url)+'" target="_blank" rel="noopener">'+esc(d.name||'drawing')+'</a>';
+    }).join('');
+    return '<div class="prod-drawings">' +
+      costing + extra +
+      '<button type="button" class="btn small ghost btn-add-drawing" data-job="'+esc(j.id)+'">+ Add drawing</button>' +
+      '<input type="file" class="drawing-file-input" data-job="'+esc(j.id)+'" accept="application/pdf,image/*" multiple hidden>' +
+      '<span class="drawing-upload-status sub" data-job="'+esc(j.id)+'" style="display:block;margin-top:4px;color:var(--ink-soft);"></span>' +
+    '</div>';
+  }
+
+  // Materials & quantities breakdown — Shane: "a breakdown of the materials and
+  // quantities needed for the job". Collapsed by default (<details>) so the board stays
+  // scannable; reuses the same description/qty/unit fields the costing BOM table itself
+  // edits (li-desc/li-qty/li-unit — see the Quotes line-item rows).
+  function prodBomHtml_(j){
+    var items = j.lineItems || [];
+    if(!items.length) return '';
+    var rows = items.map(function(li){
+      return '<tr><td>'+esc(li.description||'')+'</td><td class="num">'+esc(li.qty!=null?li.qty:'')+'</td><td>'+esc(li.unit||'')+'</td></tr>';
+    }).join('');
+    return '<details class="prod-bom"><summary>Materials ('+plural_(items.length,'item')+')</summary>' +
+      '<table><thead><tr><th>Description</th><th class="num">Qty</th><th>Unit</th></tr></thead><tbody>'+rows+'</tbody></table>' +
+    '</details>';
+  }
+
+  function prodCardHtml_(j, canTick){
+    var sections = j.productionSections || [];
+    var progress = j.sectionProgress || {};
+    var items = sections.map(function(s){
+      var done = progress[s] && progress[s].done;
+      return '<li class="'+(done?'done':'')+'" data-job="'+esc(j.id)+'" data-section="'+esc(s)+'">' +
+        '<input type="checkbox"'+(done?' checked':'')+(canTick?'':' disabled')+'> '+esc(productionSectionLabel_(s)) +
+      '</li>';
+    }).join('');
+    return '<div class="prod-card">' +
+      '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
+      '<div class="prod-meta">'+esc(j.drawingNumber||'—')+(j.customerName?' · '+esc(j.customerName):'')+'</div>' +
+      prodTimelineHtml_(j) +
+      '<ul class="prod-checklist">'+items+'</ul>' +
+      prodBomHtml_(j) +
+      prodDrawingsHtml_(j) +
+    '</div>';
+  }
+
+  // jobs loaded straight from getJobs, re-rendered locally (via the search box and
+  // post-upload refreshes) without always re-fetching.
+  var productionJobsCache = [];
+
   function loadProduction(){
     var container = document.getElementById('production-board');
     container.innerHTML = '<div class="empty">Loading…</div>';
     apiRead('getJobs').then(function(res){
-      renderProductionBoard_((res && res.jobs) || []);
+      productionJobsCache = (res && res.jobs) || [];
+      renderProductionBoard_();
     }).catch(function(e){ container.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
   }
 
-  function renderProductionBoard_(jobs){
+  function renderProductionBoard_(){
     var container = document.getElementById('production-board');
-    var active = jobs.filter(function(j){ return j.approved && !j.completedAt; });
-    var canTick = canTickProgress_(currentUser);
-    if(!active.length){
+    var searchInput = document.getElementById('prod-search');
+    var rawQuery = (searchInput && searchInput.value) || '';
+    var query = normalize(rawQuery);
+    var allActive = productionJobsCache.filter(function(j){ return j.approved && !j.completedAt; });
+    if(!allActive.length){
       container.innerHTML = '<div class="empty">No jobs in production right now — approve a quote from the Quotes screen to add one.</div>';
       return;
     }
-    container.innerHTML = '<div class="prod-board">' + active.map(function(j){
-      var sections = j.productionSections || [];
-      var progress = j.sectionProgress || {};
-      var items = sections.map(function(s){
-        var done = progress[s] && progress[s].done;
-        return '<li class="'+(done?'done':'')+'" data-job="'+esc(j.id)+'" data-section="'+esc(s)+'">' +
-          '<input type="checkbox"'+(done?' checked':'')+(canTick?'':' disabled')+'> '+esc(productionSectionLabel_(s)) +
-        '</li>';
-      }).join('');
-      return '<div class="prod-card">' +
-        '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
-        '<div class="prod-meta">'+esc(j.drawingNumber||'—')+(j.customerName?' · '+esc(j.customerName):'')+' · <span class="chip '+weeksColorClass_(j.manufactureWeeks)+'">due '+esc(j.dueDate||'')+'</span></div>' +
-        '<ul class="prod-checklist">'+items+'</ul>' +
+    var active = !query ? allActive : allActive.filter(function(j){
+      return normalize(j.productName||'').indexOf(query)!==-1 ||
+        normalize(j.drawingNumber||'').indexOf(query)!==-1 ||
+        normalize(j.customerName||'').indexOf(query)!==-1;
+    });
+    if(!active.length){
+      container.innerHTML = '<div class="empty">No jobs in production match &ldquo;'+esc(rawQuery)+'&rdquo;.</div>';
+      return;
+    }
+    var canTick = canTickProgress_(currentUser);
+    var buckets = {};
+    PROD_GROUPS.forEach(function(g){ buckets[g.key] = []; });
+    active.forEach(function(j){ buckets[prodBucketFor_(prodTimelineInfo_(j))].push(j); });
+
+    container.innerHTML = PROD_GROUPS.filter(function(g){ return buckets[g.key].length; }).map(function(g){
+      return '<div class="prod-group">' +
+        '<div class="prod-group-head '+g.cls+'"><h2>'+g.label+'</h2><span class="count">'+plural_(buckets[g.key].length,'job')+'</span></div>' +
+        '<div class="prod-board">'+buckets[g.key].map(function(j){ return prodCardHtml_(j, canTick); }).join('')+'</div>' +
       '</div>';
-    }).join('') + '</div>' +
+    }).join('') +
     (!canTick ? '<div class="sub" style="margin-top:14px;color:var(--ink-soft);">Your login can view progress here but not tick it off.</div>' : '');
 
-    if(canTick){
-      container.querySelectorAll('.prod-checklist input[type="checkbox"]').forEach(function(cb){
-        cb.addEventListener('change', function(){
-          var li = cb.closest('li');
-          var jobId = li.dataset.job, section = li.dataset.section;
-          var wasChecked = !cb.checked; // value before this change, for reverting on failure
-          cb.disabled = true;
-          apiRead('updateJobProgress', { id: jobId, section: section, done: cb.checked, actingUserId: currentUser.id }).then(function(res){
-            cb.disabled = false;
-            if(res && res.ok){
-              li.classList.toggle('done', cb.checked);
-              if(res.allDone) setTimeout(loadProduction, 800);
-            } else {
-              cb.checked = wasChecked;
-            }
-          }).catch(function(){ cb.disabled = false; cb.checked = wasChecked; });
+    wireProdChecklists_(container, canTick);
+    wireProdDrawingUploads_(container);
+  }
+
+  function wireProdChecklists_(container, canTick){
+    if(!canTick) return;
+    container.querySelectorAll('.prod-checklist input[type="checkbox"]').forEach(function(cb){
+      cb.addEventListener('change', function(){
+        var li = cb.closest('li');
+        var jobId = li.dataset.job, section = li.dataset.section;
+        var wasChecked = !cb.checked; // value before this change, for reverting on failure
+        cb.disabled = true;
+        apiRead('updateJobProgress', { id: jobId, section: section, done: cb.checked, actingUserId: currentUser.id }).then(function(res){
+          cb.disabled = false;
+          if(res && res.ok){
+            li.classList.toggle('done', cb.checked);
+            if(res.allDone) setTimeout(loadProduction, 800);
+          } else {
+            cb.checked = wasChecked;
+          }
+        }).catch(function(){ cb.disabled = false; cb.checked = wasChecked; });
+      });
+    });
+  }
+
+  // Each "+ Add drawing" button/file-input pair is scoped to its own job via data-job —
+  // picking a file reads it as base64 (blobToBase64 works on a plain File straight off
+  // disk just as well as the canvas-rendered blobs it was originally written for) and
+  // sends it through the same write-then-poll shape as addJob_'s own drawing upload,
+  // since a real photo/PDF is too big for a doGet/JSONP query string. Re-loads the whole
+  // board on success so the new link (and the Materials section it sits next to) reflects
+  // the server's own copy rather than guessing at it client-side.
+  function wireProdDrawingUploads_(container){
+    container.querySelectorAll('.btn-add-drawing').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var jobId = btn.dataset.job;
+        var input = container.querySelector('.drawing-file-input[data-job="'+jobId+'"]');
+        if(input) input.click();
+      });
+    });
+    container.querySelectorAll('.drawing-file-input').forEach(function(input){
+      input.addEventListener('change', function(){
+        var jobId = input.dataset.job;
+        var files = Array.prototype.slice.call(input.files||[]);
+        input.value = '';
+        if(!files.length) return;
+        var statusEl = container.querySelector('.drawing-upload-status[data-job="'+jobId+'"]');
+        if(statusEl) statusEl.textContent = 'Uploading…';
+        Promise.all(files.map(function(f){
+          return blobToBase64(f).then(function(data){ return { data:data, mimeType:f.type||'application/octet-stream', name:f.name }; });
+        })).then(function(fileData){
+          var token = uid();
+          return apiWrite('addProductionDrawing', { jobId: jobId, files: fileData, actingUserId: currentUser.id, token: token }).then(function(){
+            return pollTokenResult_('getAddProductionDrawingResult', token);
+          });
+        }).then(function(res){
+          var result = res && res.result;
+          if(result && result.ok){
+            loadProduction();
+          } else if(statusEl){
+            statusEl.textContent = (result && result.error) || 'Upload failed — try again.';
+          }
+        }).catch(function(){
+          if(statusEl) statusEl.textContent = 'Couldn\'t reach the backend — try again.';
         });
       });
-    }
+    });
   }
+
+  var prodSearchInput_ = document.getElementById('prod-search');
+  if(prodSearchInput_) prodSearchInput_.addEventListener('input', function(){ renderProductionBoard_(); });
 
   // ================= USERS ADMIN (Admin tab, owner only) =================
   var usersCache = [];
