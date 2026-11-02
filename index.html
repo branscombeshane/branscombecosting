@@ -77,23 +77,35 @@
   }
   .wordmark small{ display:block; font-family:"IBM Plex Sans",sans-serif; letter-spacing:0; text-transform:none;
     font-size:10px; color:var(--ink-soft); font-weight:400; margin-top:10px; margin-right:.32em; }
-  .mode-switch{ display:flex; flex-direction:column; border:1px solid var(--line-strong); }
-  .mode-switch-payroll{ margin-top:18px; }
-  .mode-btn{ background:none; border:none; padding:9px 12px; font-family:"Barlow Condensed","Arial Narrow",sans-serif;
-    font-size:13px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); cursor:pointer; text-align:left; }
-  .mode-btn:not(:last-child){ border-bottom:1px solid var(--line-strong); }
+  /* ================= SIDEBAR NAV (accordion) =================
+     One bordered box per cluster of related modes (factory ops: Costing/Production/
+     Admin; Payroll on its own below, per Shane: "payroll doesn't belong amongst the
+     factory ops stuff"). Within a box, a mode with sub-screens (Costing, Payroll) is a
+     header that expands in place to show its own screens nested right beneath it —
+     fixing the earlier layout where New Quote/Quotes/Rate Card/Settings floated in an
+     unlabeled list below, with nothing tying them visually to Costing. A mode with just
+     one screen (Production, Admin) is a plain header that navigates straight there —
+     no pointless single-item submenu under it. */
+  .sidenav{ display:flex; flex-direction:column; border:1px solid var(--line-strong); }
+  .sidenav + .sidenav{ margin-top:18px; }
+  .nav-section:not(:last-child){ border-bottom:1px solid var(--line-strong); }
+  .mode-btn{
+    display:flex; align-items:center; justify-content:space-between; width:100%; box-sizing:border-box;
+    background:none; border:none; padding:9px 12px; font-family:"Barlow Condensed","Arial Narrow",sans-serif;
+    font-size:13px; letter-spacing:.06em; text-transform:uppercase; font-weight:600; color:var(--ink-soft); cursor:pointer; text-align:left;
+  }
   .mode-btn:hover{ color:var(--ink); }
   .mode-btn.active{ background:var(--accent); color:#fff; }
-  nav{ display:flex; flex-direction:column; border-top:1px solid var(--line); border-bottom:1px solid var(--line); }
-  .nav-group{ display:flex; flex-direction:column; }
-  .nav-group[hidden]{ display:none; }
-  .nav-group .navbtn:last-child{ border-bottom:none; }
+  .mode-btn .chev{ font-size:10px; opacity:.7; transition:transform .15s ease; }
+  .mode-btn.active .chev{ transform:rotate(180deg); }
+  .nav-section-body{ display:flex; flex-direction:column; border-top:1px solid var(--line-strong); background:var(--paper); }
+  .nav-section-body[hidden]{ display:none; }
   .navbtn{
     text-align:left; background:none; border:none; border-bottom:1px solid var(--line);
-    padding:11px 8px; font-size:14px; letter-spacing:.06em; text-transform:uppercase;
+    padding:10px 8px 10px 22px; font-size:13px; letter-spacing:.06em; text-transform:uppercase;
     color:var(--ink-soft); cursor:pointer; font-weight:600; position:relative;
   }
-  .navbtn:last-child{ border-bottom:none; }
+  .nav-section-body .navbtn:last-child{ border-bottom:none; }
   .navbtn:hover{ color:var(--ink); }
   .navbtn.active{ color:var(--ink); background:var(--accent-soft); }
   .navbtn.active::before{ content:""; position:absolute; left:0; top:0; bottom:0; width:3px; background:var(--accent); }
@@ -378,40 +390,45 @@
 
 <div class="sidebar">
   <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
-  <div class="mode-switch" id="mode-switch">
-    <button class="mode-btn" data-mode="costing">Costing</button>
-    <button class="mode-btn" data-mode="production">Production</button>
-    <button class="mode-btn" data-mode="admin">Admin</button>
+  <!-- Factory-ops box: Costing and Payroll are "accordion" modes — their own screens
+       nest directly underneath when active, so it's never ambiguous which screen list
+       belongs to which mode. Production and Admin have only one screen each, so their
+       header *is* the nav button — clicking it goes straight there (setAppMode already
+       calls showView('production')/showView('admin')), no pointless single-item submenu. -->
+  <div class="sidenav" id="mode-switch">
+    <div class="nav-section" data-mode="costing">
+      <button class="mode-btn" data-mode="costing"><span>Costing</span><span class="chev">&#9662;</span></button>
+      <div class="nav-section-body" data-mode-group="costing" hidden>
+        <button class="navbtn" data-view="new">New Quote</button>
+        <button class="navbtn" data-view="quotes">Quotes</button>
+        <button class="navbtn" data-view="rates">Rate Card</button>
+        <button class="navbtn" data-view="settings">Settings</button>
+      </div>
+    </div>
+    <div class="nav-section" data-mode="production">
+      <button class="mode-btn" data-mode="production"><span>Production</span></button>
+    </div>
+    <div class="nav-section" data-mode="admin">
+      <button class="mode-btn" data-mode="admin"><span>Admin</span></button>
+    </div>
   </div>
   <!-- Payroll is its own thing, not another factory-ops screen — kept in a visually
-       separate box (its own border, a gap above it) rather than stacked in with
+       separate box (own border, gap above it) rather than stacked in with
        Costing/Production/Admin, even though it's wired through the exact same
        setAppMode()/mode-btn mechanism (see the delegated click listener on .sidebar
        below, which covers both boxes). -->
-  <div class="mode-switch mode-switch-payroll" id="mode-switch-payroll">
-    <button class="mode-btn" data-mode="payroll">Payroll</button>
+  <div class="sidenav" id="mode-switch-payroll">
+    <div class="nav-section" data-mode="payroll">
+      <button class="mode-btn" data-mode="payroll"><span>Payroll</span><span class="chev">&#9662;</span></button>
+      <div class="nav-section-body" data-mode-group="payroll" hidden>
+        <button class="navbtn" data-tab="roster">Roster</button>
+        <button class="navbtn" data-tab="adjustments">Pay Adjustments</button>
+        <button class="navbtn" data-tab="run">Run Payroll</button>
+        <button class="navbtn" data-tab="reports">Reports</button>
+        <button class="navbtn" data-view="payroll-settings">Settings</button>
+      </div>
+    </div>
   </div>
-  <nav id="nav">
-    <div class="nav-group" data-mode-group="costing">
-      <button class="navbtn" data-view="new">New Quote</button>
-      <button class="navbtn" data-view="quotes">Quotes</button>
-      <button class="navbtn" data-view="rates">Rate Card</button>
-      <button class="navbtn" data-view="settings">Settings</button>
-    </div>
-    <div class="nav-group" data-mode-group="payroll" hidden>
-      <button class="navbtn" data-tab="roster">Roster</button>
-      <button class="navbtn" data-tab="adjustments">Pay Adjustments</button>
-      <button class="navbtn" data-tab="run">Run Payroll</button>
-      <button class="navbtn" data-tab="reports">Reports</button>
-      <button class="navbtn" data-view="payroll-settings">Settings</button>
-    </div>
-    <div class="nav-group" data-mode-group="production" hidden>
-      <button class="navbtn" data-view="production">Production board</button>
-    </div>
-    <div class="nav-group" data-mode-group="admin" hidden>
-      <button class="navbtn" data-view="admin">Team &amp; site settings</button>
-    </div>
-  </nav>
   <footer id="sidebar-footer"><span id="sidebar-user"></span>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
     <button type="button" class="logout-link" id="btn-logout">Log out</button>
   </footer>
@@ -915,18 +932,20 @@
     location.reload();
   });
 
-  // Costing and Payroll are two separate jobs sharing one app — the mode switch at
-  // the top of the sidebar swaps which nav group is visible below it, so the two
-  // never sit mixed together in one flat list. Payroll's own sub-screens (Roster,
-  // Pay Adjustments, Run Payroll, Reports) are now real sidebar nav buttons rather than
-  // an in-page tab strip — each just sets payrollTab and shows the one 'payroll' view.
+  // Costing and Payroll are accordion modes — picking one expands its own screen list
+  // directly beneath its header (.nav-section-body), so which screens belong to which
+  // mode is never ambiguous. Production and Admin are single-screen modes with no
+  // submenu — their header click goes straight to that view below. Payroll's own
+  // sub-screens (Roster, Pay Adjustments, Run Payroll, Reports) are real sidebar nav
+  // buttons rather than an in-page tab strip — each just sets payrollTab and shows the
+  // one 'payroll' view.
   var appMode = 'costing';
   function setAppMode(mode){
     appMode = mode;
     Array.prototype.forEach.call(document.querySelectorAll('.mode-btn'), function(b){
       b.classList.toggle('active', b.dataset.mode===mode);
     });
-    Array.prototype.forEach.call(document.querySelectorAll('.nav-group'), function(g){
+    Array.prototype.forEach.call(document.querySelectorAll('.nav-section-body'), function(g){
       g.hidden = (g.dataset.modeGroup !== mode);
     });
     if(mode==='payroll') showView('payroll');
@@ -934,19 +953,19 @@
     else if(mode==='admin') showView('admin');
     else showView('new');
   }
-  // Delegated from .sidebar (not just #mode-switch) so this still catches clicks from
-  // the separate #mode-switch-payroll box too — see the markup comment above it.
+  // One delegated listener off .sidebar covers mode headers (incl. the separate
+  // #mode-switch-payroll box — see the markup comment above it) and the nested
+  // sub-screen buttons inside each expanded .nav-section-body.
   document.querySelector('.sidebar').addEventListener('click', function(e){
-    var b = e.target.closest('.mode-btn'); if(!b) return;
-    setAppMode(b.dataset.mode);
+    var modeBtn = e.target.closest('.mode-btn');
+    if(modeBtn){ setAppMode(modeBtn.dataset.mode); return; }
+    var navBtn = e.target.closest('.navbtn');
+    if(!navBtn) return;
+    if(navBtn.dataset.tab){ payrollTab = navBtn.dataset.tab; showView('payroll'); return; }
+    showView(navBtn.dataset.view);
   });
   document.querySelector('.mode-btn[data-mode="costing"]').classList.add('active');
-
-  document.getElementById('nav').addEventListener('click', function(e){
-    var b = e.target.closest('.navbtn'); if(!b) return;
-    if(b.dataset.tab){ payrollTab = b.dataset.tab; showView('payroll'); return; }
-    showView(b.dataset.view);
-  });
+  document.querySelector('.nav-section-body[data-mode-group="costing"]').hidden = false;
   function showView(v){
     view = v;
     ['new','quotes','rates','payroll','payroll-settings','settings','production','admin'].forEach(function(name){
