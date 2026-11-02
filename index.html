@@ -249,8 +249,23 @@
   .prod-group-head.warn h2{ color:var(--warn); }
   .prod-board{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:16px; }
   .prod-card{ border:1px solid var(--line); background:var(--paper-raised); padding:16px; }
+  .prod-card.active-row{ border-color:var(--accent); background:var(--accent-soft); }
   .prod-card .prod-title{ font-weight:600; font-size:16px; margin-bottom:2px; }
   .prod-card .prod-meta{ font-size:12px; color:var(--ink-soft); margin-bottom:10px; }
+  /* Collapsed-by-default card header — Shane: with 40-50 jobs running at once, every card
+     fully expanded (checklist, notes, materials, drawings all open) made the board
+     unusable on a phone. Tapping this summary opens the rest of the card in place, same
+     pattern as the Roster/Pay Adjustments/Deduction Account rows elsewhere in the app. */
+  .prod-card-summary{ display:flex; align-items:flex-start; justify-content:space-between; gap:12px; cursor:pointer; }
+  .prod-card-summary .prod-card-summary-main{ min-width:0; flex:1; }
+  .prod-card-summary .prod-meta{ margin-bottom:0; }
+  .prod-card-summary-side{ display:flex; flex-direction:column; align-items:flex-end; gap:4px; flex:none; }
+  .prod-progress-chip{ font-size:11px; font-weight:600; padding:2px 7px; border-radius:2px; background:var(--line); color:var(--ink-soft); white-space:nowrap; }
+  .prod-progress-chip.good{ background:var(--good-soft); color:var(--good); }
+  .prod-remain{ font-size:11px; color:var(--ink-soft); white-space:nowrap; }
+  .prod-remain.warn{ color:var(--warn); font-weight:600; }
+  .prod-chevron{ font-size:10px; color:var(--ink-soft); }
+  .prod-card-detail{ margin-top:12px; padding-top:12px; border-top:1px solid var(--line); }
   /* A tiny inline progress bar: elapsed-since-approval vs the manufacture window, with a
      "today" position implicit in how far the fill reaches — Shane asked for something
      "all users can see" at a glance, so this sits right on the card rather than behind a
@@ -291,7 +306,6 @@
   .prod-group-completed{ margin-top:8px; }
   .prod-group-completed summary{ cursor:pointer; list-style:revert; }
   .prod-group-completed summary::marker{ color:var(--ink-soft); }
-  .prod-card-done .prod-completed-line{ font-size:11px; color:var(--good); font-weight:600; text-transform:uppercase; letter-spacing:.03em; margin-bottom:10px; }
   .prod-drawings .drawing-remove{ background:none; border:none; padding:0; margin-left:6px; color:var(--warn); text-decoration:underline; font-size:11px; cursor:pointer; font-family:inherit; }
   .prod-drawings .drawing-remove:hover{ color:var(--warn); opacity:.8; }
   .prod-drawings .drawing-row{ display:flex; align-items:center; gap:0; margin-bottom:4px; }
@@ -561,8 +575,13 @@
       <h1>Production</h1>
       <div class="sub">Approved jobs currently in the workshop, 6&ndash;8 weeks to completion</div>
     </div>
-    <div class="field" style="max-width:360px;margin-bottom:16px;">
-      <input type="text" id="prod-search" placeholder="Search by name, drawing #, or customer&hellip;">
+    <div class="field-row" style="gap:12px;flex-wrap:wrap;margin-bottom:16px;">
+      <div class="field" style="max-width:360px;flex:1;min-width:220px;">
+        <input type="text" id="prod-search" placeholder="Search by name, drawing #, or customer&hellip;">
+      </div>
+      <div class="field" style="max-width:220px;min-width:160px;">
+        <select id="prod-joiner-filter"><option value="">All joiners/carpenters</option></select>
+      </div>
     </div>
     <div id="production-board"></div>
   </section>
@@ -3447,28 +3466,72 @@
       ' · '+(j.assignedJoiner?esc(j.assignedJoiner):'<span style="color:var(--warn);">Unassigned</span>');
   }
 
+  // How far along a job's checklist is — feeds the "2/3 steps" chip on the collapsed
+  // card so the board is scannable without opening every job.
+  function prodProgressInfo_(j){
+    var sections = j.productionSections || [];
+    var progress = j.sectionProgress || {};
+    var done = sections.filter(function(s){ return progress[s] && progress[s].done; }).length;
+    return { done: done, total: sections.length };
+  }
+
+  // The always-visible, collapsed header for a job card — name, customer, joiner, plus
+  // whatever status chips the caller wants on the right (progress/time-remaining for an
+  // active job, a "Completed <date>" chip for a finished one). Tapping it toggles the
+  // rest of the card open via expandedProdJobs_ below.
+  function prodCardSummaryHtml_(j, expanded, sideHtml){
+    return '<div class="prod-card-summary">' +
+      '<div class="prod-card-summary-main">' +
+        '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
+        '<div class="prod-meta">'+prodMetaHtml_(j)+'</div>' +
+      '</div>' +
+      '<div class="prod-card-summary-side">' +
+        sideHtml +
+        '<span class="prod-chevron">'+(expanded?'▲':'▼')+'</span>' +
+      '</div>' +
+    '</div>';
+  }
+
+  // Which job cards are currently expanded — Shane: with 40-50 jobs in production at
+  // once, a board where every card is fully open (checklist, notes, materials, drawings
+  // all stacked) is unusable on a phone. Cards collapse to a summary row by default (see
+  // prodCardSummaryHtml_) and open in place on tap; several can be open at once since the
+  // workshop floor often works through a few jobs side by side.
+  var expandedProdJobs_ = {};
+
   function prodCardHtml_(j, canTick){
-    return '<div class="prod-card">' +
-      '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
-      '<div class="prod-meta">'+prodMetaHtml_(j)+'</div>' +
-      prodTimelineHtml_(j) +
-      prodChecklistHtml_(j, canTick) +
-      prodBomHtml_(j) +
-      prodDrawingsHtml_(j) +
+    var expanded = !!expandedProdJobs_[j.id];
+    var prog = prodProgressInfo_(j);
+    var info = prodTimelineInfo_(j);
+    var remainLabel = info.overdue ? (plural_(Math.abs(info.remainingDays),'day')+' overdue')
+      : (info.remainingDays!=null ? (plural_(info.remainingDays,'day')+' left') : '');
+    var sideHtml =
+      '<span class="prod-progress-chip'+(prog.total && prog.done===prog.total?' good':'')+'">'+(prog.total?(prog.done+'/'+prog.total+' steps'):'No checklist')+'</span>' +
+      (remainLabel ? '<span class="prod-remain'+(info.overdue?' warn':'')+'">'+esc(remainLabel)+'</span>' : '');
+    return '<div class="prod-card'+(expanded?' active-row':'')+'" data-job="'+esc(j.id)+'">' +
+      prodCardSummaryHtml_(j, expanded, sideHtml) +
+      (expanded ? '<div class="prod-card-detail">' +
+        prodTimelineHtml_(j) +
+        prodChecklistHtml_(j, canTick) +
+        prodBomHtml_(j) +
+        prodDrawingsHtml_(j) +
+      '</div>' : '') +
     '</div>';
   }
 
   // A completed job's card — same shape as prodCardHtml_ (checklist, materials, drawings
-  // all still here "to reference if needed", per Shane) but with the due-date timeline
-  // swapped for a plain "Completed <date>" line, since urgency no longer applies.
+  // all still here "to reference if needed", per Shane) but the status chip reads
+  // "Completed <date>" instead of a progress count, since it's always 100%.
   function prodCompletedCardHtml_(j, canTick){
-    return '<div class="prod-card prod-card-done">' +
-      '<div class="prod-title">'+esc(j.productName||'Untitled')+(j.example?' <span class="chip example">example</span>':'')+'</div>' +
-      '<div class="prod-meta">'+prodMetaHtml_(j)+'</div>' +
-      '<div class="prod-completed-line">Completed '+esc((j.completedAt||'').slice(0,10))+'</div>' +
-      prodChecklistHtml_(j, canTick) +
-      prodBomHtml_(j) +
-      prodDrawingsHtml_(j) +
+    var expanded = !!expandedProdJobs_[j.id];
+    var sideHtml = '<span class="prod-progress-chip good">Completed '+esc((j.completedAt||'').slice(0,10))+'</span>';
+    return '<div class="prod-card prod-card-done'+(expanded?' active-row':'')+'" data-job="'+esc(j.id)+'">' +
+      prodCardSummaryHtml_(j, expanded, sideHtml) +
+      (expanded ? '<div class="prod-card-detail">' +
+        prodChecklistHtml_(j, canTick) +
+        prodBomHtml_(j) +
+        prodDrawingsHtml_(j) +
+      '</div>' : '') +
     '</div>';
   }
 
@@ -3492,11 +3555,36 @@
       normalize(j.customerName||'').indexOf(query)!==-1;
   }
 
+  // Shane: "quite a few joiners/carpenters" are working 40-50 jobs at once — this lets
+  // the board be narrowed down to one person's jobs (a workshop walkthrough, or checking
+  // one joiner's load) on top of the existing Overdue/Due this week/etc. grouping.
+  // Rebuilt on every render so it always reflects the current admin-managed joiner list
+  // (see renderJoinerManager), with whatever was selected preserved across the rebuild.
+  function populateProdJoinerFilter_(){
+    var sel = document.getElementById('prod-joiner-filter');
+    if(!sel) return;
+    var current = sel.value;
+    var list = (settings.joiners||[]).slice().sort();
+    sel.innerHTML = '<option value="">All joiners/carpenters</option>' +
+      '<option value="__unassigned__">Unassigned</option>' +
+      list.map(function(name){ return '<option value="'+esc(name)+'">'+esc(name)+'</option>'; }).join('');
+    sel.value = current;
+  }
+
+  function prodMatchesJoiner_(j, joinerFilter){
+    if(!joinerFilter) return true;
+    if(joinerFilter === '__unassigned__') return !j.assignedJoiner;
+    return j.assignedJoiner === joinerFilter;
+  }
+
   function renderProductionBoard_(){
     var container = document.getElementById('production-board');
     var searchInput = document.getElementById('prod-search');
     var rawQuery = (searchInput && searchInput.value) || '';
     var query = normalize(rawQuery);
+    populateProdJoinerFilter_();
+    var joinerFilter = (document.getElementById('prod-joiner-filter')||{}).value || '';
+    var hasFilters = !!query || !!joinerFilter;
 
     var allActiveJobs = productionJobsCache.filter(function(j){ return j.approved && !j.completedAt; });
     var allCompletedJobs = productionJobsCache.filter(function(j){ return j.approved && j.completedAt; });
@@ -3506,11 +3594,11 @@
       return;
     }
 
-    var active = allActiveJobs.filter(function(j){ return prodMatchesQuery_(j, query); });
-    var completed = allCompletedJobs.filter(function(j){ return prodMatchesQuery_(j, query); });
+    var active = allActiveJobs.filter(function(j){ return prodMatchesQuery_(j, query) && prodMatchesJoiner_(j, joinerFilter); });
+    var completed = allCompletedJobs.filter(function(j){ return prodMatchesQuery_(j, query) && prodMatchesJoiner_(j, joinerFilter); });
 
     if(!active.length && !completed.length){
-      container.innerHTML = '<div class="empty">No jobs in production match &ldquo;'+esc(rawQuery)+'&rdquo;.</div>';
+      container.innerHTML = '<div class="empty">No jobs in production match your current search/filter.</div>';
       return;
     }
 
@@ -3526,7 +3614,7 @@
             '<div class="prod-board">'+buckets[g.key].map(function(j){ return prodCardHtml_(j, canTick); }).join('')+'</div>' +
           '</div>';
         }).join('')
-      : '<div class="empty">No jobs currently in production'+(query?' match that search':'')+' — see Completed below.</div>';
+      : '<div class="empty">No jobs currently in production'+(hasFilters?' match that search/filter':'')+' — see Completed below.</div>';
 
     // Completed jobs no longer vanish once every checklist item is ticked — they stay
     // here to reference if needed. Collapsed by default since it's reference material,
@@ -3536,7 +3624,7 @@
     // next refresh, since Code.gs's updateJobProgress_ already clears completedAt the
     // moment any section goes back to not-done.
     var completedHtml = completed.length
-      ? '<details class="prod-group prod-group-completed"'+(query?' open':'')+'>' +
+      ? '<details class="prod-group prod-group-completed"'+(hasFilters?' open':'')+'>' +
           '<summary class="prod-group-head good"><h2>Completed</h2><span class="count">'+plural_(completed.length,'job')+'</span></summary>' +
           '<div class="prod-board">'+completed.slice().sort(function(a,b){ return (b.completedAt||'').localeCompare(a.completedAt||''); }).map(function(j){ return prodCompletedCardHtml_(j, canTick); }).join('')+'</div>' +
         '</details>'
@@ -3547,6 +3635,22 @@
 
     wireProdChecklists_(container, canTick);
     wireProdDrawingUploads_(container);
+    wireProdCardToggles_(container);
+  }
+
+  // Tapping a card's collapsed summary opens/closes that card in place — see
+  // expandedProdJobs_ above. Scoped to .prod-card-summary so taps on checkboxes, note
+  // inputs, drawing links etc. inside an already-open card never toggle it shut.
+  function wireProdCardToggles_(container){
+    container.querySelectorAll('.prod-card-summary').forEach(function(sum){
+      sum.addEventListener('click', function(){
+        var card = sum.closest('.prod-card');
+        var id = card.dataset.job;
+        if(expandedProdJobs_[id]) delete expandedProdJobs_[id];
+        else expandedProdJobs_[id] = true;
+        renderProductionBoard_();
+      });
+    });
   }
 
   function wireProdChecklists_(container, canTick){
@@ -3771,6 +3875,8 @@
 
   var prodSearchInput_ = document.getElementById('prod-search');
   if(prodSearchInput_) prodSearchInput_.addEventListener('input', function(){ renderProductionBoard_(); });
+  var prodJoinerFilterInput_ = document.getElementById('prod-joiner-filter');
+  if(prodJoinerFilterInput_) prodJoinerFilterInput_.addEventListener('change', function(){ renderProductionBoard_(); });
 
   // ================= USERS ADMIN (Admin tab, owner only) =================
   var usersCache = [];
@@ -6080,6 +6186,10 @@
     apiRead('getSettings').then(function(res){
       if(res && res.settings) settings = res.settings;
       if(view==='settings') fillSettingsForm();
+      // getJobs (loadProduction) and getSettings race at boot — if the jobs came back
+      // first, the joiner filter would have rendered with an empty list, so refresh it
+      // once settings land.
+      if(view==='production') populateProdJoinerFilter_();
     }).catch(function(){});
     var allowed = allowedModesFor_(currentUser);
     showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : (allowed[0]==='admin' ? 'admin' : 'new')));
