@@ -2907,6 +2907,18 @@
         } else if(res && res.exists){
           sageChecked = true;
           statusEl.innerHTML = '<span style="color:var(--good);">Found in Sage: '+esc(res.sageCustomerName)+'.</span>';
+        } else if(res && res.candidates && res.candidates.length){
+          // No exact match, but Sage has one or more customers whose name starts with
+          // or contains what was typed — Shane: "match on 'starts with' or 'contains',
+          // and show a pick list when more than one customer matches". Clicking a
+          // candidate fills in its exact Sage name and re-checks, which then hits the
+          // ordinary exact-match path — nothing downstream needs to know this ever
+          // went through a fuzzy match.
+          sageChecked = false;
+          statusEl.innerHTML = '<div style="color:var(--warn);margin-bottom:4px;">No exact match for "'+esc(name)+'" — did you mean:</div>' +
+            res.candidates.map(function(c){
+              return '<button type="button" class="btn small sage-candidate-pick" data-name="'+esc(c.name)+'" style="margin:2px 6px 2px 0;">'+esc(c.name)+'</button>';
+            }).join('');
         } else {
           sageChecked = false;
           statusEl.innerHTML = '<span style="color:var(--warn);">'+esc((res && res.reason) || 'Not found in Sage.')+'</span>';
@@ -2916,6 +2928,14 @@
         sageChecked = false;
         statusEl.innerHTML = '<span style="color:var(--warn);">'+esc(backendErrorMsg(e))+'</span>';
       });
+    });
+    statusEl.addEventListener('click', function(e){
+      var pickBtn = e.target.closest('.sage-candidate-pick');
+      if(!pickBtn) return;
+      customerInput.value = pickBtn.dataset.name;
+      sageChecked = false; sageCheckFailed = false;
+      renderPicks();
+      panel.querySelector('#btn-sage-check-customer').click();
     });
 
     panel.querySelector('#btn-sage-send-cancel').addEventListener('click', closeSageSendModal_);
