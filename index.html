@@ -826,6 +826,39 @@
   function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
   function money(n){ return 'R ' + (Number(n)||0).toLocaleString('en-ZA', {minimumFractionDigits:2, maximumFractionDigits:2}); }
   function normalize(s){ return (s||'').toString().toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+  // Expands a fused cross-section like "5x20mm" into two separate dimension tokens
+  // ("5mm 20mm") before matching — a drawing description written as "5x20mm flatbar" and
+  // a rate card entry named "Flat Bar - 20mm x 5mm" describe the exact same thing, but
+  // matchRateWithConfidence_ below compares whole words, so "5x20mm" (one fused token)
+  // never equals "20mm" or "5mm" (the rate name's separate tokens) and the line matches
+  // nothing at all. Applied to both sides in matchRateWithConfidence_, so an
+  // already-spaced name like "20mm x 5mm" just passes through unchanged (nothing to fuse).
+  function expandFusedDimensions_(s){
+    return (s||'').toString().replace(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|cm|m)\b/gi, function(_, a, b, unit){
+      return a+unit+' '+b+unit;
+    });
+  }
+  // Same idea as expandFusedDimensions_ above, for common trade terms that are two
+  // separate words in Natalie's rate card (and in normal usage) but can come back fused
+  // from a drawing reading — "flat bar", not "flatbar" — which otherwise silently fails
+  // to match "Flat Bar - 20mm x 5mm" even once the dimensions themselves line up. The
+  // EXTRACTION_PROMPT now asks for the spaced form directly, but this covers it at the
+  // matching layer too — for anything already saved before that change, or if a reading
+  // slips through fused anyway. Extend this list if another fused term turns up.
+  var FUSED_TERM_SPLITS_ = [
+    [/\bflatbar\b/g, 'flat bar'],
+    [/\broundbar\b/g, 'round bar'],
+    [/\bboxsection\b/g, 'box section'],
+    [/\bangleiron\b/g, 'angle iron'],
+    [/\bmildsteel\b/g, 'mild steel'],
+    [/\bsquaretube\b/g, 'square tube'],
+    [/\broundtube\b/g, 'round tube']
+  ];
+  function expandFusedTerms_(s){
+    var out = (s||'').toString();
+    FUSED_TERM_SPLITS_.forEach(function(pair){ out = out.replace(pair[0], pair[1]); });
+    return out;
+  }
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function el(html){ var t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
 
@@ -1350,11 +1383,11 @@
       var bySku = pool.find(function(r){ return r.sku && String(r.sku).trim().toLowerCase()===String(sku).trim().toLowerCase(); });
       if(bySku) return { rate: bySku, exact: true, score: 100 };
     }
-    var n = normalize(description);
+    var n = normalize(expandFusedTerms_(expandFusedDimensions_(description)));
     if(!n) return null;
     var best=null, bestScore=0;
     pool.forEach(function(r){
-      var rn = normalize(r.name);
+      var rn = normalize(expandFusedTerms_(expandFusedDimensions_(r.name)));
       if(!rn) return;
       var score=0;
       if(n===rn) score=100;
