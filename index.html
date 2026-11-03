@@ -2206,6 +2206,16 @@
   function buildBomFromExtraction_(data){
     data = data || {};
     var lineItems = [];
+    // A hard physical ceiling for any single volume-priced material line: whatever's
+    // inside a product can never need more solid timber than the product's own outer
+    // envelope, since panels are thin shells within that envelope, not solid blocks
+    // filling it — so a material whose computed volume exceeds the WHOLE product's own
+    // bounding-box volume is never a real reading, it's a units/scale error (e.g. a
+    // drawing's dimensions misread at the wrong scale, or against its printed "SCALE
+    // 1:N" note rather than taken as-is). Checked per material below rather than
+    // silently costing a line that can run to hundreds of thousands of Rand on a typo.
+    var od = data.overallDimensions || {};
+    var overallVolM3 = (od.width_mm && od.height_mm && od.depth_mm) ? (od.width_mm*od.height_mm*od.depth_mm)/1e9 : null;
     // Tallied across hardware and materials below, to auto-fill the Labour line's hours
     // at the end of this function — see the comment above that line for the formula.
     var totalHardwareQty = 0;
@@ -2453,6 +2463,10 @@
         // rather than just losing some cosmetic precision.
         if(hasAny && !missingThickness && total>0) qty = Math.round(total*100000)/100000;
         else { sizeMissing = true; volumeFlags.push('Couldn\'t work out a volume for "'+m.description+'" (rate card unit: '+(basisRate.unit||'m³')+') — enter the actual quantity by hand.'); }
+        if(qty>0 && overallVolM3 && qty>overallVolM3){
+          volumeFlags.push('"'+m.description+'" came out to '+Math.round(qty*1000)/1000+' m³ — more solid timber than the whole product\'s own overall size ('+Math.round(overallVolM3*1000)/1000+' m³) could physically hold, which means a dimension was almost certainly read at the wrong scale (e.g. mm misread as cm, or against the drawing\'s printed "SCALE 1:N" note instead of taken as-is). Zeroed out rather than costing a line that could be wildly wrong — check this material\'s component sizes against the drawing and enter the quantity by hand.');
+          qty = 0; sizeMissing = true;
+        }
       } else {
         if(hasAny && total>0) qty = Math.round(total*10000)/10000; // 4dp (0.0001 m² = 1 cm²) — same reasoning as above
         else { sizeMissing = true; volumeFlags.push('No size given for "'+m.description+'" — enter the quantity by hand.'); }
