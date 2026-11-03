@@ -1195,7 +1195,14 @@
   // (see <datalist id="unit-list">), so that's the one this actually needs to catch —
   // kept as its own function so a future spelling (e.g. "lm") has one place to add.
   function isLinearUnit_(u){
-    var n = (u||'').toString().toLowerCase().replace(/[^a-z0-9]/g,'');
+    // The superscript "²" (U+00B2) isn't a-z0-9, so without converting it first it just
+    // gets silently stripped by the filter below — collapsing "m²" (an AREA unit) down to
+    // plain "m", which then matches the n==='m' check below as if it were a LINEAR unit.
+    // That's exactly the bug that made an area-priced "16mm Oak Veneer SF" material (and
+    // any other area-priced flat material) get costed on length alone instead of
+    // length×width — isVolumeUnit_ above already guards against the equivalent mistake
+    // for "³", this needed the same guard for "²".
+    var n = (u||'').toString().toLowerCase().replace(/²/g,'2').replace(/[^a-z0-9]/g,'');
     return n==='m' || n==='lm' || n==='linearm' || n==='linearmetre' || n==='linearmetres' || n==='linearmeter' || n==='linearmeters';
   }
   // Classifies a material as needing a wood finish (oil/varnish) or a steel finish
