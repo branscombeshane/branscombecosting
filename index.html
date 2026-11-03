@@ -501,6 +501,17 @@
   <div class="modal-panel modal-panel-plain" id="sage-send-modal-body"></div>
 </div>
 
+<!-- Approve-&-create-job-card used to render inline inside every unapproved quote's own
+     editor panel, always visible the moment that panel was open — on a job you were just
+     checking the BOM of, not approving yet, it sat there taking up space and inviting a
+     stray click. As a modal it only ever appears once "Approve & create job card" (in the
+     editor's own action row, next to Save changes/Re-analyze drawing/Delete this quote)
+     is actually clicked — see openApproveModal_. One shared modal, filled fresh for
+     whichever job card's button was clicked, same pattern as sage-send-panel above. -->
+<div id="approve-modal" class="modal-overlay" hidden>
+  <div class="modal-panel modal-panel-plain" id="approve-modal-body"></div>
+</div>
+
 <div class="sidebar">
   <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
   <!-- Factory-ops box: Costing and Payroll are "accordion" modes — their own screens
@@ -3281,6 +3292,7 @@
   function closeAnyModal_(overlay){
     if(overlay.id === 'prod-drawing-modal') closeProdDrawingModal_();
     else if(overlay.id === 'sage-send-panel') closeSageSendModal_();
+    else if(overlay.id === 'approve-modal') closeApproveModal_();
     else overlay.hidden = true;
   }
   document.addEventListener('click', function(e){
@@ -3326,6 +3338,10 @@
     function renderEditor(){
       var parts = jobEditorParts(editingJob);
       var hasDrawing = editingJob.drawingFileUrls && editingJob.drawingFileUrls.length;
+      // Same visibility rule the inline Approve box used to gate itself with — approving
+      // is Natalie-only (Shane confirmed), so no point showing the button to anyone else,
+      // and only while the quote isn't already approved.
+      var canApprove = !editingJob.approved && currentUser && currentUser.role==='owner';
       detail.innerHTML =
         '<div class="label" style="margin-bottom:8px;">Drawing details</div>' + parts.header +
         '<div class="label" style="margin:18px 0 8px;">Bill of materials</div>' + parts.bom +
@@ -3333,13 +3349,19 @@
         '<div class="field-row" style="margin-top:16px;">' +
           '<button class="btn primary btn-save-existing">Save changes</button>' +
           (hasDrawing ? '<button class="btn ghost btn-reanalyze">Re-analyze drawing</button>' : '') +
+          (canApprove ? '<button class="btn primary btn-open-approve">Approve &amp; create job card</button>' : '') +
           '<button class="btn danger job-del">Delete this quote</button>' +
           '<span class="save-confirm sub" style="align-self:center;"></span>' +
         '</div>' +
         '<div class="reanalyze-status"></div>' +
         productionStatusHtml_(editingJob);
       wireJobEditor(editingJob, detail, { rerender: renderEditor });
-      wireApproveBox_(detail, editingJob);
+      if(canApprove){
+        detail.querySelector('.btn-open-approve').addEventListener('click', function(e){
+          e.stopPropagation();
+          openApproveModal_(editingJob);
+        });
+      }
       detail.querySelector('.btn-save-existing').addEventListener('click', function(e){
         e.stopPropagation();
         apiWrite('updateJob', { job: editingJob }).then(function(){
@@ -3490,10 +3512,11 @@
     '</div>';
   }
 
-  // Read-only summary shown once a quote IS approved, or (owner only) the Approve box
-  // itself on one that isn't yet. Non-owners see nothing extra on an unapproved quote —
-  // approving is Natalie-only (Shane confirmed), so there's no point showing a box
-  // whichever other role can't actually submit.
+  // Read-only summary shown once a quote IS approved. An unapproved quote gets nothing
+  // here any more — the Approve box itself now only appears in its own modal (see
+  // openApproveModal_), opened from the "Approve & create job card" button in the
+  // editor's action row, which is itself only shown to the owner role (approving is
+  // Natalie-only, Shane confirmed) — same visibility rule as before, just moved.
   function productionStatusHtml_(j){
     if(j.approved){
       var cls = weeksColorClass_(j.manufactureWeeks);
@@ -3502,12 +3525,24 @@
       var assigned = j.assignedJoiner ? (' Assigned to '+esc(j.assignedJoiner)+'.') : '';
       return '<div class="sub" style="margin-top:14px;">Approved by '+esc(j.approvedBy||'')+' on '+esc((j.approvedAt||'').slice(0,10))+' — '+when+'.'+assigned+' See the Production board to track progress.</div>';
     }
-    if(currentUser && currentUser.role==='owner'){
-      var sug = suggestProductionSections_(j);
-      sug._id = j.id;
-      return renderApproveBox_(sug);
-    }
     return '';
+  }
+
+  // Fills the shared approve-modal with this job's own Approve box (fresh suggestions
+  // from its current BOM) and opens it. editingJob is the job card's own local working
+  // copy (same object wireJobEditor/the save/reanalyze buttons already use), captured by
+  // the caller's closure — this function itself holds no per-job state of its own.
+  function openApproveModal_(editingJob){
+    var sug = suggestProductionSections_(editingJob);
+    sug._id = editingJob.id;
+    var body = document.getElementById('approve-modal-body');
+    body.innerHTML = renderApproveBox_(sug);
+    wireApproveBox_(body, editingJob);
+    document.getElementById('approve-modal').hidden = false;
+  }
+  function closeApproveModal_(){
+    document.getElementById('approve-modal').hidden = true;
+    document.getElementById('approve-modal-body').innerHTML = '';
   }
 
   // Wires the Approve box's controls, if it's actually present (it only renders for an
@@ -3600,14 +3635,14 @@
               } else {
                 statusEl.textContent = 'Approved, but the Sage invoice push failed: ' + ((result && result.error) || 'something went wrong.');
               }
-              setTimeout(loadQuotes, result && result.dryRun ? 2200 : 1400);
+              setTimeout(function(){ loadQuotes(); closeApproveModal_(); }, result && result.dryRun ? 2200 : 1400);
             }).catch(function(){
               statusEl.textContent = 'Approved, but couldn\'t reach the backend to push the Sage invoice.';
-              setTimeout(loadQuotes, 1400);
+              setTimeout(function(){ loadQuotes(); closeApproveModal_(); }, 1400);
             });
           } else {
             statusEl.textContent = 'Approved.';
-            setTimeout(loadQuotes, 600);
+            setTimeout(function(){ loadQuotes(); closeApproveModal_(); }, 600);
           }
         } else if(res && res.error==='forbidden'){
           statusEl.textContent = 'Only Natalie\'s login can approve a quote.';
