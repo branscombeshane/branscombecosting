@@ -512,6 +512,14 @@
   <div class="modal-panel modal-panel-plain" id="approve-modal-body"></div>
 </div>
 
+<!-- Catalogue picker — for a recurring product (Shane: "products that are catalogue
+     products that get made frequently... we don't need to do an extraction of a drawing
+     every time"), lets a new quote start straight from a saved BOM template instead of
+     uploading a drawing. Same shared-modal pattern as sage-send-panel/approve-modal. -->
+<div id="catalogue-pick-modal" class="modal-overlay" hidden>
+  <div class="modal-panel modal-panel-plain" id="catalogue-pick-modal-body"></div>
+</div>
+
 <div class="sidebar">
   <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
   <!-- Factory-ops box: Costing and Payroll are "accordion" modes — their own screens
@@ -569,6 +577,7 @@
     <div class="panel" id="upload-panel">
       <h2>1 · Drawing or photo</h2>
       <div id="upload-area"></div>
+      <div class="sub" style="margin-top:10px;">Making one of your regular products? <button type="button" class="btn ghost" id="btn-catalogue-pick" style="margin-left:4px;">Pick from the catalogue instead</button></div>
       <div id="thumbs" class="thumbs"></div>
       <div class="field" style="margin-top:14px;">
         <span class="label">Notes about this drawing (optional)</span>
@@ -826,6 +835,7 @@
   var API_URL = "https://script.google.com/macros/s/AKfycbxQ0cNotDUzckTVzm8fZgUPaEyZpBlVCCI4Plbuh1pIy1X8bGO0McJCckkX_xGtASPM3w/exec";
 
   var rates = [];
+  var catalogue = [];
   var jobsCache = [];
   var pdfImages = [];
   var job = null;
@@ -1452,6 +1462,16 @@
     }).catch(function(e){
       if(view==='rates') document.getElementById('rates-tables').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
     });
+  }
+
+  // Catalogue — saved reusable products (see CATALOGUE_SHEET's own comment in Code.gs).
+  // Loaded once at boot, same as rates/settings; re-fetched whenever the New Quote
+  // catalogue picker is opened so a product saved moments ago (from another tab, or
+  // just now in this one) always shows up.
+  function loadCatalogue(){
+    return apiRead('getCatalogue').then(function(res){
+      catalogue = (res && res.catalogue) || [];
+    }).catch(function(){});
   }
 
   // One row of a rate card table. Description is always editable (wording drifts —
@@ -2734,6 +2754,38 @@
     renderReview();
   }
 
+  // Starts a new quote from a saved Catalogue product instead of a drawing — no
+  // extraction, no AI call. `item.lineItems` is stored PER SINGLE UNIT (see
+  // CATALOGUE_HEADERS's own comment in Code.gs), so every line's qty just multiplies up
+  // by the order quantity typed in the picker. Same `job`/renderReview() path as
+  // startJobFromExtraction above, so everything downstream (editing, saving, approving)
+  // works identically regardless of where the quote started from.
+  function startJobFromCatalogue_(item, qty){
+    qty = Math.max(1, Number(qty)||1);
+    var scaledItems = (item.lineItems||[]).map(function(li){
+      var copy = {};
+      for(var k in li) copy[k] = li[k];
+      copy.id = uid();
+      copy.qty = Math.round((Number(li.qty)||0) * qty * 100000) / 100000;
+      return copy;
+    });
+    job = {
+      customerName: '',
+      notes: '',
+      drawingNumber: null,
+      productName: item.productName || 'Untitled quote',
+      revision: null,
+      quantity: qty,
+      colour: item.colour || null,
+      overallDimensions: item.overallDimensions || {},
+      sourceFileName: null,
+      flags: [],
+      lineItems: scaledItems,
+      markupPct: (item.markupPct != null ? item.markupPct : settings.markupPct)
+    };
+    renderReview();
+  }
+
   // Wastage % inflates the quantity actually charged for, to cover offcuts,
   // over-cutting, breakage etc. — the qty column stays the net amount the job
   // needs, and wastage is layered on top only when working out cost.
@@ -2864,7 +2916,7 @@
 
     var header =
       '<div class="field-row">' +
-        '<div class="field"><span class="label">Customer</span><input type="text" data-f="customerName" value="'+esc(j.customerName||'')+'"></div>' +
+        '<div class="field"><span class="label">Customer *</span><input type="text" data-f="customerName" value="'+esc(j.customerName||'')+'"></div>' +
         '<div class="field"><span class="label">Product</span><input type="text" data-f="productName" value="'+esc(j.productName||'')+'"></div>' +
         '<div class="field"><span class="label">Drawing no.</span><input type="text" data-f="drawingNumber" value="'+esc(j.drawingNumber||'')+'"></div>' +
         '<div class="field"><span class="label">Quantity</span><input type="number" data-f="quantity" min="1" value="'+(j.quantity||1)+'"></div>' +
@@ -3046,6 +3098,17 @@
   }
 
   function saveJob(){
+    var el = document.querySelector('#review-panel .save-confirm');
+    // Customer is required before a quote can be saved — Shane: force a customer name
+    // to be entered before creating a new quote. Checked here (not just left to the
+    // Sage-send step) so it's caught right when the quote is first created, not only
+    // once someone later tries to bundle it off to Sage.
+    if(!(job.customerName||'').trim()){
+      if(el) el.innerHTML = '<span style="color:var(--warn);">Enter a customer name above before saving.</span>';
+      var custInput = document.querySelector('#review-panel [data-f="customerName"]');
+      if(custInput) custInput.focus();
+      return;
+    }
     var newId = 'j_' + uid();
     var payload = {
       id: newId, customerName: job.customerName, notes: job.notes,
@@ -3068,7 +3131,6 @@
     var detailImagesPromise = pdfImages.length
       ? Promise.all([].concat.apply([], pdfImages.map(function(p){ return p.detailBlobs||[]; })).map(blobToBase64))
       : Promise.resolve([]);
-    var el = document.querySelector('#review-panel .save-confirm');
     if(el) el.textContent = 'Saving…';
     Promise.all([imagesPromise, detailImagesPromise]).then(function(both){
       return apiWrite('addJob', { job: payload, images: both[0], detailImages: both[1] });
@@ -3309,6 +3371,68 @@
     });
   }
 
+  function renderCataloguePickPanel_(){
+    var panel = document.getElementById('catalogue-pick-modal-body');
+    function draw(){
+      var query = normalize((panel.querySelector('#catalogue-pick-search')||{}).value || '');
+      var items = catalogue.filter(function(c){ return !query || normalize(c.productName||'').indexOf(query)!==-1; });
+      panel.innerHTML =
+        '<div class="approve-box">' +
+          '<div class="label" style="margin-bottom:6px;">Pick from the catalogue</div>' +
+          '<div class="sub" style="margin-bottom:10px;">Starts a new quote from a saved product\'s bill of materials, scaled to the quantity you set — no drawing needed.</div>' +
+          '<div class="field" style="max-width:320px;"><input type="text" id="catalogue-pick-search" placeholder="Search products…" value="'+esc((panel.querySelector('#catalogue-pick-search')||{}).value||'')+'"></div>' +
+          '<div id="catalogue-pick-list" style="margin-top:12px;">' +
+            (!items.length ? '<div class="sub">'+(catalogue.length ? 'No catalogue products match that search.' : 'No catalogue products saved yet — open a saved quote and click "Save as catalogue product".')+'</div>' :
+              items.map(function(c){
+                return '<div class="field-row" style="align-items:center;margin-top:8px;" data-id="'+esc(c.id)+'">' +
+                  '<div style="flex:1;min-width:160px;">'+esc(c.productName||'Untitled')+(c.colour?' <span class="sub">'+esc(c.colour)+'</span>':'')+'</div>' +
+                  '<div class="field" style="max-width:90px;"><span class="label">Qty</span><input type="number" class="catalogue-pick-qty" min="1" value="1"></div>' +
+                  '<button type="button" class="btn small catalogue-pick-use">Use this</button>' +
+                  '<button type="button" class="btn small ghost catalogue-pick-remove" style="color:var(--warn);">Remove</button>' +
+                '</div>';
+              }).join('')) +
+          '</div>' +
+          '<div class="field-row" style="margin-top:14px;"><button type="button" class="btn ghost" id="btn-catalogue-pick-cancel">Cancel</button></div>' +
+        '</div>';
+      panel.querySelector('#catalogue-pick-search').addEventListener('input', draw);
+      panel.querySelector('#catalogue-pick-search').focus();
+      panel.querySelector('#btn-catalogue-pick-cancel').addEventListener('click', closeCataloguePickModal_);
+      panel.querySelectorAll('.catalogue-pick-use').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var row = btn.closest('[data-id]');
+          var item = catalogue.find(function(c){ return c.id===row.dataset.id; });
+          if(!item) return;
+          var qty = Number(row.querySelector('.catalogue-pick-qty').value) || 1;
+          closeCataloguePickModal_();
+          startJobFromCatalogue_(item, qty);
+        });
+      });
+      panel.querySelectorAll('.catalogue-pick-remove').forEach(function(btn){
+        btn.addEventListener('click', function(){
+          var row = btn.closest('[data-id]');
+          var item = catalogue.find(function(c){ return c.id===row.dataset.id; });
+          if(!item) return;
+          if(!confirm('Remove "'+item.productName+'" from the catalogue? This won\'t affect any quotes already made from it.')) return;
+          apiWrite('deleteCatalogueItem', { id: item.id }).then(function(){
+            catalogue = catalogue.filter(function(c){ return c.id!==item.id; });
+            draw();
+          });
+        });
+      });
+    }
+    draw();
+  }
+
+  function openCataloguePickModal_(){
+    document.getElementById('catalogue-pick-modal').hidden = false;
+    loadCatalogue().then(renderCataloguePickPanel_);
+  }
+  function closeCataloguePickModal_(){
+    document.getElementById('catalogue-pick-modal').hidden = true;
+    document.getElementById('catalogue-pick-modal-body').innerHTML = '';
+  }
+  document.getElementById('btn-catalogue-pick').addEventListener('click', openCataloguePickModal_);
+
   function openSageSendModal_(){
     document.getElementById('sage-send-panel').hidden = false;
     renderSageSendPanel_();
@@ -3326,6 +3450,7 @@
     if(overlay.id === 'prod-drawing-modal') closeProdDrawingModal_();
     else if(overlay.id === 'sage-send-panel') closeSageSendModal_();
     else if(overlay.id === 'approve-modal') closeApproveModal_();
+    else if(overlay.id === 'catalogue-pick-modal') closeCataloguePickModal_();
     else overlay.hidden = true;
   }
   document.addEventListener('click', function(e){
@@ -3382,6 +3507,7 @@
         '<div class="field-row" style="margin-top:16px;">' +
           '<button class="btn primary btn-save-existing">Save changes</button>' +
           (canApprove ? '<button class="btn primary btn-open-approve">Approve &amp; create job card</button>' : '') +
+          '<button class="btn ghost btn-save-catalogue">Save as catalogue product</button>' +
           '<button class="btn danger job-del">Delete this quote</button>' +
           (hasDrawing ? '<button class="btn ghost btn-reanalyze">Re-analyze drawing</button>' : '') +
           '<span class="save-confirm sub" style="align-self:center;"></span>' +
@@ -3407,6 +3533,37 @@
       detail.querySelector('.job-del').addEventListener('click', function(e){
         e.stopPropagation();
         if(confirm('Delete this quote?')) apiWrite('deleteJob', { id:j.id }).then(function(){ setTimeout(loadQuotes, 900); });
+      });
+      // Saves this quote's current BOM as a reusable Catalogue product — Shane: "products
+      // that are catalogue products that get made frequently... we don't need to do an
+      // extraction of a drawing every time". Line-item quantities are stored PER SINGLE
+      // UNIT (divided by this quote's own quantity) so starting a future quote from it at
+      // any order quantity is a plain multiply — see startJobFromCatalogue_. Saving to the
+      // catalogue never changes or removes this quote itself.
+      detail.querySelector('.btn-save-catalogue').addEventListener('click', function(e){
+        e.stopPropagation();
+        var name = prompt('Save this as a catalogue product — name it:', editingJob.productName||'');
+        if(name===null) return;
+        name = name.trim();
+        if(!name) return;
+        var baseQty = Math.max(1, Number(editingJob.quantity)||1);
+        var perUnitItems = (editingJob.lineItems||[]).map(function(li){
+          var copy = {};
+          for(var k in li) copy[k] = li[k];
+          copy.qty = Math.round((Number(li.qty)||0) / baseQty * 100000) / 100000;
+          return copy;
+        });
+        var statusEl = detail.querySelector('.save-confirm');
+        if(statusEl) statusEl.textContent = 'Saving to catalogue…';
+        apiWrite('addCatalogueItem', { item: {
+          productName: name, colour: editingJob.colour||'', overallDimensions: editingJob.overallDimensions||{},
+          lineItems: perUnitItems, markupPct: editingJob.markupPct, savedFromJobId: editingJob.id||''
+        }, byName: currentUser ? currentUser.name : '' }).then(function(){
+          if(statusEl) statusEl.textContent = 'Saved to the catalogue — pick it from New Quote next time.';
+          loadCatalogue();
+        }).catch(function(err){
+          if(statusEl) statusEl.textContent = 'Could not save to catalogue ('+((err&&err.message)||'try again')+').';
+        });
       });
       // Re-reads the quote's own saved drawing (from Drive) and rebuilds only the bill
       // of materials / warnings against the CURRENT rate card — the point being you've
@@ -6532,6 +6689,7 @@
     applyRolePermissions_();
     renderUploadArea();
     loadRates();
+    loadCatalogue();
     apiRead('getSettings').then(function(res){
       if(res && res.settings) settings = res.settings;
       if(view==='settings') fillSettingsForm();
