@@ -2050,11 +2050,13 @@
   }
 
   // A dense multi-view sheet (A3 or bigger — several views plus a title block crammed
-  // onto one page, like a "Top/Front/Side/Callout" set) rendered at the normal ~1600px
-  // overview width leaves each individual view only a few hundred pixels across, with
-  // dimension text too small for the model to read reliably — not a prompt-wording
-  // problem, a legibility one: Claude's vision input gets resized down to ~1568px on its
-  // longest edge regardless, so a single image can only ever carry so much genuinely
+  // onto one page, like a "Top/Front/Side/Callout" set) still leaves each individual view
+  // only a small fraction of the overview image's width, with dimension text too small
+  // for the model to read reliably, no matter how big renderPage's own overview render
+  // is — not a prompt-wording problem, a legibility one: Claude's vision input gets
+  // resized down to ~1568px on its longest edge regardless, so a single image (even the
+  // ~3000px-wide overview renderPage now produces for a person's benefit) can only ever
+  // carry so much genuinely
   // readable detail no matter how it's worded. PDFs are vector, so rendering BIGGER
   // stays crisp (no blur the way upscaling a photo would) — this renders the page a
   // second time at a much higher true resolution and slices it into 4 heavily-
@@ -2089,7 +2091,16 @@
   function renderPage(pdf, num){
     return pdf.getPage(num).then(function(page){
       var vp0 = page.getViewport({ scale:1 });
-      var scale = Math.min(2, 1600/vp0.width);
+      // This is the image a PERSON actually opens via "View drawing" — a plain PNG link,
+      // saved to Drive at exactly this resolution with no server-side resizing (see
+      // saveDrawingImages_). The old 1600px-wide cap was sized around what Claude's own
+      // vision input needs, which (per renderPageDetailCrops_ above) turned out to be too
+      // low for a dense multi-view sheet even for THAT purpose — but it was never raised
+      // for a human zooming into the saved drawing to actually read a dimension figure,
+      // which has no 1568px resize ceiling forcing it small the way Claude's vision input
+      // does. PDFs are vector, so rendering bigger costs nothing but file size (and PNG
+      // compresses line-art drawings well) — no blur the way upscaling a photo would have.
+      var scale = Math.min(3, 3000/vp0.width);
       var viewport = page.getViewport({ scale: scale });
       var canvas = document.createElement('canvas');
       canvas.width = viewport.width; canvas.height = viewport.height;
