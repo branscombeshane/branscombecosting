@@ -1396,10 +1396,23 @@
     }
     var n = normalize(expandFusedTerms_(expandFusedDimensions_(description)));
     if(!n) return null;
+    // A shape word like "round bar" is ambiguous across materials — it means a steel rod
+    // on one rate card entry and could just as easily describe a turned solid-oak dowel
+    // or handle on another, so it alone is never enough to decide a match (see
+    // materialFinishCategory_'s own comment). Checked once here, against whichever
+    // candidate is being scored below: when BOTH sides have a clear wood-or-steel
+    // identity and they disagree, that candidate is disqualified outright — skipped
+    // before scoring, not merely scored lower — so an oak handle can never fuzzy-match a
+    // steel round bar rate just because both descriptions happen to say "round".
+    var descCat = materialFinishCategory_(description, null, null);
     var best=null, bestScore=0;
     pool.forEach(function(r){
       var rn = normalize(expandFusedTerms_(expandFusedDimensions_(r.name)));
       if(!rn) return;
+      if(descCat){
+        var rateCat = materialFinishCategory_(r.name, null, r.subcategory);
+        if(rateCat && rateCat!==descCat) return;
+      }
       var score=0;
       if(n===rn) score=100;
       else if(n.indexOf(rn)!==-1 || rn.indexOf(n)!==-1) score=60;
@@ -2702,7 +2715,14 @@
       sourceFileName: currentFileName,
       flags: bom.flags,
       lineItems: bom.lineItems,
-      markupPct: settings.markupPct
+      markupPct: settings.markupPct,
+      // Client-side only (never sent to apiWrite/the backend, never saved to the sheet) —
+      // the model's own JSON reply before buildBomFromExtraction_ turned it into line
+      // items, kept around purely so a wrong-looking BOM number can be traced back to
+      // exactly what the model actually said (component sizes/quantities/shapes) rather
+      // than guessed backward from the final costed figure. See the "Raw AI reading"
+      // disclosure in jobEditorParts below.
+      _rawExtraction: data
     };
     renderReview();
   }
@@ -2856,7 +2876,13 @@
       // per-component/per-hardware/base-hours rates in Settings can be tuned to match
       // Natalie's shop specifically rather than staying a generic placeholder forever.
       (j.id ? '<div class="field" style="margin-top:14px;max-width:280px;"><span class="label">Actual hours worked (once built)</span><input type="number" data-f="actualHours" step="0.5" min="0" value="'+(j.actualHours!=null? j.actualHours : '')+'" placeholder="e.g. 14"></div>' : '') +
-      (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '');
+      (flagsHtml ? '<div style="margin-top:14px;">'+flagsHtml+'</div>' : '') +
+      // Client-side only (see _rawExtraction's own comment in startJobFromExtraction) —
+      // not saved, so this is blank again after a page reload until the drawing is
+      // (re-)extracted again in this same session. Collapsed by default so it never gets
+      // in the way; exists purely so a BOM number that looks wrong can be checked against
+      // exactly what the model actually said, instead of guessed backward from the total.
+      (j._rawExtraction ? '<details style="margin-top:14px;"><summary class="sub" style="cursor:pointer;">Raw AI reading (debug)</summary><pre style="white-space:pre-wrap;font-size:11px;background:var(--paper);border:1px solid var(--line);padding:10px;margin-top:6px;max-height:320px;overflow:auto;">'+esc(JSON.stringify(j._rawExtraction, null, 2))+'</pre></details>' : '');
 
     var bom =
       '<div class="table-wrap"><table class="bom-table"><thead><tr>' +
@@ -3403,6 +3429,7 @@
             var bom = buildBomFromExtraction_(data || {});
             editingJob.lineItems = bom.lineItems;
             editingJob.flags = bom.flags;
+            editingJob._rawExtraction = data || {}; // see the field's own comment in startJobFromExtraction
             renderEditor();
           }).catch(function(err){
             reanalyzeBtn.disabled = false;
