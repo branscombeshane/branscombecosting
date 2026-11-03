@@ -3167,7 +3167,7 @@
         '<div class="label" style="margin-bottom:6px;">Send quotes to Sage</div>' +
         '<div class="sub" style="margin-bottom:10px;">Pick the customer, then which of their not-yet-sent quotes to bundle into one Sage quote — one Sage line per quote selected.</div>' +
         '<div class="field-row">' +
-          '<div class="field" style="min-width:240px;"><span class="label">Customer (must match Sage exactly)</span>' +
+          '<div class="field" style="min-width:240px;"><span class="label">Customer (exact or partial name — we\'ll offer close matches)</span>' +
             '<input type="text" id="sage-send-customer" list="sage-send-customer-list" placeholder="e.g. Acme Interiors">' +
             '<datalist id="sage-send-customer-list">'+Object.keys(names).map(function(n){ return '<option value="'+esc(n)+'">'; }).join('')+'</datalist>' +
           '</div>' +
