@@ -612,7 +612,7 @@
       <div class="add-rate-form">
         <div class="field"><span class="label">Description</span><input type="text" id="rf-name" placeholder="e.g. 16mm Melamine"></div>
         <div class="field" style="min-width:110px;"><span class="label">Category</span>
-          <select id="rf-category"><option value="material">Material</option><option value="hardware">Hardware</option><option value="finish">Finish</option><option value="labour">Labour</option></select>
+          <select id="rf-category"><option value="material">Material</option><option value="hardware">Hardware</option><option value="finish">Finish</option><option value="labour">Labour</option><option value="packaging">Packaging</option></select>
         </div>
         <div class="field" style="min-width:140px;"><span class="label">Subcategory</span><select id="rf-subcategory"></select></div>
         <div class="field" style="min-width:90px;"><span class="label">Unit</span><input type="text" id="rf-unit" placeholder="m², each, hour" list="unit-list"></div>
@@ -1507,7 +1507,7 @@
 
   function renderRatesTables(){
     var wrap = document.getElementById('rates-tables');
-    var cats = [['material','Materials'],['hardware','Hardware'],['finish','Finish'],['labour','Labour']];
+    var cats = [['material','Materials'],['hardware','Hardware'],['finish','Finish'],['labour','Labour'],['packaging','Packaging']];
     var html = '';
     cats.forEach(function(c){
       var isMaterial = c[0]==='material';
@@ -2278,6 +2278,12 @@
     // silently costing a line that can run to hundreds of thousands of Rand on a typo.
     var od = data.overallDimensions || {};
     var overallVolM3 = (od.width_mm && od.height_mm && od.depth_mm) ? (od.width_mm*od.height_mm*od.depth_mm)/1e9 : null;
+    // Total exterior surface area of the product's own bounding box (both ends of all
+    // three axis pairs) — Shane: "packaging... calculated by the total exterior m2 as we
+    // wrap all the units in bubble wrap/tape". Used below for the auto Packaging line.
+    var overallSurfaceAreaM2 = (od.width_mm && od.height_mm && od.depth_mm)
+      ? 2*(od.width_mm*od.height_mm + od.width_mm*od.depth_mm + od.height_mm*od.depth_mm)/1e6
+      : null;
     // Tallied across hardware and materials below, to auto-fill the Labour line's hours
     // at the end of this function — see the comment above that line for the formula.
     var totalHardwareQty = 0;
@@ -2701,6 +2707,26 @@
       });
     }
 
+    // Every product gets wrapped before it leaves the workshop, so a Packaging line is
+    // standard on every quote too (same reasoning as Finish above) — Shane: "add a
+    // packaging cost to every quote... calculated by the total exterior m2 as we wrap
+    // all the units in bubble wrap/tape". Costed on the product's own bounding-box
+    // surface area (overallSurfaceAreaM2, computed above from the drawing's overall
+    // dimensions), auto-matched against a "Packaging" rate card entry the same way
+    // Labour is matched just below — add that rate card entry once (Settings > Rate
+    // Card > Packaging) and it links automatically on every future quote from here on.
+    if(overallSurfaceAreaM2!=null){
+      var packagingMatch = matchRate('packaging','Packaging',null);
+      lineItems.push({
+        id: uid(), type:'packaging', description: packagingMatch ? packagingMatch.name : 'Packaging (bubble wrap & tape)',
+        qty: Math.round(overallSurfaceAreaM2*100)/100, unit:'m²',
+        wastagePct: Number(settings.defaultWastePct)||0,
+        rateId: packagingMatch ? packagingMatch.id : null, unitPrice: packagingMatch ? Number(packagingMatch.price)||0 : 0
+      });
+    } else {
+      volumeFlags.push('No Packaging line was added — the drawing\'s overall dimensions weren\'t complete enough to work out the exterior surface area to wrap. Add one by hand once the size is known.');
+    }
+
     // Auto-estimates labour hours from the bill of materials just built, rather than
     // leaving the Labour line at 0 for someone to fill in from scratch every time:
     //   (every component counted above × minutes per component, from Settings)
@@ -2796,10 +2822,10 @@
 
   function computeTotals(j){
     function byType(t){ return (j.lineItems||[]).filter(function(i){ return i.type===t; }).reduce(function(s,i){ return s + lineTotal(i); }, 0); }
-    var materials = byType('material'), hardware = byType('hardware'), finish = byType('finish'), labour = byType('labour');
-    var subtotal = materials+hardware+finish+labour;
+    var materials = byType('material'), hardware = byType('hardware'), finish = byType('finish'), labour = byType('labour'), packaging = byType('packaging');
+    var subtotal = materials+hardware+finish+labour+packaging;
     var markup = subtotal * (Number(j.markupPct)||0) / 100;
-    return { materials:materials, hardware:hardware, finish:finish, labour:labour, subtotal:subtotal, markup:markup, total:subtotal+markup };
+    return { materials:materials, hardware:hardware, finish:finish, labour:labour, packaging:packaging, subtotal:subtotal, markup:markup, total:subtotal+markup };
   }
 
   // Turns a raw match score (see matchRateWithConfidence_) into something a person can
@@ -2890,6 +2916,7 @@
       '<div class="stat"><span class="label">Hardware</span><div class="value num">'+money(t.hardware)+'</div></div>' +
       '<div class="stat"><span class="label">Finish</span><div class="value num">'+money(t.finish)+'</div></div>' +
       '<div class="stat"><span class="label">Labour</span><div class="value num">'+money(t.labour)+'</div></div>' +
+      '<div class="stat"><span class="label">Packaging</span><div class="value num">'+money(t.packaging)+'</div></div>' +
       '<div class="stat"><span class="label">Subtotal</span><div class="value num">'+money(t.subtotal)+'</div></div>' +
       '<div class="stat"><span class="label">Markup</span><div class="value num">'+money(t.markup)+'</div></div>' +
       '<div class="stat total"><span class="label">Total (sell price, excl. VAT)</span><div class="value num">'+money(t.total)+'</div></div>';
@@ -2902,7 +2929,7 @@
     var t = computeTotals(j);
     var dims = j.overallDimensions || {};
     var dimStr = [dims.width_mm, dims.height_mm, dims.depth_mm].filter(function(v){return v!=null;}).join(' × ');
-    var groups = [['material','Materials'],['hardware','Hardware'],['finish','Finish'],['labour','Labour']];
+    var groups = [['material','Materials'],['hardware','Hardware'],['finish','Finish'],['labour','Labour'],['packaging','Packaging']];
 
     var rowsHtml = '';
     groups.forEach(function(g){
@@ -2949,7 +2976,7 @@
         '<th class="cell-waste num">Waste %</th><th class="cell-rate num">Rate (excl. VAT)</th>' +
         '<th class="cell-total num">Line total (excl. VAT)</th><th class="cell-ratecard">Rate card</th><th class="cell-actions"></th>' +
       '</tr></thead><tbody class="li-body">'+rowsHtml+'</tbody></table></div>' +
-      '<div class="field-row"><button class="btn add-line" data-type="material">+ Material line</button><button class="btn add-line" data-type="hardware">+ Hardware line</button><button class="btn add-line" data-type="finish">+ Finish line</button><button class="btn add-line" data-type="labour">+ Labour line</button></div>';
+      '<div class="field-row"><button class="btn add-line" data-type="material">+ Material line</button><button class="btn add-line" data-type="hardware">+ Hardware line</button><button class="btn add-line" data-type="finish">+ Finish line</button><button class="btn add-line" data-type="labour">+ Labour line</button><button class="btn add-line" data-type="packaging">+ Packaging line</button></div>';
 
     var markup =
       '<div class="field-row"><div class="field"><span class="label">Markup %</span><input type="number" class="markup-input" step="1" min="0" value="'+j.markupPct+'"></div></div>' +
@@ -3070,7 +3097,7 @@
         e.stopPropagation();
         var type = btn.dataset.type;
         var defUnit = type==='hardware' ? 'each' : (type==='labour' ? 'hour' : 'm²');
-        var defWaste = (type==='material' || type==='finish') ? (Number(settings.defaultWastePct)||0) : 0;
+        var defWaste = (type==='material' || type==='finish' || type==='packaging') ? (Number(settings.defaultWastePct)||0) : 0;
         jobRef.lineItems = jobRef.lineItems || [];
         jobRef.lineItems.push({ id: uid(), type:type, description:'', qty:0, unit:defUnit, wastagePct:defWaste, rateId:null, unitPrice:0 });
         rerender();
