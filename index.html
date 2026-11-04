@@ -3292,6 +3292,16 @@
     var hintEl = panel.querySelector('#sage-send-hint');
     var sageChecked = false;
     var sageCheckFailed = false;
+    // The exact Sage customer name "Check Sage" resolved to — DELIBERATELY kept separate
+    // from customerInput.value. The input field doubles as the search key into Batten's
+    // OWN not-yet-sent quotes (renderPicks, below), which are filed under whatever name
+    // was typed when each quote was created ("Studio 19", say) — that's very often not
+    // the exact legal name Sage has on file ("Studio MCW 19 (Pty) Ltd"). Overwriting the
+    // input with the resolved Sage name used to re-filter that list against a name none
+    // of Batten's own quotes actually have, wiping the very picks list someone just
+    // ticked. Sending to Sage always uses resolvedSageName once set; the input field
+    // never has to match it.
+    var resolvedSageName = null;
 
     // Always keeps a plain-language reason under the Send button for why it's greyed
     // out — "Check Sage" must succeed before sending is allowed (confirms the customer
@@ -3330,6 +3340,7 @@
     customerInput.addEventListener('input', function(){
       sageChecked = false;
       sageCheckFailed = false;
+      resolvedSageName = null;
       statusEl.textContent = '';
       renderPicks();
     });
@@ -3343,45 +3354,64 @@
       withBusy_(btn, apiRead('sageCheckCustomer', { customerName: name }), 'Checking…').then(function(res){
         if(res && res.error){
           sageChecked = false;
+          resolvedSageName = null;
           statusEl.innerHTML = '<span style="color:var(--warn);">'+esc(res.error)+'</span>';
         } else if(res && res.exists){
           sageChecked = true;
-          statusEl.innerHTML = '<span style="color:var(--good);">Found in Sage: '+esc(res.sageCustomerName)+'.</span>';
+          resolvedSageName = res.sageCustomerName;
+          // Only mention the resolved name when it's not just an echo of what was typed —
+          // an exact match needs no extra explanation, a fuzzy one (e.g. "Studio 19" ->
+          // "Studio MCW 19 (Pty) Ltd") is worth spelling out, since that's the name the
+          // quotes below will actually be sent to Sage under.
+          var sameAsTyped = normalize(res.sageCustomerName) === normalize(name);
+          statusEl.innerHTML = '<span style="color:var(--good);">Found in Sage'+(sameAsTyped ? '' : ': '+esc(res.sageCustomerName))+'.</span>';
         } else if(res && res.candidates && res.candidates.length){
           // No exact match, but Sage has one or more customers whose name starts with
           // or contains what was typed — Shane: "match on 'starts with' or 'contains',
           // and show a pick list when more than one customer matches". Clicking a
-          // candidate fills in its exact Sage name and re-checks, which then hits the
-          // ordinary exact-match path — nothing downstream needs to know this ever
-          // went through a fuzzy match.
+          // candidate resolves straight to it (see the click handler below) — it does
+          // NOT overwrite the typed customer name, which is still what's filtering
+          // Batten's own not-yet-sent quotes just below; only resolvedSageName changes.
           sageChecked = false;
+          resolvedSageName = null;
           statusEl.innerHTML = '<div style="color:var(--warn);margin-bottom:4px;">No exact match for "'+esc(name)+'" — did you mean:</div>' +
             res.candidates.map(function(c){
-              return '<button type="button" class="btn small sage-candidate-pick" data-name="'+esc(c.name)+'" style="margin:2px 6px 2px 0;">'+esc(c.name)+'</button>';
-            }).join('');
+              return '<button type="button" class="btn small sage-candidate-pick" data-name="'+esc(c.name)+'">'+esc(c.name)+'</button>';
+            }).join(' ');
         } else {
           sageChecked = false;
+          resolvedSageName = null;
           statusEl.innerHTML = '<span style="color:var(--warn);">'+esc((res && res.reason) || 'Not found in Sage.')+'</span>';
         }
         updateSendEnabled();
       }).catch(function(e){
         sageChecked = false;
+        resolvedSageName = null;
         statusEl.innerHTML = '<span style="color:var(--warn);">'+esc(backendErrorMsg(e))+'</span>';
       });
     });
     statusEl.addEventListener('click', function(e){
       var pickBtn = e.target.closest('.sage-candidate-pick');
       if(!pickBtn) return;
-      customerInput.value = pickBtn.dataset.name;
-      sageChecked = false; sageCheckFailed = false;
-      renderPicks();
-      panel.querySelector('#btn-sage-check-customer').click();
+      // Resolves straight to the picked candidate — deliberately leaves customerInput
+      // (and so the quote-picks list below it) untouched; see resolvedSageName's own
+      // comment for why conflating the two broke sending to a customer whose Sage name
+      // doesn't match what Batten's own quotes are filed under.
+      sageChecked = true;
+      sageCheckFailed = false;
+      resolvedSageName = pickBtn.dataset.name;
+      statusEl.innerHTML = '<span style="color:var(--good);">Found in Sage: '+esc(resolvedSageName)+'.</span>';
+      updateSendEnabled();
     });
 
     panel.querySelector('#btn-sage-send-cancel').addEventListener('click', closeSageSendModal_);
 
     sendBtn.addEventListener('click', function(){
-      var name = customerInput.value.trim();
+      // Always the exact Sage name "Check Sage" resolved to, NOT whatever's currently
+      // typed in the box — see resolvedSageName's own comment above. sendBtn is only
+      // ever enabled once sageChecked is true, so this should always be set by now; the
+      // typed value is kept only as a last-resort fallback, never the normal path.
+      var name = resolvedSageName || customerInput.value.trim();
       var rows = [];
       Array.prototype.forEach.call(picksEl.querySelectorAll('.sage-pick:checked'), function(cb){
         var id = cb.closest('label').dataset.id;
