@@ -3257,10 +3257,9 @@
 
   function renderSageSendPanel_(){
     var panel = document.getElementById('sage-send-modal-body');
-    // Every customer name any quote currently has — including already-sent ones, since a
-    // customer whose quotes are all already on Sage can still be picked to re-send one
-    // (see renderPicks below) — as typing suggestions only; doesn't mean they're actually
-    // in Sage, "Check Sage" below is what matters.
+    // Every customer name any quote currently has, as typing suggestions for the
+    // "Customer to send under" field below — doesn't mean they're actually in Sage or
+    // spelled the way Sage has them, "Check Sage" is what actually matters.
     var names = {};
     (jobsCache||[]).forEach(function(j){
       if(!j.example && j.customerName) names[j.customerName] = true;
@@ -3268,16 +3267,20 @@
     panel.innerHTML =
       '<div class="approve-box">' +
         '<div class="label" style="margin-bottom:6px;">Send quotes to Sage</div>' +
-        '<div class="sub" style="margin-bottom:10px;">Pick the customer, then which of their not-yet-sent quotes to bundle into one Sage quote — one Sage line per quote selected.</div>' +
-        '<div class="field-row">' +
-          '<div class="field" style="min-width:240px;"><span class="label">Customer (exact or partial name — we\'ll offer close matches)</span>' +
+        '<div class="sub" style="margin-bottom:10px;">Tick which quotes to bundle into one Sage quote — one Sage line per quote ticked — then pick which Sage customer to send them under. Ticking is independent of how each quote\'s own Customer field is spelled, so near-duplicate spellings (e.g. "Studio 19" and "Studio19") can still be sent together in one go.</div>' +
+        '<div class="field-row" style="align-items:flex-end;">' +
+          '<div class="field" style="min-width:240px;flex:1;"><span class="label">Filter quotes</span><input type="text" id="sage-pick-filter" placeholder="Search by customer, product or drawing no…"></div>' +
+          '<label class="chk-label" style="padding-bottom:9px;"><input type="checkbox" id="sage-pick-show-sent"> Include already-sent quotes</label>' +
+        '</div>' +
+        '<div id="sage-quote-picks" style="margin-top:10px;"></div>' +
+        '<div class="field-row" style="margin-top:18px;">' +
+          '<div class="field" style="min-width:240px;"><span class="label">Customer to send under (exact or partial name — we\'ll offer close matches)</span>' +
             '<input type="text" id="sage-send-customer" list="sage-send-customer-list" placeholder="e.g. Acme Interiors">' +
             '<datalist id="sage-send-customer-list">'+Object.keys(names).map(function(n){ return '<option value="'+esc(n)+'">'; }).join('')+'</datalist>' +
           '</div>' +
           '<button type="button" class="btn" id="btn-sage-check-customer" style="align-self:flex-end;">Check Sage</button>' +
         '</div>' +
         '<div id="sage-customer-status" class="sub" style="margin-top:6px;"></div>' +
-        '<div id="sage-quote-picks" style="margin-top:12px;"></div>' +
         '<div class="field-row" style="margin-top:12px;align-items:center;">' +
           '<button type="button" class="btn primary" id="btn-sage-send-confirm" disabled>Send to Sage</button>' +
           '<button type="button" class="btn ghost" id="btn-sage-send-cancel">Cancel</button>' +
@@ -3286,6 +3289,8 @@
         '</div>' +
       '</div>';
 
+    var filterInput = panel.querySelector('#sage-pick-filter');
+    var showSentChk = panel.querySelector('#sage-pick-show-sent');
     var customerInput = panel.querySelector('#sage-send-customer');
     var picksEl = panel.querySelector('#sage-quote-picks');
     var statusEl = panel.querySelector('#sage-customer-status');
@@ -3294,70 +3299,88 @@
     var hintEl = panel.querySelector('#sage-send-hint');
     var sageChecked = false;
     var sageCheckFailed = false;
-    // The exact Sage customer name "Check Sage" resolved to — DELIBERATELY kept separate
-    // from customerInput.value. The input field doubles as the search key into Batten's
-    // OWN not-yet-sent quotes (renderPicks, below), which are filed under whatever name
-    // was typed when each quote was created ("Studio 19", say) — that's very often not
-    // the exact legal name Sage has on file ("Studio MCW 19 (Pty) Ltd"). Overwriting the
-    // input with the resolved Sage name used to re-filter that list against a name none
-    // of Batten's own quotes actually have, wiping the very picks list someone just
-    // ticked. Sending to Sage always uses resolvedSageName once set; the input field
-    // never has to match it.
+    // The exact Sage customer name "Check Sage" resolved to. Entirely independent of
+    // which quotes are ticked below — Shane: "a better way to send to sage is have a
+    // tick box next to each quote and then choose the customer because if the customer
+    // name is studio 19 in 1 quote and studio19 in another they dont group together".
+    // Quote selection is now pure manual ticking (see renderQuotePicks_ below), with no
+    // string-matching involved at all, so a naming inconsistency on Batten's own side can
+    // never stop two quotes being bundled into the same Sage send.
     var resolvedSageName = null;
 
     // Always keeps a plain-language reason under the Send button for why it's greyed
-    // out — "Check Sage" must succeed before sending is allowed (confirms the customer
-    // actually exists in Sage), separately from at least one quote being ticked.
+    // out — ticking at least one quote and a successful "Check Sage" are both required,
+    // independently of each other.
     function updateSendEnabled(){
-      var anyPick = !!picksEl.querySelector('.sage-pick');
       var anyChecked = !!picksEl.querySelector('.sage-pick:checked');
       sendBtn.disabled = !(sageChecked && anyChecked);
-      if(!customerInput.value.trim()){ hintEl.textContent = 'Type a customer name, then click "Check Sage".'; }
+      if(!anyChecked){ hintEl.textContent = 'Tick at least one quote above to send.'; }
+      else if(!customerInput.value.trim()){ hintEl.textContent = 'Type the customer to send under, then click "Check Sage".'; }
       else if(sageCheckFailed){ hintEl.textContent = 'Fix the customer name above and click "Check Sage" again.'; }
       else if(!sageChecked){ hintEl.textContent = 'Click "Check Sage" above before you can send.'; }
-      else if(anyPick && !anyChecked){ hintEl.textContent = 'Select at least one quote below to send.'; }
       else { hintEl.textContent = ''; }
     }
-    function renderPicks(){
-      var name = customerInput.value.trim().toLowerCase();
-      sendBtn.disabled = true;
-      if(!name){ picksEl.innerHTML = ''; updateSendEnabled(); return; }
-      // Already-sent quotes are now included too (Shane: "once sent to sage wont allow
-      // to resend") — not-yet-sent ones sorted first since that's the common case, with
-      // already-sent ones after. Each push always creates a brand new Sage Quote
-      // (sageQuotePushCore_ never updates one in place), so re-sending a quote here
-      // doesn't touch or remove the old Sage Quote it already went out on — it just
-      // points this Batten quote at the new one.
-      var matches = (jobsCache||[]).filter(function(j){
-        return !j.example && String(j.customerName||'').trim().toLowerCase()===name;
-      }).sort(function(a,b){ return (a.sageQuoteId?1:0) - (b.sageQuoteId?1:0); });
-      if(!matches.length){ picksEl.innerHTML = '<div class="sub">No quotes for this customer yet.</div>'; updateSendEnabled(); return; }
-      picksEl.innerHTML = matches.map(function(j){
+    // Lists every quote (any customer, not just one) with its own checkbox — ticking is
+    // the only thing that decides what bundles together, never a Customer-field string
+    // match. Grouped under its own (literal, unmodified) Customer-field text purely as a
+    // visual aid — sorted alphabetically, so two near-identical spellings of the same
+    // customer land in adjacent groups where they're easy to spot and tick together,
+    // rather than being silently merged or silently kept apart by exact string equality.
+    function renderQuotePicks_(){
+      var query = normalize(filterInput.value||'');
+      var showSent = !!showSentChk.checked;
+      var list = (jobsCache||[]).filter(function(j){
+        if(j.example) return false;
+        if(!showSent && j.sageQuoteId) return false;
+        if(!query) return true;
+        return normalize(j.customerName||'').indexOf(query)!==-1 ||
+          normalize(j.productName||'').indexOf(query)!==-1 ||
+          normalize(j.drawingNumber||'').indexOf(query)!==-1;
+      }).sort(function(a,b){
+        var an=(a.customerName||'').toLowerCase(), bn=(b.customerName||'').toLowerCase();
+        if(an!==bn) return an<bn?-1:1;
+        return (b.createdAt||'').localeCompare(a.createdAt||'');
+      });
+      if(!list.length){
+        picksEl.innerHTML = '<div class="sub">'+((query||showSent) ? 'No quotes match.' : 'No not-yet-sent quotes yet.')+'</div>';
+        updateSendEnabled();
+        return;
+      }
+      var html = '', lastCustomer = null;
+      list.forEach(function(j){
+        var cust = j.customerName || '(no customer set)';
+        if(cust!==lastCustomer){
+          html += '<div class="subgroup-row" style="margin-top:10px;">'+esc(cust)+'</div>';
+          lastCustomer = cust;
+        }
         var t = computeTotals(j);
         var alreadySent = !!j.sageQuoteId;
-        // Left UNCHECKED by default when already sent — unlike a fresh quote — so the
-        // ordinary "send what's new" workflow never accidentally re-sends something
-        // already on Sage; ticking it is a deliberate choice to re-send.
-        return '<label class="chk-label" style="display:flex;margin-top:6px;" data-id="'+esc(j.id)+'">' +
-          '<input type="checkbox" class="sage-pick"'+(alreadySent?'':' checked')+'> ' +
+        // Always unchecked by default now — this list spans every customer at once, so
+        // auto-ticking everything (safe back when it was pre-filtered to one customer's
+        // unsent quotes) would risk silently bundling someone else's quote in too.
+        html += '<label class="chk-label" style="display:flex;margin-top:4px;" data-id="'+esc(j.id)+'">' +
+          '<input type="checkbox" class="sage-pick"> ' +
           esc(j.productName||'Untitled')+(j.drawingNumber?' ('+esc(j.drawingNumber)+')':'') +
           (alreadySent ? ' <span class="chip" style="margin-left:6px;" title="Sending again creates a NEW Sage quote — the old one stays as it was">already sent — '+esc(j.sageQuoteNumber||j.sageQuoteId)+'</span>' : '') +
           ' <span class="num" style="margin-left:auto;">'+money(t.total)+'</span>' +
         '</label>';
-      }).join('');
+      });
+      picksEl.innerHTML = html;
       updateSendEnabled();
     }
     picksEl.addEventListener('change', function(e){
       if(e.target.classList.contains('sage-pick')) updateSendEnabled();
     });
+    filterInput.addEventListener('input', renderQuotePicks_);
+    showSentChk.addEventListener('change', renderQuotePicks_);
     customerInput.addEventListener('input', function(){
       sageChecked = false;
       sageCheckFailed = false;
       resolvedSageName = null;
       statusEl.textContent = '';
-      renderPicks();
+      updateSendEnabled();
     });
-    renderPicks();
+    renderQuotePicks_();
 
     panel.querySelector('#btn-sage-check-customer').addEventListener('click', function(e){
       var btn = e.currentTarget;
@@ -3382,9 +3405,8 @@
           // No exact match, but Sage has one or more customers whose name starts with
           // or contains what was typed — Shane: "match on 'starts with' or 'contains',
           // and show a pick list when more than one customer matches". Clicking a
-          // candidate resolves straight to it (see the click handler below) — it does
-          // NOT overwrite the typed customer name, which is still what's filtering
-          // Batten's own not-yet-sent quotes just below; only resolvedSageName changes.
+          // candidate resolves straight to it (see the click handler below) rather than
+          // overwriting the typed name and re-checking — only resolvedSageName changes.
           sageChecked = false;
           resolvedSageName = null;
           statusEl.innerHTML = '<div style="color:var(--warn);margin-bottom:4px;">No exact match for "'+esc(name)+'" — did you mean:</div>' +
@@ -3407,9 +3429,7 @@
       var pickBtn = e.target.closest('.sage-candidate-pick');
       if(!pickBtn) return;
       // Resolves straight to the picked candidate — deliberately leaves customerInput
-      // (and so the quote-picks list below it) untouched; see resolvedSageName's own
-      // comment for why conflating the two broke sending to a customer whose Sage name
-      // doesn't match what Batten's own quotes are filed under.
+      // untouched; only resolvedSageName (what's actually sent) changes.
       sageChecked = true;
       sageCheckFailed = false;
       resolvedSageName = pickBtn.dataset.name;
