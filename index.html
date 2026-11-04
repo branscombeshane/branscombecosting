@@ -3257,11 +3257,13 @@
 
   function renderSageSendPanel_(){
     var panel = document.getElementById('sage-send-modal-body');
-    // Every customer name any not-yet-sent quote currently has, as typing suggestions
-    // only — doesn't mean they're actually in Sage, "Check Sage" below is what matters.
+    // Every customer name any quote currently has — including already-sent ones, since a
+    // customer whose quotes are all already on Sage can still be picked to re-send one
+    // (see renderPicks below) — as typing suggestions only; doesn't mean they're actually
+    // in Sage, "Check Sage" below is what matters.
     var names = {};
     (jobsCache||[]).forEach(function(j){
-      if(!j.example && j.customerName && !j.sageQuoteId) names[j.customerName] = true;
+      if(!j.example && j.customerName) names[j.customerName] = true;
     });
     panel.innerHTML =
       '<div class="approve-box">' +
@@ -3320,15 +3322,26 @@
       var name = customerInput.value.trim().toLowerCase();
       sendBtn.disabled = true;
       if(!name){ picksEl.innerHTML = ''; updateSendEnabled(); return; }
+      // Already-sent quotes are now included too (Shane: "once sent to sage wont allow
+      // to resend") — not-yet-sent ones sorted first since that's the common case, with
+      // already-sent ones after. Each push always creates a brand new Sage Quote
+      // (sageQuotePushCore_ never updates one in place), so re-sending a quote here
+      // doesn't touch or remove the old Sage Quote it already went out on — it just
+      // points this Batten quote at the new one.
       var matches = (jobsCache||[]).filter(function(j){
-        return !j.example && !j.sageQuoteId && String(j.customerName||'').trim().toLowerCase()===name;
-      });
-      if(!matches.length){ picksEl.innerHTML = '<div class="sub">No not-yet-sent quotes for this customer.</div>'; updateSendEnabled(); return; }
+        return !j.example && String(j.customerName||'').trim().toLowerCase()===name;
+      }).sort(function(a,b){ return (a.sageQuoteId?1:0) - (b.sageQuoteId?1:0); });
+      if(!matches.length){ picksEl.innerHTML = '<div class="sub">No quotes for this customer yet.</div>'; updateSendEnabled(); return; }
       picksEl.innerHTML = matches.map(function(j){
         var t = computeTotals(j);
+        var alreadySent = !!j.sageQuoteId;
+        // Left UNCHECKED by default when already sent — unlike a fresh quote — so the
+        // ordinary "send what's new" workflow never accidentally re-sends something
+        // already on Sage; ticking it is a deliberate choice to re-send.
         return '<label class="chk-label" style="display:flex;margin-top:6px;" data-id="'+esc(j.id)+'">' +
-          '<input type="checkbox" class="sage-pick" checked> ' +
+          '<input type="checkbox" class="sage-pick"'+(alreadySent?'':' checked')+'> ' +
           esc(j.productName||'Untitled')+(j.drawingNumber?' ('+esc(j.drawingNumber)+')':'') +
+          (alreadySent ? ' <span class="chip" style="margin-left:6px;" title="Sending again creates a NEW Sage quote — the old one stays as it was">already sent — '+esc(j.sageQuoteNumber||j.sageQuoteId)+'</span>' : '') +
           ' <span class="num" style="margin-left:auto;">'+money(t.total)+'</span>' +
         '</label>';
       }).join('');
