@@ -1411,7 +1411,19 @@
       var bySku = pool.find(function(r){ return r.sku && String(r.sku).trim().toLowerCase()===String(sku).trim().toLowerCase(); });
       if(bySku) return { rate: bySku, exact: true, score: 100 };
     }
-    var n = normalize(expandFusedTerms_(expandFusedDimensions_(description)));
+    // Strip any parenthetical aside ("(drawn as 16mm Oak Veneer)", "(was MDF)"...) out of
+    // the description BEFORE matching — belt-and-braces alongside EXTRACTION_PROMPT's own
+    // instruction to keep "description" clean. Natalie: a carcass drawn as oak veneer but
+    // noted to quote as solid oak still matched the veneer (area-priced) rate card entry,
+    // because the model had echoed "...(drawn as 16mm oak veneer carcass...)" straight into
+    // the description — the word "veneer" sitting right there in parentheses was real text
+    // to the matcher, pulling it back onto the superseded veneer rate (and, with it, back
+    // onto area-based costing) even though the override itself had been correctly applied
+    // everywhere else. Stripping parentheses here means a future wording slip in the
+    // model's own reply can't reintroduce this — this app's own rate names never rely on
+    // parenthetical text to be found, so nothing legitimate is lost by ignoring it.
+    var matchableDescription = (description||'').toString().replace(/\([^)]*\)/g, ' ');
+    var n = normalize(expandFusedTerms_(expandFusedDimensions_(matchableDescription)));
     if(!n) return null;
     // A shape word like "round bar" is ambiguous across materials — it means a steel rod
     // on one rate card entry and could just as easily describe a turned solid-oak dowel
@@ -1421,7 +1433,7 @@
     // identity and they disagree, that candidate is disqualified outright — skipped
     // before scoring, not merely scored lower — so an oak handle can never fuzzy-match a
     // steel round bar rate just because both descriptions happen to say "round".
-    var descCat = materialFinishCategory_(description, null, null);
+    var descCat = materialFinishCategory_(matchableDescription, null, null);
     var best=null, bestScore=0;
     pool.forEach(function(r){
       var rn = normalize(expandFusedTerms_(expandFusedDimensions_(r.name)));
