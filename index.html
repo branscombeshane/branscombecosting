@@ -907,8 +907,14 @@
         try{ window[cbName] = undefined; delete window[cbName]; }catch(e){}
         if(script.parentNode) script.parentNode.removeChild(script);
       }
-      window[cbName] = function(data){ if(done) return; done=true; cleanup(); resolve(data); };
+      window[cbName] = function(data){
+        if(done) return; done=true; cleanup();
+        if(data && data.error==='session_expired' && !KIOSK_MODE){ handleSessionExpired_(); }
+        resolve(data);
+      };
       var qs = 'action=' + encodeURIComponent(action) + '&callback=' + cbName;
+      var sess = currentSessionToken_();
+      if(sess) qs += '&session=' + encodeURIComponent(sess);
       Object.keys(params||{}).forEach(function(k){ qs += '&' + encodeURIComponent(k) + '=' + encodeURIComponent(params[k]); });
       script.src = API_URL + '?' + qs;
       script.onerror = function(){ if(done) return; done=true; cleanup(); reject(new Error('script_error')); };
@@ -930,6 +936,8 @@
     form.method = 'POST'; form.action = API_URL; form.target = 'batten-hidden-frame'; form.style.display = 'none';
     function field(name, value){ var i=document.createElement('input'); i.type='hidden'; i.name=name; i.value=value; form.appendChild(i); }
     field('action', action);
+    var sess = currentSessionToken_();
+    if(sess) field('session', sess);
     field('payload', JSON.stringify(payload||{}));
     document.body.appendChild(form);
     form.submit();
@@ -1001,11 +1009,51 @@
   // each of Natalie/Izak/Tselane/Angy has their own username/password and role). Same
   // POST-then-poll pattern as drawing extraction, since a hidden-iframe form POST can't
   // read a response back directly. The logged-in user {id,name,role} is cached in
-  // localStorage (SESSION_KEY) purely so a page refresh doesn't force a re-login — the
-  // server still re-validates that id's role on every sensitive call (approveJob,
-  // updateJobProgress, addUser/updateUser), so a stale/tampered localStorage value can't
-  // grant anything it doesn't actually have server-side.
+  // localStorage (SESSION_KEY) so a page refresh doesn't force a re-login. That stored
+  // user carries the server-issued sessionToken, which apiRead/apiWrite send as `session`
+  // on every call; Code.gs checks it (and the user's permissions, fresh from the Users
+  // sheet) before answering anything — see its "Sessions & request authorization"
+  // section. An expired/revoked session comes back as error 'session_expired', which
+  // sends the page back to the login screen (handleSessionExpired_).
   var SESSION_KEY = 'batten_session';
+  var SESSION_EXPIRED_FLAG = 'batten_session_expired';
+  function currentSessionToken_(){ return (currentUser && currentUser.sessionToken) || ''; }
+  var sessionExpiredHandled_ = false;
+  function handleSessionExpired_(){
+    if(sessionExpiredHandled_) return;
+    sessionExpiredHandled_ = true;
+    setAuthed(null);
+    try{ sessionStorage.setItem(SESSION_EXPIRED_FLAG, '1'); }catch(e){}
+    location.reload();
+  }
+  // Login tokens (the key the login result is fetched back under, which now carries the
+  // session token) use the browser's cryptographic RNG rather than uid()'s Math.random.
+  function secureToken_(){
+    try{
+      var a = new Uint8Array(24); window.crypto.getRandomValues(a);
+      return Array.prototype.map.call(a, function(b){ return ('0'+b.toString(16)).slice(-2); }).join('');
+    }catch(e){ return uid() + uid(); }
+  }
+  // Re-checks the session when the tab comes back into view after a while, so a session
+  // that expired overnight is caught before the next fire-and-forget write (whose
+  // refusal the page can't see) rather than after. Also picks up permission changes.
+  var lastSessionCheck_ = 0;
+  function checkSession_(){
+    if(!currentUser || !apiConfigured()) return;
+    lastSessionCheck_ = Date.now();
+    apiRead('whoami').then(function(res){
+      // An old backend (pre-sessions) answers 'Unknown action' — nothing to do then.
+      if(res && res.ok && res.user){
+        var changed = JSON.stringify(res.user.permissions||[]) !== JSON.stringify(currentUser.permissions||[]) || res.user.role !== currentUser.role;
+        currentUser.name = res.user.name; currentUser.role = res.user.role; currentUser.permissions = res.user.permissions;
+        setAuthed(currentUser);
+        if(changed) applyRolePermissions_();
+      }
+    }).catch(function(){});
+  }
+  document.addEventListener('visibilitychange', function(){
+    if(document.visibilityState==='visible' && Date.now() - lastSessionCheck_ > 5*60*1000) checkSession_();
+  });
   var currentUser = null; // {id, name, role} once logged in — see applyRolePermissions_
   function isAuthed(){ try{ return !!localStorage.getItem(SESSION_KEY); }catch(e){ return false; } }
   function loadStoredUser(){
@@ -1086,7 +1134,7 @@
     }
     var username = document.getElementById('login-username').value;
     var pwd = document.getElementById('login-password').value;
-    var token = uid();
+    var token = secureToken_();
     submitBtn.disabled = true;
     statusEl.innerHTML = '<div class="status-msg thinking">Checking…</div>';
     apiWrite('login', { username: username, password: pwd, token: token }).then(function(){
@@ -1096,6 +1144,7 @@
       if(res && res.ok){
         currentUser = res.user;
         setAuthed(currentUser);
+        lastSessionCheck_ = Date.now();
         document.getElementById('login-password').value = '';
         statusEl.innerHTML = '';
         document.body.classList.add('authed');
@@ -1110,8 +1159,11 @@
   });
 
   document.getElementById('btn-logout').addEventListener('click', function(){
-    setAuthed(null);
-    location.reload();
+    var reload = function(){ setAuthed(null); location.reload(); };
+    if(currentSessionToken_()){
+      var t = setTimeout(reload, 3000);
+      apiRead('logout').then(function(){ clearTimeout(t); reload(); }, function(){ clearTimeout(t); reload(); });
+    } else reload();
   });
 
   // Costing and Payroll are accordion modes — picking one expands its own screen list
@@ -6835,7 +6887,12 @@
     }).join('');
   }
   function loadKioskOnce_(){
-    apiRead('getJobs').then(function(res){ renderKiosk_((res && res.jobs) || []); }).catch(function(){});
+    // getFloorBoard is the kiosk's own login-free action (production fields only, no
+    // pricing). Falls back to getJobs only against an older backend that predates it.
+    apiRead('getFloorBoard').then(function(res){
+      if(res && res.error && /^Unknown action/.test(res.error)) return apiRead('getJobs');
+      return res;
+    }).then(function(res){ if(res && res.jobs) renderKiosk_(res.jobs); }).catch(function(){});
   }
   function initKiosk_(){
     loadKioskOnce_();
@@ -6849,7 +6906,14 @@
     currentUser = loadStoredUser();
     document.body.classList.add('authed');
     boot();
+    checkSession_();
   } else {
+    try{
+      if(sessionStorage.getItem(SESSION_EXPIRED_FLAG)){
+        sessionStorage.removeItem(SESSION_EXPIRED_FLAG);
+        document.getElementById('login-status').innerHTML = '<div class="status-msg error">Your login has expired — please log in again.</div>';
+      }
+    }catch(e){}
     document.getElementById('login-username').focus();
   }
 
