@@ -520,6 +520,25 @@
   <div class="modal-panel modal-panel-plain" id="catalogue-pick-modal-body"></div>
 </div>
 
+<!-- Change your own password — any logged-in user, from the sidebar link under their
+     name. See openChangePasswordModal_ / Code.gs changeOwnPassword_. -->
+<div id="change-pw-modal" class="modal-overlay" hidden>
+  <div class="modal-panel" style="max-width:420px;">
+    <div class="sheet-head" style="margin-bottom:12px;"><h1 style="font-size:18px;">Change password</h1></div>
+    <form id="change-pw-form" autocomplete="on">
+      <input type="text" autocomplete="username" id="change-pw-username" hidden>
+      <div class="field"><span class="label">Current password</span><input type="password" id="change-pw-current" autocomplete="current-password"></div>
+      <div class="field" style="margin-top:10px;"><span class="label">New password (at least 8 characters)</span><input type="password" id="change-pw-new" autocomplete="new-password"></div>
+      <div class="field" style="margin-top:10px;"><span class="label">Confirm new password</span><input type="password" id="change-pw-confirm" autocomplete="new-password"></div>
+      <div id="change-pw-status" style="margin-top:12px;"></div>
+      <div class="field-row" style="margin-top:14px;">
+        <button type="submit" class="btn primary" id="change-pw-submit">Change password</button>
+        <button type="button" class="btn" id="change-pw-cancel">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
 <div class="sidebar">
   <div class="wordmark">Batten<small>Costing — Natalie Branscombe (Pty) Ltd</small></div>
   <!-- Factory-ops box: Costing and Payroll are "accordion" modes — their own screens
@@ -562,6 +581,7 @@
     </div>
   </div>
   <footer id="sidebar-footer"><span id="sidebar-user"></span>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
+    <button type="button" class="logout-link" id="btn-change-password">Change password</button>
     <button type="button" class="logout-link" id="btn-logout">Log out</button>
   </footer>
 </div>
@@ -1177,6 +1197,69 @@
     }).catch(function(e){
       submitBtn.disabled = false;
       statusEl.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  });
+
+  // ---- Change your own password (any logged-in user) ----
+  function openChangePasswordModal_(){
+    ['change-pw-current','change-pw-new','change-pw-confirm'].forEach(function(id){ document.getElementById(id).value = ''; });
+    document.getElementById('change-pw-username').value = (currentUser && currentUser.name) || '';
+    document.getElementById('change-pw-status').innerHTML = '';
+    document.getElementById('change-pw-submit').disabled = false;
+    document.getElementById('change-pw-modal').hidden = false;
+    document.getElementById('change-pw-current').focus();
+  }
+  function closeChangePasswordModal_(){ document.getElementById('change-pw-modal').hidden = true; }
+  document.getElementById('btn-change-password').addEventListener('click', openChangePasswordModal_);
+  document.getElementById('change-pw-cancel').addEventListener('click', closeChangePasswordModal_);
+  function pollChangePasswordResult_(token){
+    var attempts = 0, maxAttempts = 25; // ~10s
+    return new Promise(function(resolve){
+      function tick(){
+        attempts++;
+        apiRead('getChangePasswordResult', { token: token }).then(function(res){
+          if(res && res.status === 'done') resolve(res.result || {});
+          else if(res && res.error && /^Unknown action/.test(res.error)) resolve({ error: 'needs_backend' });
+          else if(res && res.error) resolve({ error: res.error });
+          else if(attempts >= maxAttempts) resolve({ error: 'timeout' });
+          else setTimeout(tick, 400);
+        }).catch(function(){
+          if(attempts >= maxAttempts) resolve({ error: 'timeout' }); else setTimeout(tick, 400);
+        });
+      }
+      tick();
+    });
+  }
+  document.getElementById('change-pw-form').addEventListener('submit', function(e){
+    e.preventDefault();
+    var statusEl = document.getElementById('change-pw-status');
+    var submitBtn = document.getElementById('change-pw-submit');
+    var current = document.getElementById('change-pw-current').value;
+    var next = document.getElementById('change-pw-new').value;
+    var confirmPw = document.getElementById('change-pw-confirm').value;
+    function fail(msg){ statusEl.innerHTML = '<div class="status-msg error">'+esc(msg)+'</div>'; }
+    if(!current) return fail('Enter your current password.');
+    if(next.length < 8) return fail('The new password must be at least 8 characters.');
+    if(next !== confirmPw) return fail('The new password and its confirmation don\'t match.');
+    if(next === current) return fail('The new password must be different from your current one.');
+    var token = secureToken_();
+    submitBtn.disabled = true;
+    statusEl.innerHTML = '<div class="status-msg thinking">Changing…</div>';
+    apiWrite('changePassword', { token: token, currentPassword: current, newPassword: next }).then(function(){
+      return pollChangePasswordResult_(token);
+    }).then(function(res){
+      submitBtn.disabled = false;
+      if(res && res.ok){
+        // The backend logged out every other session and issued this browser a new one.
+        if(res.sessionToken && currentUser){ currentUser.sessionToken = res.sessionToken; setAuthed(currentUser); }
+        statusEl.innerHTML = '<div class="status-msg">Password changed. Any other device you were logged in on has been logged out.</div>';
+        ['change-pw-current','change-pw-new','change-pw-confirm'].forEach(function(id){ document.getElementById(id).value = ''; });
+        setTimeout(closeChangePasswordModal_, 2500);
+      } else if(res && (res.error === 'needs_backend' || res.error === 'timeout')){
+        fail('Changing your password isn\'t available yet: the backend (Code.gs) needs to be updated to the latest version first.');
+      } else {
+        fail((res && res.error) || 'Couldn\'t change your password. Try again.');
+      }
     });
   });
 
