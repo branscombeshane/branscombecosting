@@ -1077,14 +1077,31 @@
   // The checkboxes shown in Admin when "Employee" is selected — key must match Code.gs's
   // PERMISSION_KEYS exactly. 'tickProgress' only does anything alongside 'production'.
   var EMPLOYEE_PERMISSIONS = [
-    { key:'costing', label:'Costing', hint:'New quotes, the Quotes list and the Rate Card.' },
+    { key:'costing', label:'Costing', hint:'New quotes, the Quotes list, the Rate Card and Costing settings.' },
+    { key:'rateCard', label:'Rate Card only', hint:'View and edit the Rate Card, without New Quote, Quotes or Costing settings. Not needed if Costing is ticked.' },
     { key:'production', label:'Production board', hint:'View the workshop production board.' },
     { key:'tickProgress', label:'Tick off production progress', hint:'Mark a job’s checklist sections done on the production board (needs Production board too).' },
     { key:'payroll', label:'Payroll', hint:'Salaries, payslips and payroll runs — sensitive, only tick this for someone who should see it.' }
   ];
   function allowedModesFor_(user){
     if(!user || user.role==='owner') return ['costing','payroll','production','admin'];
-    return ['costing','payroll','production'].filter(function(m){ return (user.permissions||[]).indexOf(m)!==-1; });
+    var perms = user.permissions||[];
+    return ['costing','payroll','production'].filter(function(m){
+      // 'rateCard' (Rate Card only) still opens the Costing section, just with only the
+      // Rate Card screen in it — see allowedCostingViews_.
+      return perms.indexOf(m)!==-1 || (m==='costing' && perms.indexOf('rateCard')!==-1);
+    });
+  }
+  // Which screens inside the Costing section this user gets. Full Costing = all four;
+  // 'rateCard' on its own = just the Rate Card. Code.gs enforces the same split on the
+  // server (quote/settings actions need 'costing'; rate edits accept either).
+  var COSTING_VIEWS_ = ['new','quotes','rates','settings'];
+  function allowedCostingViews_(user){
+    if(!user || user.role==='owner') return COSTING_VIEWS_.slice();
+    var perms = user.permissions||[];
+    if(perms.indexOf('costing')!==-1) return COSTING_VIEWS_.slice();
+    if(perms.indexOf('rateCard')!==-1) return ['rates'];
+    return [];
   }
   function applyRolePermissions_(){
     var allowed = allowedModesFor_(currentUser);
@@ -1096,6 +1113,11 @@
     // when someone doesn't have Payroll, so it never shows as an empty bordered gap.
     var payrollBox = document.getElementById('mode-switch-payroll');
     if(payrollBox) payrollBox.hidden = allowed.indexOf('payroll') === -1;
+    var costingViews = allowedCostingViews_(currentUser);
+    Array.prototype.forEach.call(document.querySelectorAll('.nav-section-body[data-mode-group="costing"] .navbtn'), function(b){
+      b.hidden = costingViews.indexOf(b.dataset.view) === -1;
+    });
+    if(COSTING_VIEWS_.indexOf(view) !== -1 && costingViews.indexOf(view) === -1 && costingViews.length) showView(costingViews[0]);
     if(allowed.indexOf(appMode) === -1) setAppMode(allowed[0] || 'costing');
     var userEl = document.getElementById('sidebar-user');
     if(userEl) userEl.textContent = currentUser ? (currentUser.name + ' · ' + (ROLE_LABELS[currentUser.role]||currentUser.role)) : '';
@@ -1195,7 +1217,7 @@
     if(mode==='payroll') showView('payroll');
     else if(mode==='production') showView('production');
     else if(mode==='admin') showView('admin');
-    else showView('new');
+    else showView(allowedCostingViews_(currentUser)[0] || 'new');
   }
   // One delegated listener off .sidebar covers mode headers (incl. the separate
   // #mode-switch-payroll box — see the markup comment above it) and the nested
@@ -1223,6 +1245,12 @@
   document.querySelector('.mode-btn[data-mode="costing"]').classList.add('active');
   setAccordionOpen_('costing', true);
   function showView(v){
+    // Never open a Costing screen this login isn't allowed (e.g. after saving a quote,
+    // or a stale nav state) — fall back to the first one it is allowed.
+    if(currentUser && COSTING_VIEWS_.indexOf(v) !== -1){
+      var okViews = allowedCostingViews_(currentUser);
+      if(okViews.indexOf(v) === -1 && okViews.length) v = okViews[0];
+    }
     view = v;
     ['new','quotes','rates','payroll','payroll-settings','settings','production','admin'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
@@ -6853,7 +6881,7 @@
       if(view==='production') populateProdJoinerFilter_();
     }).catch(function(){});
     var allowed = allowedModesFor_(currentUser);
-    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : (allowed[0]==='admin' ? 'admin' : 'new')));
+    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : (allowed[0]==='admin' ? 'admin' : (allowedCostingViews_(currentUser)[0] || 'new'))));
   }
 
   // ================= KIOSK (factory floor display) =================
