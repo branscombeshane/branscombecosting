@@ -1140,7 +1140,7 @@
     if(COSTING_VIEWS_.indexOf(view) !== -1 && costingViews.indexOf(view) === -1 && costingViews.length) showView(costingViews[0]);
     if(allowed.indexOf(appMode) === -1) setAppMode(allowed[0] || 'costing');
     var userEl = document.getElementById('sidebar-user');
-    if(userEl) userEl.textContent = currentUser ? (currentUser.name + ' · ' + (ROLE_LABELS[currentUser.role]||currentUser.role)) : '';
+    if(userEl) userEl.textContent = currentUser ? (currentUser.name || '') : '';
   }
 
   function pollLoginResult(token){
