@@ -559,6 +559,9 @@
     <div class="nav-section" data-mode="production">
       <button class="mode-btn" data-mode="production"><span>Production</span></button>
     </div>
+    <div class="nav-section" data-mode="attendance">
+      <button class="mode-btn" data-mode="attendance"><span>Attendance</span></button>
+    </div>
     <div class="nav-section" data-mode="admin">
       <button class="mode-btn" data-mode="admin"><span>Admin</span></button>
     </div>
@@ -721,6 +724,25 @@
       </div>
     </div>
 
+  </section>
+
+  <section class="view" id="view-attendance" hidden>
+    <div class="sheet-head">
+      <h1>Attendance</h1>
+      <div class="sub">BioTime link-up: each person in BioTime linked to their payroll employee</div>
+    </div>
+    <div class="panel" id="bt-status"></div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="field-row" style="align-items:flex-end;">
+        <div class="field" style="min-width:220px;"><span class="label">Search</span><input type="text" id="bt-search" placeholder="Name or number"></div>
+        <label class="chk-label"><input type="checkbox" id="bt-show-inactive"> Show people no longer active in BioTime</label>
+      </div>
+      <div id="bt-staff" style="margin-top:12px;"></div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <h2 style="font-size:15px;margin:0 0 8px;">Payroll employees not linked to BioTime</h2>
+      <div id="bt-unlinked-emps"></div>
+    </div>
   </section>
 
   <section class="view" id="view-admin" hidden>
@@ -1104,9 +1126,11 @@
     { key:'payroll', label:'Payroll', hint:'Salaries, payslips and payroll runs — sensitive, only tick this for someone who should see it.' }
   ];
   function allowedModesFor_(user){
-    if(!user || user.role==='owner') return ['costing','payroll','production','admin'];
+    if(!user || user.role==='owner') return ['costing','payroll','production','attendance','admin'];
     var perms = user.permissions||[];
-    return ['costing','payroll','production'].filter(function(m){
+    // 'attendance' isn't a tick box: Code.gs grants it to logins linked to a Management
+    // employee (withDerivedPermissions_), and it arrives in user.permissions like the rest.
+    return ['costing','payroll','production','attendance'].filter(function(m){
       // 'rateCard' (Rate Card only) still opens the Costing section, just with only the
       // Rate Card screen in it — see allowedCostingViews_.
       return perms.indexOf(m)!==-1 || (m==='costing' && perms.indexOf('rateCard')!==-1);
@@ -1300,6 +1324,7 @@
     if(mode==='payroll') showView('payroll');
     else if(mode==='production') showView('production');
     else if(mode==='admin') showView('admin');
+    else if(mode==='attendance') showView('attendance');
     else showView(allowedCostingViews_(currentUser)[0] || 'new');
   }
   // One delegated listener off .sidebar covers mode headers (incl. the separate
@@ -1335,7 +1360,7 @@
       if(okViews.indexOf(v) === -1 && okViews.length) v = okViews[0];
     }
     view = v;
-    ['new','quotes','rates','payroll','payroll-settings','settings','production','admin'].forEach(function(name){
+    ['new','quotes','rates','payroll','payroll-settings','settings','production','attendance','admin'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
@@ -1349,6 +1374,7 @@
     if(v==='payroll-settings') fillPayrollSettingsForm();
     if(v==='production') loadProduction();
     if(v==='admin') loadUsersAdmin_();
+    if(v==='attendance') loadBiotimeLinkup_();
   }
 
   // ================= RATE CARD =================
@@ -4649,8 +4675,110 @@
   var prodJoinerFilterInput_ = document.getElementById('prod-joiner-filter');
   if(prodJoinerFilterInput_) prodJoinerFilterInput_.addEventListener('change', function(){ renderProductionBoard_(); });
 
+  // ================= ATTENDANCE: BioTime link-up =================
+  // Code.gs biotimeLinkup_/biotimeSetLink_. BioTime people arrive from the BioTime PC's
+  // Branscombe sync; each is linked to a payroll employee (automatically by number + name or
+  // by unique full name during the sync, otherwise by hand here).
+  var btData_ = null;
+  function btWhen_(iso){
+    if(!iso) return 'never';
+    var d = new Date(iso); if(isNaN(d.getTime())) return iso;
+    var mins = Math.round((Date.now() - d.getTime())/60000);
+    var ago = mins < 1 ? 'just now' : (mins < 120 ? mins+' min ago' : (mins < 2880 ? Math.round(mins/60)+' h ago' : Math.round(mins/1440)+' days ago'));
+    return d.toLocaleString('en-ZA', { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' }) + ' (' + ago + ')';
+  }
+  function loadBiotimeLinkup_(){
+    document.getElementById('bt-staff').innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getBiotimeLinkup').then(function(res){
+      if(res && res.error){
+        var msg = /^Unknown action/.test(res.error) ? 'The backend (Code.gs) needs to be updated to the latest version for Attendance.' : res.error;
+        document.getElementById('bt-status').innerHTML = '<div class="status-msg error">'+esc(msg)+'</div>';
+        document.getElementById('bt-staff').innerHTML = ''; document.getElementById('bt-unlinked-emps').innerHTML = '';
+        return;
+      }
+      btData_ = res; renderBiotimeLinkup_();
+    }).catch(function(e){
+      document.getElementById('bt-status').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
+  function renderBiotimeLinkup_(){
+    var d = btData_; if(!d) return;
+    var cfg = d.configured || {}, sync = d.sync || {};
+    var warn = [];
+    if(!cfg.keySet) warn.push('No BioTime ingest key yet: in Batten\'s Apps Script editor, run <b>biotimeCreateIngestKey</b> once.');
+    if(!(cfg.departments||[]).length) warn.push('Batten doesn\'t know which BioTime departments are Branscombe\'s yet, so it accepts nothing from BioTime. Set the Script Property <b>BIOTIME_DEPARTMENTS</b>.');
+    var labels = { employees:'Staff', resigned:'Resignations', punches:'Clock-ins', manual:'Manual clock-ins', leave:'Leave', timetables:'Timetables' };
+    var rows = Object.keys(labels).map(function(k){
+      var x = sync[k];
+      return '<tr><td>'+labels[k]+'</td><td>'+esc(x ? btWhen_(x.at) : 'never')+'</td><td class="num">'+(x ? esc(String(x.stored)) + (x.received!==x.stored ? ' of '+esc(String(x.received))+' received' : '') : '')+'</td></tr>';
+    }).join('');
+    document.getElementById('bt-status').innerHTML =
+      (warn.length ? '<div class="status-msg error" style="margin-bottom:10px;">'+warn.join('<br>')+'</div>' : '') +
+      '<div style="font-size:13px;margin-bottom:6px;">Branscombe departments in BioTime: <b>'+esc((cfg.departments||[]).join(', ') || 'not set')+'</b></div>' +
+      '<div class="table-wrap"><table><thead><tr><th>From BioTime</th><th>Last received</th><th class="num">Kept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+
+    var q = (document.getElementById('bt-search').value||'').trim().toLowerCase();
+    var showInactive = document.getElementById('bt-show-inactive').checked;
+    var staff = (d.staff||[]).filter(function(p){
+      if(!showInactive && !p.active) return false;
+      return !q || (p.name+' '+p.empCode+' '+(p.link?p.link.employeeName:'')).toLowerCase().indexOf(q)!==-1;
+    });
+    var linkedCount = (d.staff||[]).filter(function(p){ return p.active && p.link; }).length;
+    var activeCount = (d.staff||[]).filter(function(p){ return p.active; }).length;
+    var freeEmps = (d.employees||[]).filter(function(e){ return !e.linkedTo; });
+    function empOptions_(){
+      return '<option value="">Choose employee…</option>' + freeEmps.map(function(e){
+        return '<option value="'+esc(e.id)+'">'+esc(e.name)+(e.employeeNumber?' · #'+esc(e.employeeNumber):'')+(e.active?'':' (discharged)')+'</option>';
+      }).join('');
+    }
+    var html = '<div style="font-size:13px;margin-bottom:8px;">'+linkedCount+' of '+activeCount+' active BioTime people linked.</div>';
+    if(!staff.length) html += '<div class="empty">'+((d.staff||[]).length ? 'Nobody matches.' : 'No BioTime staff received yet.')+'</div>';
+    else html += '<div class="table-wrap"><table><thead><tr><th>BioTime #</th><th>Name in BioTime</th><th>BioTime department</th><th>Payroll employee</th><th></th></tr></thead><tbody>' +
+      staff.map(function(p){
+        var linkCell = p.link
+          ? esc(p.link.employeeName) + (p.link.employeeNumber ? ' · #'+esc(p.link.employeeNumber) : '') +
+            (p.link.employeeNumber && p.link.employeeNumber !== p.empCode ? ' <span class="chip amber" title="The payroll employee number differs from the BioTime number">number differs</span>' : '') +
+            '<div style="font-size:11px;color:var(--ink-soft);">'+esc(p.link.method)+(p.link.linkedBy && p.link.method==='manual' ? ' by '+esc(p.link.linkedBy) : '')+'</div>'
+          : '<select class="bt-link-pick" data-code="'+esc(p.empCode)+'">'+empOptions_()+'</select>';
+        var action = p.link ? '<button class="btn small bt-unlink" data-code="'+esc(p.empCode)+'">Unlink</button>' : '<button class="btn small primary bt-link" data-code="'+esc(p.empCode)+'">Link</button>';
+        return '<tr'+(p.active?'':' style="opacity:.6;"')+'><td>'+esc(p.empCode)+'</td><td>'+esc(p.name)+(p.active?'':' <span class="chip warn">'+(p.resignDate?'resigned '+esc(p.resignDate):'not active')+'</span>')+'</td><td>'+esc(p.department)+'</td><td>'+linkCell+'</td><td>'+action+'</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    var wrap = document.getElementById('bt-staff');
+    wrap.innerHTML = html;
+    wrap.querySelectorAll('.bt-link').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        var sel = wrap.querySelector('.bt-link-pick[data-code="'+btn.dataset.code+'"]');
+        if(!sel || !sel.value){ alert('Choose the payroll employee first.'); return; }
+        btSetLink_(btn, btn.dataset.code, sel.value);
+      });
+    });
+    wrap.querySelectorAll('.bt-unlink').forEach(function(btn){
+      btn.addEventListener('click', function(){
+        if(confirm('Unlink BioTime number '+btn.dataset.code+'?')) btSetLink_(btn, btn.dataset.code, '');
+      });
+    });
+    var activeFree = freeEmps.filter(function(e){ return e.active; });
+    document.getElementById('bt-unlinked-emps').innerHTML = activeFree.length
+      ? '<div style="font-size:13px;">'+activeFree.map(function(e){ return esc(e.name)+(e.employeeNumber?' (#'+esc(e.employeeNumber)+')':'')+(e.department?' · '+esc(e.department):''); }).join('<br>')+'</div>'
+      : '<div class="empty">Every active payroll employee is linked.</div>';
+  }
+  function btSetLink_(btn, code, employeeId){
+    withBusy_(btn, apiRead('setBiotimeLink', { empCode: code, employeeId: employeeId }), employeeId ? 'Linking…' : 'Unlinking…').then(function(res){
+      if(res && res.ok){ btData_ = res; renderBiotimeLinkup_(); }
+      else alert((res && res.error) || 'Couldn\'t save the link.');
+    }).catch(function(e){ alert(backendErrorMsg(e)); });
+  }
+  document.getElementById('bt-search').addEventListener('input', renderBiotimeLinkup_);
+  document.getElementById('bt-show-inactive').addEventListener('change', renderBiotimeLinkup_);
+
   // ================= USERS ADMIN (Admin tab, owner only) =================
   var usersCache = [];
+  var usersEmployees_ = []; // payroll employees for each login's "Employee" drop-down
+  function employeeSelectHtml_(selectedId){
+    return '<select class="u-employee"><option value="">(not linked)</option>' + usersEmployees_.map(function(e){
+      return '<option value="'+esc(e.id)+'"'+(String(selectedId||'')===e.id?' selected':'')+'>'+esc(e.name)+(e.department?' · '+esc(e.department):'')+(e.active?'':' (discharged)')+'</option>';
+    }).join('') + '</select>';
+  }
   document.getElementById('user-new-permissions').innerHTML = permissionCheckboxesHtml_([], 'un-perm');
   wireRoleTogglesPermissions_(document.getElementById('user-new-role'), document.getElementById('user-new-permissions'));
   function loadUsersAdmin_(){
@@ -4662,6 +4790,7 @@
         return;
       }
       usersCache = (res && res.users) || [];
+      usersEmployees_ = (res && res.employees) || [];
       renderUsersAdmin_();
     }).catch(function(){
       document.getElementById('users-list-mgr').innerHTML = '<div class="status-msg error">Couldn\'t load users.</div>';
@@ -4697,6 +4826,7 @@
           '<div class="field" style="min-width:110px;"><span class="label">Name</span><input type="text" class="u-name" value="'+esc(u.name)+'"></div>' +
           '<div class="field" style="min-width:110px;"><span class="label">Username</span><input type="text" class="u-username" value="'+esc(u.username)+'"></div>' +
           '<div class="field" style="min-width:140px;"><span class="label">New password</span><input type="password" class="u-password" placeholder="leave blank to keep current" autocomplete="new-password"></div>' +
+          '<div class="field" style="min-width:200px;" title="Which payroll employee this login belongs to. A login linked to someone in the Management department gets Attendance."><span class="label">Employee</span>'+employeeSelectHtml_(u.employeeId)+'</div>' +
           '<div class="field" style="min-width:120px;"><span class="label">Role</span><select class="u-role">' +
             ['employee','owner'].map(function(r){
               return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+esc(ROLE_LABELS[r]||r)+'</option>';
@@ -4724,7 +4854,8 @@
           username: row.querySelector('.u-username').value.trim(),
           role: role,
           active: row.querySelector('.u-active').checked,
-          permissions: Array.prototype.map.call(row.querySelectorAll('.u-perm:checked'), function(cb){ return cb.value; })
+          permissions: Array.prototype.map.call(row.querySelectorAll('.u-perm:checked'), function(cb){ return cb.value; }),
+          employeeId: row.querySelector('.u-employee').value
         };
         var pwd = row.querySelector('.u-password').value;
         if(pwd) payload.password = pwd;
@@ -6964,7 +7095,7 @@
       if(view==='production') populateProdJoinerFilter_();
     }).catch(function(){});
     var allowed = allowedModesFor_(currentUser);
-    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : (allowed[0]==='admin' ? 'admin' : (allowedCostingViews_(currentUser)[0] || 'new'))));
+    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : (allowed[0]==='attendance' ? 'attendance' : (allowed[0]==='admin' ? 'admin' : (allowedCostingViews_(currentUser)[0] || 'new')))));
   }
 
   // ================= KIOSK (factory floor display) =================
