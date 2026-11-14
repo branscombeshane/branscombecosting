@@ -516,6 +516,12 @@
      products that get made frequently... we don't need to do an extraction of a drawing
      every time"), lets a new quote start straight from a saved BOM template instead of
      uploading a drawing. Same shared-modal pattern as sage-send-panel/approve-modal. -->
+<div id="att-person-modal" class="modal-overlay" hidden>
+  <div class="modal-panel" style="max-width:900px;"><div id="att-person-body"></div>
+    <div class="field-row" style="margin-top:14px;"><button type="button" class="btn" id="att-person-close">Close</button></div>
+  </div>
+</div>
+
 <div id="catalogue-pick-modal" class="modal-overlay" hidden>
   <div class="modal-panel modal-panel-plain" id="catalogue-pick-modal-body"></div>
 </div>
@@ -560,7 +566,14 @@
       <button class="mode-btn" data-mode="production"><span>Production</span></button>
     </div>
     <div class="nav-section" data-mode="attendance">
-      <button class="mode-btn" data-mode="attendance"><span>Attendance</span></button>
+      <button class="mode-btn" data-mode="attendance"><span>Attendance</span><span class="chev">&#9662;</span></button>
+      <div class="nav-section-body" data-mode-group="attendance" hidden>
+        <button class="navbtn" data-view="att-daily">Daily</button>
+        <button class="navbtn" data-view="att-shifts">Shifts</button>
+        <button class="navbtn" data-view="att-holidays">Public holidays</button>
+        <button class="navbtn" data-view="att-missed">Missed clock-ins</button>
+        <button class="navbtn" data-view="attendance">BioTime link-up</button>
+      </div>
     </div>
     <div class="nav-section" data-mode="admin">
       <button class="mode-btn" data-mode="admin"><span>Admin</span></button>
@@ -726,10 +739,72 @@
 
   </section>
 
+  <section class="view" id="view-att-daily" hidden>
+    <div class="sheet-head">
+      <h1>Daily attendance</h1>
+      <div class="sub" id="att-day-sub">Everyone with a shift: in and out, hours, late, left early, overtime</div>
+    </div>
+    <div class="panel">
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
+        <button class="btn small" id="att-day-prev" title="Previous day">&#8249;</button>
+        <div class="field" style="min-width:150px;"><span class="label">Date</span><input type="date" id="att-day-date"></div>
+        <button class="btn small" id="att-day-next" title="Next day">&#8250;</button>
+        <button class="btn small" id="att-day-today">Today</button>
+        <div class="field" style="min-width:150px;"><span class="label">Department</span><select id="att-day-dept"><option value="">All departments</option></select></div>
+        <div class="field" style="min-width:180px;"><span class="label">Search</span><input type="text" id="att-day-search" placeholder="Name or number"></div>
+      </div>
+      <div id="att-day-tiles" class="stats" style="margin-top:14px;"></div>
+      <div id="att-day-table" style="margin-top:12px;"></div>
+    </div>
+  </section>
+
+  <section class="view" id="view-att-shifts" hidden>
+    <div class="sheet-head">
+      <h1>Shifts</h1>
+      <div class="sub" id="att-shifts-sub">Shift times, which time applies on which weekday, and who is on which shift</div>
+    </div>
+    <div class="panel"><h2 style="font-size:15px;margin:0 0 8px;">Shift times</h2><div id="att-times"></div></div>
+    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Shifts</h2><div id="att-shift-list"></div></div>
+    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Who is on which shift</h2><div id="att-people"></div></div>
+  </section>
+
+  <section class="view" id="view-att-holidays" hidden>
+    <div class="sheet-head">
+      <h1>Public holidays</h1>
+      <div class="sub">South African public holidays are worked out automatically for every year (a Sunday holiday moves to the Monday). Add company days such as a shutdown below.</div>
+    </div>
+    <div class="panel">
+      <div class="field-row" style="align-items:flex-end;"><div class="field" style="min-width:110px;"><span class="label">Year</span><select id="att-hol-year"></select></div></div>
+      <div id="att-hol-list" style="margin-top:12px;"></div>
+      <div id="att-hol-add" class="field-row" style="align-items:flex-end;margin-top:14px;" hidden>
+        <div class="field"><span class="label">Date</span><input type="date" id="att-hol-date"></div>
+        <div class="field" style="min-width:200px;"><span class="label">Name</span><input type="text" id="att-hol-name" placeholder="e.g. Year-end shutdown"></div>
+        <button class="btn primary small" id="att-hol-add-btn">Add company day</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="view" id="view-att-missed" hidden>
+    <div class="sheet-head">
+      <h1>Missed clock-ins</h1>
+      <div class="sub">Add a clock-in someone missed, with a reason. It counts straight away, but is only used for pay once someone else in Management signs it off (never your own, and never one you entered).</div>
+    </div>
+    <div class="panel">
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
+        <div class="field" style="min-width:200px;"><span class="label">Person</span><select id="att-missed-person"></select></div>
+        <div class="field"><span class="label">Date and time</span><input type="datetime-local" id="att-missed-time"></div>
+        <div class="field" style="min-width:260px;"><span class="label">Reason</span><input type="text" id="att-missed-reason" placeholder="e.g. forgot to clock out, left at 16:05" maxlength="500"></div>
+        <button class="btn primary small" id="att-missed-add">Add</button>
+      </div>
+      <div id="att-missed-status" class="status-msg" style="display:none;margin-top:10px;"></div>
+      <div id="att-missed-list" style="margin-top:14px;"></div>
+    </div>
+  </section>
+
   <section class="view" id="view-attendance" hidden>
     <div class="sheet-head">
-      <h1>Attendance</h1>
-      <div class="sub">BioTime link-up: each person in BioTime linked to their payroll employee</div>
+      <h1>BioTime link-up</h1>
+      <div class="sub">Each person in BioTime linked to their payroll employee</div>
     </div>
     <div class="panel" id="bt-status"></div>
     <div class="panel" style="margin-top:16px;">
@@ -1321,11 +1396,11 @@
     Array.prototype.forEach.call(document.querySelectorAll('.mode-btn'), function(b){
       b.classList.toggle('active', b.dataset.mode===mode);
     });
-    ['costing','payroll'].forEach(function(m){ setAccordionOpen_(m, m===mode); });
+    ['costing','payroll','attendance'].forEach(function(m){ setAccordionOpen_(m, m===mode); });
     if(mode==='payroll') showView('payroll');
     else if(mode==='production') showView('production');
     else if(mode==='admin') showView('admin');
-    else if(mode==='attendance') showView('attendance');
+    else if(mode==='attendance') showView('att-daily');
     else showView(allowedCostingViews_(currentUser)[0] || 'new');
   }
   // One delegated listener off .sidebar covers mode headers (incl. the separate
@@ -1361,7 +1436,7 @@
       if(okViews.indexOf(v) === -1 && okViews.length) v = okViews[0];
     }
     view = v;
-    ['new','quotes','rates','payroll','payroll-settings','settings','production','attendance','admin'].forEach(function(name){
+    ['new','quotes','rates','payroll','payroll-settings','settings','production','att-daily','att-shifts','att-holidays','att-missed','attendance','admin'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
@@ -1376,6 +1451,10 @@
     if(v==='production') loadProduction();
     if(v==='admin') loadUsersAdmin_();
     if(v==='attendance') loadBiotimeLinkup_();
+    if(v==='att-daily') loadAttDay_();
+    if(v==='att-shifts') loadAttShifts_();
+    if(v==='att-holidays') loadAttHolidays_();
+    if(v==='att-missed') loadAttMissed_();
   }
 
   // ================= RATE CARD =================
@@ -4676,6 +4755,210 @@
   var prodJoinerFilterInput_ = document.getElementById('prod-joiner-filter');
   if(prodJoinerFilterInput_) prodJoinerFilterInput_.addEventListener('change', function(){ renderProductionBoard_(); });
 
+  // ================= ATTENDANCE: daily, shifts, holidays, missed clock-ins =================
+  // Code.gs attDay_/attPerson_/attShiftsView_/attHolidaysView_/attMissedView_ do the maths;
+  // these screens only show it. Shifts and company holidays are edited by the owner only.
+  var ATT_STATUS_ORDER = ['Present','In','Not in yet','Absent','On leave','Public holiday','No clock-out','No clock-in','Worked on day off','Off','Future'];
+  var ATT_STATUS_CHIP = { 'Present':'good', 'In':'good', 'Absent':'warn', 'No clock-out':'amber', 'No clock-in':'amber', 'Worked on day off':'amber', 'On leave':'amber' };
+  var ATT_DOW = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
+  var attDayData_ = null, attDayStatusFilter_ = '';
+  function attIsOwner_(){ return !!currentUser && currentUser.role==='owner'; }
+  function attTodayStr_(){ var d=new Date(); return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2); }
+  function attShiftDate_(str, n){ var p=str.split('-'); var d=new Date(Date.UTC(+p[0],+p[1]-1,+p[2]+n)); return d.toISOString().slice(0,10); }
+  function attNiceDate_(str){ var p=str.split('-'); var d=new Date(Date.UTC(+p[0],+p[1]-1,+p[2])); return d.toLocaleDateString('en-ZA',{ weekday:'long', day:'numeric', month:'long', year:'numeric', timeZone:'UTC' }); }
+  function attChip_(st){ return '<span class="chip '+(ATT_STATUS_CHIP[st]||'')+'">'+esc(st)+'</span>'; }
+  function attTimeCell_(t, source, pending){
+    if(!t) return '';
+    var tag = (source==='app-manual' || source==='biotime-manual') ? ' <span style="font-size:11px;color:var(--ink-soft);">(manual'+(pending?', awaiting sign-off':'')+')</span>' : '';
+    return esc(t)+tag;
+  }
+  function attErr_(el, res){
+    var msg = (res && res.error && /^Unknown action/.test(res.error)) ? 'The backend (Code.gs) needs to be updated to the latest version for this screen.' : ((res && res.error) || 'Couldn\'t load.');
+    document.getElementById(el).innerHTML = '<div class="status-msg error">'+esc(msg)+'</div>';
+  }
+  function loadAttDay_(){
+    var input = document.getElementById('att-day-date');
+    if(!input.value) input.value = attTodayStr_();
+    document.getElementById('att-day-table').innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getAttendanceDay', { date: input.value }).then(function(res){
+      if(!res || !res.ok){ attErr_('att-day-table', res); document.getElementById('att-day-tiles').innerHTML=''; return; }
+      attDayData_ = res; input.value = res.date;
+      var sel = document.getElementById('att-day-dept'), keep = sel.value;
+      sel.innerHTML = '<option value="">All departments</option>' + res.departments.map(function(d){ return '<option'+(d===keep?' selected':'')+'>'+esc(d)+'</option>'; }).join('');
+      renderAttDay_();
+    }).catch(function(e){ document.getElementById('att-day-table').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  function renderAttDay_(){
+    var d = attDayData_; if(!d) return;
+    document.getElementById('att-day-sub').textContent = attNiceDate_(d.date) + (d.holiday ? ' — ' + d.holiday : '') + (d.date===d.today ? ' (today)' : '');
+    var dept = document.getElementById('att-day-dept').value;
+    var q = (document.getElementById('att-day-search').value||'').trim().toLowerCase();
+    var base = d.rows.filter(function(r){ return (!dept || r.department===dept) && (!q || (r.name+' '+r.empCode).toLowerCase().indexOf(q)!==-1); });
+    var counts = {}; base.forEach(function(r){ counts[r.status]=(counts[r.status]||0)+1; });
+    document.getElementById('att-day-tiles').innerHTML = '<div class="stat'+(attDayStatusFilter_?'':' total')+'" data-status="" style="cursor:pointer;"><span class="label">Everyone</span><span class="value num">'+base.length+'</span></div>' +
+      ATT_STATUS_ORDER.filter(function(st){ return counts[st]; }).map(function(st){
+        return '<div class="stat'+(attDayStatusFilter_===st?' total':'')+'" data-status="'+esc(st)+'" style="cursor:pointer;"><span class="label">'+esc(st)+'</span><span class="value num">'+counts[st]+'</span></div>';
+      }).join('');
+    document.querySelectorAll('#att-day-tiles .stat').forEach(function(t){ t.addEventListener('click', function(){ attDayStatusFilter_ = t.dataset.status; renderAttDay_(); }); });
+    var rows = base.filter(function(r){ return !attDayStatusFilter_ || r.status===attDayStatusFilter_; });
+    document.getElementById('att-day-table').innerHTML = rows.length ? '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Department</th><th>Shift</th><th>In</th><th>Out</th><th class="num">Hours</th><th class="num">Late</th><th class="num">Left early</th><th class="num">Overtime</th><th>Status</th></tr></thead><tbody>' +
+      rows.map(function(r){
+        return '<tr><td><a href="#" class="att-person-link" data-code="'+esc(r.empCode)+'">'+esc(r.name)+'</a></td><td>'+esc(r.department)+'</td>' +
+          '<td>'+(r.start ? esc(r.start+'–'+r.end) : '<span style="color:var(--ink-soft);">'+esc(r.shiftName ? 'day off' : 'no shift')+'</span>')+'</td>' +
+          '<td>'+attTimeCell_(r.inTime, r.inSource, r.inPending)+'</td><td>'+attTimeCell_(r.outTime, r.outSource, r.outPending)+'</td>' +
+          '<td class="num">'+(r.hours!=null ? r.hours.toFixed(1) : '')+'</td><td class="num">'+(r.lateMin ? r.lateMin+' min' : '')+'</td><td class="num">'+(r.earlyMin ? r.earlyMin+' min' : '')+'</td>' +
+          '<td class="num">'+(r.overtimeHrs ? r.overtimeHrs.toFixed(1)+' h' : '')+'</td><td>'+attChip_(r.status)+(r.note ? ' <span style="font-size:11px;color:var(--ink-soft);">'+esc(r.note)+'</span>' : '')+'</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">Nobody to show.</div>';
+    document.querySelectorAll('#att-day-table .att-person-link').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); openAttPerson_(a.dataset.code); }); });
+  }
+  function openAttPerson_(code){
+    var body = document.getElementById('att-person-body');
+    body.innerHTML = '<div class="empty">Loading…</div>';
+    document.getElementById('att-person-modal').hidden = false;
+    var to = (attDayData_ && attDayData_.date) || attTodayStr_();
+    apiRead('getAttendancePerson', { empCode: code, to: to }).then(function(res){
+      if(!res || !res.ok){ attErr_('att-person-body', res); return; }
+      var t = { late:0, early:0, ot:0, absent:0 };
+      res.days.forEach(function(x){ t.late+=x.lateMin||0; t.early+=x.earlyMin||0; t.ot+=x.overtimeHrs||0; if(x.status==='Absent') t.absent++; });
+      body.innerHTML = '<div class="sheet-head" style="margin-bottom:10px;"><h1 style="font-size:18px;">'+esc(res.name)+' · #'+esc(res.empCode)+'</h1><div class="sub">'+esc(res.department)+' — last 14 days to '+esc(attNiceDate_(res.to))+'. Absent '+t.absent+' · late '+t.late+' min · left early '+t.early+' min · overtime '+t.ot.toFixed(1)+' h</div></div>' +
+        '<div class="table-wrap"><table><thead><tr><th>Day</th><th>Shift</th><th>In</th><th>Out</th><th class="num">Hours</th><th class="num">Late</th><th class="num">Early</th><th class="num">OT</th><th>Status</th><th>All clock-ins</th></tr></thead><tbody>' +
+        res.days.map(function(x){
+          var p=x.date.split('-'); var dow = ATT_DOW[(new Date(Date.UTC(+p[0],+p[1]-1,+p[2])).getUTCDay()||7)];
+          return '<tr><td>'+dow+' '+esc(x.date.slice(5))+'</td><td>'+(x.start?esc(x.start+'–'+x.end):'')+'</td><td>'+attTimeCell_(x.inTime,x.inSource,x.inPending)+'</td><td>'+attTimeCell_(x.outTime,x.outSource,x.outPending)+'</td>' +
+            '<td class="num">'+(x.hours!=null?x.hours.toFixed(1):'')+'</td><td class="num">'+(x.lateMin||'')+'</td><td class="num">'+(x.earlyMin||'')+'</td><td class="num">'+(x.overtimeHrs?x.overtimeHrs.toFixed(1):'')+'</td>' +
+            '<td>'+attChip_(x.status)+(x.note?' <span style="font-size:11px;color:var(--ink-soft);">'+esc(x.note)+'</span>':'')+'</td><td style="font-size:11.5px;">'+x.punches.map(function(pp){ return esc(pp.time)+(pp.source!=='machine'?'*':''); }).join(', ')+'</td></tr>';
+        }).join('') + '</tbody></table></div><div class="sub" style="margin-top:6px;">* manual clock-in</div>';
+    }).catch(function(e){ body.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  document.getElementById('att-person-close').addEventListener('click', function(){ document.getElementById('att-person-modal').hidden = true; });
+  document.getElementById('att-day-date').addEventListener('change', function(){ attDayStatusFilter_=''; loadAttDay_(); });
+  document.getElementById('att-day-prev').addEventListener('click', function(){ var i=document.getElementById('att-day-date'); i.value = attShiftDate_(i.value||attTodayStr_(), -1); attDayStatusFilter_=''; loadAttDay_(); });
+  document.getElementById('att-day-next').addEventListener('click', function(){ var i=document.getElementById('att-day-date'); var n = attShiftDate_(i.value||attTodayStr_(), 1); if(n > attTodayStr_()) return; i.value = n; attDayStatusFilter_=''; loadAttDay_(); });
+  document.getElementById('att-day-today').addEventListener('click', function(){ document.getElementById('att-day-date').value = attTodayStr_(); attDayStatusFilter_=''; loadAttDay_(); });
+  document.getElementById('att-day-dept').addEventListener('change', renderAttDay_);
+  document.getElementById('att-day-search').addEventListener('input', renderAttDay_);
+
+  // ---- shifts ----
+  var attShiftData_ = null;
+  function loadAttShifts_(){
+    document.getElementById('att-times').innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getShifts').then(function(res){
+      if(!res || !res.ok){ attErr_('att-times', res); return; }
+      attShiftData_ = res; renderAttShifts_();
+    }).catch(function(e){ document.getElementById('att-times').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  function attShiftAction_(btn, action, params){
+    withBusy_(btn, apiRead(action, params), 'Saving…').then(function(res){
+      if(res && res.ok){ attShiftData_ = res; renderAttShifts_(); }
+      else alert((res && res.error) || 'Couldn\'t save.');
+    }).catch(function(e){ alert(backendErrorMsg(e)); });
+  }
+  function renderAttShifts_(){
+    var d = attShiftData_; if(!d) return;
+    var own = attIsOwner_();
+    document.getElementById('att-shifts-sub').textContent = own ? 'Shift times, which time applies on which weekday, and who is on which shift' : 'Shift times, which time applies on which weekday, and who is on which shift. Only the owner can change these.';
+    var timeName = {}; d.times.forEach(function(t){ timeName[t.id] = t.name+' ('+t.start+'–'+t.end+')'; });
+    var shiftName = {}; d.shifts.forEach(function(sh){ shiftName[sh.id] = sh.name; });
+    // shift times
+    var th = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Start</th><th>End</th><th class="num">Hours</th>'+(own?'<th></th>':'')+'</tr></thead><tbody>' +
+      d.times.map(function(t){
+        var hrs = ((parseInt(t.end)*60+parseInt(t.end.slice(3))) - (parseInt(t.start)*60+parseInt(t.start.slice(3))))/60;
+        return own ? '<tr data-id="'+esc(t.id)+'"><td><input type="text" class="att-t-name" value="'+esc(t.name)+'"></td><td><input type="time" class="att-t-start" value="'+esc(t.start)+'"></td><td><input type="time" class="att-t-end" value="'+esc(t.end)+'"></td><td class="num">'+hrs.toFixed(1)+'</td><td><button class="btn small att-t-save">Save</button> <button class="btn small att-t-del">Delete</button></td></tr>'
+          : '<tr><td>'+esc(t.name)+'</td><td>'+esc(t.start)+'</td><td>'+esc(t.end)+'</td><td class="num">'+hrs.toFixed(1)+'</td></tr>';
+      }).join('') + (own ? '<tr data-id=""><td><input type="text" class="att-t-name" placeholder="New shift time"></td><td><input type="time" class="att-t-start"></td><td><input type="time" class="att-t-end"></td><td></td><td><button class="btn small primary att-t-save">Add</button></td></tr>' : '') + '</tbody></table></div>';
+    var tEl = document.getElementById('att-times'); tEl.innerHTML = th;
+    tEl.querySelectorAll('.att-t-save').forEach(function(b){ b.addEventListener('click', function(){ var tr=b.closest('tr'); attShiftAction_(b, 'saveShiftTime', { id: tr.dataset.id, name: tr.querySelector('.att-t-name').value, start: tr.querySelector('.att-t-start').value, end: tr.querySelector('.att-t-end').value }); }); });
+    tEl.querySelectorAll('.att-t-del').forEach(function(b){ b.addEventListener('click', function(){ if(confirm('Delete this shift time?')) attShiftAction_(b, 'deleteShiftTime', { id: b.closest('tr').dataset.id }); }); });
+    // shifts
+    function timeSelect_(cur){ return '<select class="att-s-day"><option value="">Off</option>'+d.times.map(function(t){ return '<option value="'+esc(t.id)+'"'+(cur===t.id?' selected':'')+'>'+esc(t.name)+'</option>'; }).join('')+'</select>'; }
+    var sh = '<div class="table-wrap"><table><thead><tr><th>Shift</th>'+[1,2,3,4,5,6,7].map(function(i){ return '<th>'+ATT_DOW[i]+'</th>'; }).join('')+(own?'<th></th>':'')+'</tr></thead><tbody>' +
+      d.shifts.map(function(x){
+        return own ? '<tr data-id="'+esc(x.id)+'"><td><input type="text" class="att-s-name" value="'+esc(x.name)+'"></td>'+[1,2,3,4,5,6,7].map(function(i){ return '<td data-dow="'+i+'">'+timeSelect_(x.days[i]||'')+'</td>'; }).join('')+'<td><button class="btn small att-s-save">Save</button> <button class="btn small att-s-del">Delete</button></td></tr>'
+          : '<tr><td>'+esc(x.name)+'</td>'+[1,2,3,4,5,6,7].map(function(i){ var t = d.times.filter(function(tt){ return tt.id===x.days[i]; })[0]; return '<td style="font-size:12px;">'+(t?esc(t.start+'–'+t.end):'<span style="color:var(--ink-soft);">off</span>')+'</td>'; }).join('')+'</tr>';
+      }).join('') + (own ? '<tr data-id=""><td><input type="text" class="att-s-name" placeholder="New shift"></td>'+[1,2,3,4,5,6,7].map(function(i){ return '<td data-dow="'+i+'">'+timeSelect_('')+'</td>'; }).join('')+'<td><button class="btn small primary att-s-save">Add</button></td></tr>' : '') + '</tbody></table></div>';
+    var sEl = document.getElementById('att-shift-list'); sEl.innerHTML = sh;
+    sEl.querySelectorAll('.att-s-save').forEach(function(b){ b.addEventListener('click', function(){
+      var tr=b.closest('tr'), days={};
+      tr.querySelectorAll('td[data-dow]').forEach(function(td){ var v=td.querySelector('select').value; if(v) days[td.dataset.dow]=v; });
+      attShiftAction_(b, 'saveShift', { id: tr.dataset.id, name: tr.querySelector('.att-s-name').value, days: JSON.stringify(days) });
+    }); });
+    sEl.querySelectorAll('.att-s-del').forEach(function(b){ b.addEventListener('click', function(){ if(confirm('Delete this shift?')) attShiftAction_(b, 'deleteShift', { id: b.closest('tr').dataset.id }); }); });
+    // people
+    var byCode = {}; d.assignments.forEach(function(a){ (byCode[a.emp_code]=byCode[a.emp_code]||[]).push(a); });
+    var shiftOpts = d.shifts.map(function(x){ return '<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>'; }).join('');
+    var pp = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Department</th><th>Shift today</th><th>History</th>'+(own?'<th>Put on a shift</th>':'')+'</tr></thead><tbody>' +
+      d.staff.map(function(p){
+        var hist = (byCode[p.empCode]||[]).map(function(a){
+          return '<div style="font-size:11.5px;">'+esc(shiftName[a.shiftId]||a.shiftId)+': '+esc(a.from)+(a.to?' to '+esc(a.to)+' (one-off)':' onwards')+(own?' <a href="#" class="att-a-del" data-id="'+esc(a.id)+'" title="Remove this assignment">remove</a>':'')+'</div>';
+        }).join('');
+        return '<tr data-code="'+esc(p.empCode)+'"><td>'+esc(p.name)+'</td><td>'+esc(p.department)+'</td><td>'+(p.currentShiftName?esc(p.currentShiftName):'<span class="chip warn">none</span>')+'</td><td>'+hist+'</td>' +
+          (own ? '<td><div class="field-row" style="gap:6px;flex-wrap:wrap;"><select class="att-a-shift">'+shiftOpts+'</select><input type="date" class="att-a-from" value="'+esc(d.today)+'" title="From"><input type="date" class="att-a-to" title="To (leave empty for permanent)"><button class="btn small att-a-save">Save</button></div></td>' : '') + '</tr>';
+      }).join('') + '</tbody></table></div>' + (own ? '<div class="sub" style="margin-top:6px;">Leave "To" empty to put someone on a shift permanently from that date; fill it in for a one-off, which takes priority over their permanent shift for those days.</div>' : '');
+    var pEl = document.getElementById('att-people'); pEl.innerHTML = pp;
+    pEl.querySelectorAll('.att-a-save').forEach(function(b){ b.addEventListener('click', function(){ var tr=b.closest('tr'); attShiftAction_(b, 'assignShift', { empCode: tr.dataset.code, shiftId: tr.querySelector('.att-a-shift').value, from: tr.querySelector('.att-a-from').value, to: tr.querySelector('.att-a-to').value }); }); });
+    pEl.querySelectorAll('.att-a-del').forEach(function(a){ a.addEventListener('click', function(e){ e.preventDefault(); if(confirm('Remove this shift assignment?')) attShiftAction_(null, 'deleteAssignment', { id: a.dataset.id }); }); });
+  }
+
+  // ---- holidays ----
+  function loadAttHolidays_(){
+    var sel = document.getElementById('att-hol-year');
+    if(!sel.options.length){ var y = new Date().getFullYear(); for(var i=y-1;i<=y+1;i++) sel.insertAdjacentHTML('beforeend','<option'+(i===y?' selected':'')+'>'+i+'</option>'); }
+    document.getElementById('att-hol-add').hidden = !attIsOwner_();
+    document.getElementById('att-hol-list').innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getHolidays', { year: sel.value }).then(renderAttHolidays_).catch(function(e){ document.getElementById('att-hol-list').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  function renderAttHolidays_(res){
+    if(!res || !res.ok){ attErr_('att-hol-list', res); return; }
+    var own = attIsOwner_();
+    var el = document.getElementById('att-hol-list');
+    el.innerHTML = '<div class="table-wrap"><table><thead><tr><th>Date</th><th>Day</th><th>Holiday</th><th></th></tr></thead><tbody>' + res.holidays.map(function(h){
+      var p=h.date.split('-'); var dow = ATT_DOW[(new Date(Date.UTC(+p[0],+p[1]-1,+p[2])).getUTCDay()||7)];
+      return '<tr><td>'+esc(h.date)+'</td><td>'+dow+'</td><td>'+esc(h.name)+(h.kind==='company'?' <span class="chip">company day</span>':'')+'</td><td>'+(own && h.kind==='company' ? '<button class="btn small att-hol-del" data-date="'+esc(h.date)+'">Remove</button>' : '')+'</td></tr>';
+    }).join('') + '</tbody></table></div>';
+    el.querySelectorAll('.att-hol-del').forEach(function(b){ b.addEventListener('click', function(){ if(!confirm('Remove this company day?')) return; withBusy_(b, apiRead('deleteCompanyHoliday', { date: b.dataset.date }), 'Removing…').then(renderAttHolidays_); }); });
+  }
+  document.getElementById('att-hol-year').addEventListener('change', loadAttHolidays_);
+  document.getElementById('att-hol-add-btn').addEventListener('click', function(){
+    var b=this;
+    withBusy_(b, apiRead('addCompanyHoliday', { date: document.getElementById('att-hol-date').value, name: document.getElementById('att-hol-name').value }), 'Adding…').then(function(res){
+      if(res && res.ok){ document.getElementById('att-hol-year').value = String(res.year); document.getElementById('att-hol-name').value=''; renderAttHolidays_(res); }
+      else alert((res && res.error) || 'Couldn\'t add.');
+    });
+  });
+
+  // ---- missed clock-ins ----
+  function loadAttMissed_(){
+    document.getElementById('att-missed-list').innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getShifts').then(function(res){
+      if(res && res.ok){
+        var sel = document.getElementById('att-missed-person'), keep = sel.value;
+        sel.innerHTML = '<option value="">Choose person…</option>' + res.staff.map(function(p){ return '<option value="'+esc(p.empCode)+'"'+(p.empCode===keep?' selected':'')+'>'+esc(p.name)+' · #'+esc(p.empCode)+'</option>'; }).join('');
+      }
+    });
+    apiRead('getMissedClockIns').then(renderAttMissed_).catch(function(e){ document.getElementById('att-missed-list').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  function renderAttMissed_(res){
+    if(!res || !res.ok){ attErr_('att-missed-list', res); return; }
+    var el = document.getElementById('att-missed-list');
+    el.innerHTML = res.items.length ? '<div class="table-wrap"><table><thead><tr><th>Person</th><th>Clock-in</th><th>Reason</th><th>Entered by</th><th>Status</th><th></th></tr></thead><tbody>' + res.items.map(function(m){
+      var st = m.status==='pending' ? '<span class="chip amber">awaiting sign-off</span>' : (m.status==='approved' ? '<span class="chip good">signed off</span> <span style="font-size:11px;">'+esc(m.decidedBy)+'</span>' : '<span class="chip warn">rejected</span> <span style="font-size:11px;">'+esc(m.decidedBy)+'</span>');
+      var act = m.status==='pending' ? (m.canSignOff ? '<button class="btn small primary att-m-ok" data-id="'+esc(m.id)+'">Sign off</button> <button class="btn small att-m-no" data-id="'+esc(m.id)+'">Reject</button>' : '<span style="font-size:11px;color:var(--ink-soft);">'+esc(m.cannotWhy)+'</span>') : '';
+      return '<tr><td>'+esc(m.name)+'</td><td>'+esc(String(m.time).slice(0,16))+'</td><td>'+esc(m.reason)+'</td><td>'+esc(m.enteredBy)+'</td><td>'+st+'</td><td>'+act+'</td></tr>';
+    }).join('') + '</tbody></table></div>' : '<div class="empty">No missed clock-ins entered yet.</div>';
+    el.querySelectorAll('.att-m-ok, .att-m-no').forEach(function(b){ b.addEventListener('click', function(){
+      var decision = b.classList.contains('att-m-ok') ? 'approved' : 'rejected';
+      withBusy_(b, apiRead('signOffMissedClockIn', { id: b.dataset.id, decision: decision }), 'Saving…').then(function(r){ if(r && r.ok) renderAttMissed_(r); else alert((r && r.error) || 'Couldn\'t save.'); });
+    }); });
+  }
+  document.getElementById('att-missed-add').addEventListener('click', function(){
+    var b=this, st=document.getElementById('att-missed-status');
+    withBusy_(b, apiRead('addMissedClockIn', { empCode: document.getElementById('att-missed-person').value, time: document.getElementById('att-missed-time').value, reason: document.getElementById('att-missed-reason').value }), 'Adding…').then(function(res){
+      st.style.display='block';
+      if(res && res.ok){ st.className='status-msg'; st.textContent='Added. It now needs someone else in Management to sign it off.'; document.getElementById('att-missed-reason').value=''; renderAttMissed_(res); }
+      else { st.className='status-msg error'; st.textContent=(res && res.error) || 'Couldn\'t add.'; }
+    });
+  });
+
   // ================= ATTENDANCE: BioTime link-up =================
   // Code.gs biotimeLinkup_/biotimeSetLink_. BioTime people arrive from the BioTime PC's
   // Branscombe sync; each is linked to a payroll employee (automatically by number + name or
@@ -4728,7 +5011,7 @@
     var activeCount = (d.staff||[]).filter(function(p){ return p.active; }).length;
     var freeEmps = (d.employees||[]).filter(function(e){ return !e.linkedTo; });
     function empOptions_(){
-      return '<option value="">Choose employee…</option>' + freeEmps.map(function(e){
+      return '<option value="">Choose employee…</option><option value="__none__">Not on Batten payroll (attendance only)</option>' + freeEmps.map(function(e){
         return '<option value="'+esc(e.id)+'">'+esc(e.name)+(e.employeeNumber?' · #'+esc(e.employeeNumber):'')+(e.active?'':' (discharged)')+'</option>';
       }).join('');
     }
@@ -7099,7 +7382,7 @@
       if(view==='production') populateProdJoinerFilter_();
     }).catch(function(){});
     var allowed = allowedModesFor_(currentUser);
-    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : (allowed[0]==='attendance' ? 'attendance' : (allowed[0]==='admin' ? 'admin' : (allowedCostingViews_(currentUser)[0] || 'new')))));
+    showView(allowed[0]==='production' ? 'production' : (allowed[0]==='payroll' ? 'payroll' : (allowed[0]==='attendance' ? 'att-daily' : (allowed[0]==='admin' ? 'admin' : (allowedCostingViews_(currentUser)[0] || 'new')))));
   }
 
   // ================= KIOSK (factory floor display) =================
