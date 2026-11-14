@@ -886,6 +886,7 @@
     payrollDepartments: ['Management','Production','Admin'], joiners: [], companyInfo: { name:'', payeNumber:'', uifNumber:'', sdlNumber:'', address:'', contactFirstName:'', contactSurname:'', contactBusTel:'', contactCellNo:'', contactEmail:'' } };
   var currentFileName = null;
 
+  var OVERTIME_RATE_MULTIPLIER = 1.5; // overtime pay = hours x hourly rate x this
   function uid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
   function money(n){ return 'R ' + (Number(n)||0).toLocaleString('en-ZA', {minimumFractionDigits:2, maximumFractionDigits:2}); }
   function normalize(s){ return (s||'').toString().toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
@@ -5698,13 +5699,16 @@
     var amountField = container.querySelector('.adj-amount-field');
     var amountInput = container.querySelector('.adj-amount');
     var hoursInput = container.querySelector('.adj-hours');
+    // Overtime is paid at OVERTIME_RATE_MULTIPLIER x the employee's hourly rate (1.5x —
+    // Shane, 14 Nov 2026; also the BCEA minimum). Only the computed Amount is stored, so
+    // overtime entered before this change keeps the amount it was saved with.
     function syncOvertimeFields(){
       var isOt = typeSel.value==='Overtime';
       var isAbsent = typeSel.value==='Absent';
       hoursField.hidden = !(isOt || isAbsent);
       if(isOt){
-        hoursLabel.textContent = 'Hours';
-        amountInput.value = (hoursInput.value && e.hourRate) ? round2Js_(Number(hoursInput.value)*e.hourRate) : '';
+        hoursLabel.textContent = 'Hours (paid at ' + OVERTIME_RATE_MULTIPLIER + '× ' + (e.hourRate ? money(e.hourRate) + '/hr' : 'the hourly rate') + ')';
+        amountInput.value = (hoursInput.value && e.hourRate) ? round2Js_(Number(hoursInput.value)*e.hourRate*OVERTIME_RATE_MULTIPLIER) : '';
         amountInput.readOnly = true; amountField.style.opacity = .7;
       } else if(isAbsent){
         hoursLabel.textContent = 'Days absent';
@@ -6305,7 +6309,7 @@
     earnings.push(['Basic Salary', money(c.baseAmount)]);
     if(adj.Commission) earnings.push([withNote_('Commission','Commission'), money(adj.Commission)]);
     if(adj.Bonus) earnings.push([withNote_('Bonus','Bonus'), money(adj.Bonus)]);
-    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''),'Overtime'), money(adj.Overtime)]);
+    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs @ '+OVERTIME_RATE_MULTIPLIER+'x)':''),'Overtime'), money(adj.Overtime)]);
     if(adj.Absent) earnings.push([withNote_('Absent'+(c.absentDays?' ('+c.absentDays+' days)':''),'Absent'), '-'+money(adj.Absent)]);
     var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0);
 
@@ -6451,7 +6455,7 @@
     earnings.push(['Basic Salary', money(c.baseAmount)]);
     if(adj.Commission) earnings.push([withNote_('Commission','Commission'), money(adj.Commission)]);
     if(adj.Bonus) earnings.push([withNote_('Bonus','Bonus'), money(adj.Bonus)]);
-    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''),'Overtime'), money(adj.Overtime)]);
+    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs @ '+OVERTIME_RATE_MULTIPLIER+'x)':''),'Overtime'), money(adj.Overtime)]);
     if(adj.Absent) earnings.push([withNote_('Absent'+(c.absentDays?' ('+c.absentDays+' days)':''),'Absent'), '-'+money(adj.Absent)]);
     var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0);
 
