@@ -571,6 +571,7 @@
         <button class="navbtn" data-view="att-daily">Daily</button>
         <button class="navbtn" data-view="att-shifts">Shifts</button>
         <button class="navbtn" data-view="att-holidays">Public holidays</button>
+        <button class="navbtn" data-view="att-leave">Leave</button>
         <button class="navbtn" data-view="att-missed">Missed clock-ins</button>
         <button class="navbtn" data-view="attendance">BioTime link-up</button>
       </div>
@@ -782,6 +783,34 @@
         <button class="btn primary small" id="att-hol-add-btn">Add company day</button>
       </div>
     </div>
+  </section>
+
+  <section class="view" id="view-att-leave" hidden>
+    <div class="sheet-head">
+      <h1>Leave</h1>
+      <div class="sub">Calendar year. Annual leave: 15 days from 1 January; in the year someone starts, 1.25 days per full month worked (only what's built up can be taken). Unused leave is forfeited on 31 December. Days off and public holidays don't use leave.</div>
+    </div>
+    <div class="panel">
+      <h2 style="font-size:15px;margin:0 0 8px;">Add leave</h2>
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
+        <div class="field" style="min-width:200px;"><span class="label">Person</span><select id="lv-person"></select></div>
+        <div class="field" style="min-width:170px;"><span class="label">Type</span><select id="lv-type"></select></div>
+        <div class="field"><span class="label">First day</span><input type="date" id="lv-from"></div>
+        <div class="field"><span class="label">Last day</span><input type="date" id="lv-to"></div>
+        <label class="chk-label" title="Only for a single day"><input type="checkbox" id="lv-half"> Half day</label>
+        <div class="field" style="min-width:200px;"><span class="label">Note (optional)</span><input type="text" id="lv-note" maxlength="500"></div>
+        <button class="btn primary small" id="lv-add">Add leave</button>
+      </div>
+      <div id="lv-status" class="status-msg" style="display:none;margin-top:10px;"></div>
+    </div>
+    <div class="panel" style="margin-top:16px;">
+      <div class="field-row" style="align-items:flex-end;"><div class="field" style="min-width:110px;"><span class="label">Year</span><select id="lv-year"></select></div></div>
+      <h2 style="font-size:15px;margin:14px 0 8px;">Leave taken</h2>
+      <div id="lv-people"></div>
+      <h2 style="font-size:15px;margin:18px 0 8px;">Leave records</h2>
+      <div id="lv-records"></div>
+    </div>
+    <div class="panel" style="margin-top:16px;" id="lv-switchoff"></div>
   </section>
 
   <section class="view" id="view-att-missed" hidden>
@@ -1436,7 +1465,7 @@
       if(okViews.indexOf(v) === -1 && okViews.length) v = okViews[0];
     }
     view = v;
-    ['new','quotes','rates','payroll','payroll-settings','settings','production','att-daily','att-shifts','att-holidays','att-missed','attendance','admin'].forEach(function(name){
+    ['new','quotes','rates','payroll','payroll-settings','settings','production','att-daily','att-shifts','att-holidays','att-leave','att-missed','attendance','admin'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
@@ -1455,6 +1484,7 @@
     if(v==='att-shifts') loadAttShifts_();
     if(v==='att-holidays') loadAttHolidays_();
     if(v==='att-missed') loadAttMissed_();
+    if(v==='att-leave') loadLeave_();
   }
 
   // ================= RATE CARD =================
@@ -4923,6 +4953,71 @@
     withBusy_(b, apiRead('addCompanyHoliday', { date: document.getElementById('att-hol-date').value, name: document.getElementById('att-hol-name').value }), 'Adding…').then(function(res){
       if(res && res.ok){ document.getElementById('att-hol-year').value = String(res.year); document.getElementById('att-hol-name').value=''; renderAttHolidays_(res); }
       else alert((res && res.error) || 'Couldn\'t add.');
+    });
+  });
+
+  // ---- leave (step 5) ----
+  // Code.gs leaveView_/leaveAdd_/leaveSignOff_/leaveCancel_/leaveSetSwitchOff_.
+  var lvData_ = null;
+  function lvNum_(n){ return (Math.round((Number(n)||0)*100)/100).toString(); }
+  function loadLeave_(){
+    var ys = document.getElementById('lv-year');
+    if(!ys.options.length){ var y=new Date().getFullYear(); for(var i=y-1;i<=y+1;i++) ys.insertAdjacentHTML('beforeend','<option'+(i===y?' selected':'')+'>'+i+'</option>'); }
+    document.getElementById('lv-people').innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getLeave', { year: ys.value }).then(renderLeave_).catch(function(e){ document.getElementById('lv-people').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  function renderLeave_(res){
+    if(!res || !res.ok){ attErr_('lv-people', res); return; }
+    lvData_ = res;
+    var ps = document.getElementById('lv-person'), keep = ps.value;
+    ps.innerHTML = '<option value="">Choose person…</option>' + res.people.filter(function(p){ return p.active; }).map(function(p){ return '<option value="'+esc(p.empCode)+'"'+(p.empCode===keep?' selected':'')+'>'+esc(p.name)+' · #'+esc(p.empCode)+'</option>'; }).join('');
+    var ts = document.getElementById('lv-type');
+    if(!ts.options.length) ts.innerHTML = res.types.map(function(t){ return '<option>'+esc(t)+'</option>'; }).join('');
+    document.getElementById('lv-people').innerHTML = '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Started</th><th class="num">Annual this year</th><th class="num">Built up so far</th><th class="num">Annual taken</th><th class="num">Annual left</th><th class="num">Sick</th><th class="num">Family resp.</th><th class="num">Unpaid</th><th class="num">Maternity</th></tr></thead><tbody>' +
+      res.people.map(function(p){
+        return '<tr'+(p.active?'':' style="opacity:.6;"')+'><td>'+esc(p.name)+'</td><td>'+esc(p.startDate||'')+'</td><td class="num">'+lvNum_(p.entitlement)+(p.firstYear?' <span class="chip">first year</span>':'')+'</td>' +
+          '<td class="num">'+(p.firstYear?lvNum_(p.earned):'')+'</td><td class="num">'+lvNum_(p.annualTaken)+'</td><td class="num"><b>'+lvNum_(p.annualLeft)+'</b></td>' +
+          '<td class="num">'+(p.sick?lvNum_(p.sick):'')+'</td><td class="num">'+(p.family?lvNum_(p.family):'')+'</td><td class="num">'+(p.unpaid?lvNum_(p.unpaid):'')+'</td><td class="num">'+(p.maternity?lvNum_(p.maternity):'')+'</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    var rl = document.getElementById('lv-records');
+    rl.innerHTML = res.records.length ? '<div class="table-wrap"><table><thead><tr><th>Person</th><th>Type</th><th>Dates</th><th class="num">Days</th><th>From</th><th>Sign-off</th><th></th></tr></thead><tbody>' + res.records.map(function(r){
+      var dates = r.from===r.to ? r.from : r.from+' to '+r.to;
+      var srcCell = r.source==='biotime' ? '<span class="chip">BioTime</span> <span style="font-size:11px;">'+esc(r.btType||'')+'</span>' : esc(r.enteredBy||'') + (r.note ? '<div style="font-size:11px;color:var(--ink-soft);">'+esc(r.note)+'</div>' : '');
+      var sign = '', act = '';
+      if(r.cancelled){ sign = '<span class="chip warn">cancelled</span> <span style="font-size:11px;">'+esc(r.cancelledBy)+': '+esc(r.cancelReason)+'</span>'; }
+      else if(r.source==='batten'){
+        sign = r.signOff==='approved' ? '<span class="chip good">signed off</span> <span style="font-size:11px;">'+esc(r.signedOffBy)+'</span>' : '<span class="chip amber">awaiting sign-off</span>';
+        act = (r.signOff!=='approved' ? (r.canSignOff ? '<button class="btn small primary lv-ok" data-id="'+esc(r.id)+'">Sign off</button> ' : '<span style="font-size:11px;color:var(--ink-soft);">'+esc(r.cannotWhy)+'</span> ') : '') + '<button class="btn small lv-cancel" data-id="'+esc(r.id)+'">Cancel</button>';
+      }
+      return '<tr'+(r.cancelled?' style="opacity:.6;text-decoration:line-through;"':'')+'><td>'+esc(r.name)+'</td><td>'+esc(r.type)+(r.half?' (half day)':'')+'</td><td>'+esc(dates)+'</td><td class="num">'+(r.cancelled?'':lvNum_(r.days))+'</td><td>'+srcCell+'</td><td style="text-decoration:none;">'+sign+'</td><td>'+act+'</td></tr>';
+    }).join('') + '</tbody></table></div>' : '<div class="empty">No leave this year.</div>';
+    rl.querySelectorAll('.lv-ok').forEach(function(b){ b.addEventListener('click', function(){ withBusy_(b, apiRead('signOffLeave', { id: b.dataset.id }), 'Saving…').then(function(x){ if(x && x.ok) renderLeave_(x); else alert((x && x.error) || 'Couldn\'t sign off.'); }); }); });
+    rl.querySelectorAll('.lv-cancel').forEach(function(b){ b.addEventListener('click', function(){
+      var reason = prompt('Reason for cancelling this leave? (The record is kept.)');
+      if(!reason) return;
+      withBusy_(b, apiRead('cancelLeave', { id: b.dataset.id, reason: reason }), 'Cancelling…').then(function(x){ if(x && x.ok) renderLeave_(x); else alert((x && x.error) || 'Couldn\'t cancel.'); });
+    }); });
+    var so = res.switchOff || {}, own = attIsOwner_();
+    document.getElementById('lv-switchoff').innerHTML = '<h2 style="font-size:15px;margin:0 0 8px;">Stop using leave and manual clock-ins from BioTime</h2>' +
+      '<div class="sub">From this date, leave and manual clock-ins entered in BioTime are ignored, so Batten is the only place they\'re recorded. Ignored entries are still counted here so you can see if anyone keeps using BioTime.</div>' +
+      '<div style="margin-top:8px;font-size:13px;">'+(so.date ? 'Switched off from <b>'+esc(so.date)+'</b>. Ignored since then: '+so.ignored.leave+' leave record(s), '+so.ignored.manual+' manual clock-in(s).' : 'Not switched off: BioTime leave and manual clock-ins are still counted.')+'</div>' +
+      (own ? '<div class="field-row" style="align-items:flex-end;margin-top:8px;"><div class="field"><span class="label">Switch-off date</span><input type="date" id="lv-so-date" value="'+esc(so.date||'')+'"></div><button class="btn small" id="lv-so-save">Save</button></div>' : '');
+    var sb = document.getElementById('lv-so-save');
+    if(sb) sb.addEventListener('click', function(){ withBusy_(sb, apiRead('setBiotimeSwitchOff', { date: document.getElementById('lv-so-date').value, year: res.year }), 'Saving…').then(function(x){ if(x && x.ok) renderLeave_(x); else alert((x && x.error) || 'Couldn\'t save.'); }); });
+  }
+  function lvSyncHalf_(){
+    var f=document.getElementById('lv-from').value, t=document.getElementById('lv-to').value, h=document.getElementById('lv-half');
+    h.disabled = !!(f && t && f!==t); if(h.disabled) h.checked=false;
+  }
+  document.getElementById('lv-from').addEventListener('change', function(){ var t=document.getElementById('lv-to'); if(!t.value || t.value < this.value) t.value=this.value; lvSyncHalf_(); });
+  document.getElementById('lv-to').addEventListener('change', lvSyncHalf_);
+  document.getElementById('lv-year').addEventListener('change', loadLeave_);
+  document.getElementById('lv-add').addEventListener('click', function(){
+    var b=this, st=document.getElementById('lv-status');
+    withBusy_(b, apiRead('addLeave', { empCode: document.getElementById('lv-person').value, type: document.getElementById('lv-type').value, from: document.getElementById('lv-from').value, to: document.getElementById('lv-to').value, half: document.getElementById('lv-half').checked, note: document.getElementById('lv-note').value }), 'Adding…').then(function(res){
+      st.style.display='block';
+      if(res && res.ok){ st.className='status-msg'; st.textContent='Leave added. It counts now and needs a sign-off from someone else in Management.'; document.getElementById('lv-note').value=''; document.getElementById('lv-year').value=String(res.year); renderLeave_(res); }
+      else { st.className='status-msg error'; st.textContent=(res && res.error) || 'Couldn\'t add the leave.'; }
     });
   });
 
