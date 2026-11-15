@@ -890,11 +890,12 @@
 
     <div class="panel" id="users-add-panel" style="max-width:620px;margin-top:16px;">
       <h2 style="margin:0 0 4px;">Add a new login</h2>
-      <div class="sub" style="margin-bottom:14px;">Fill in the details and click Add login. Link them to their payroll employee afterwards, in their box above.</div>
+      <div class="sub" style="margin-bottom:14px;">Fill in the details and click Add login. Pick their payroll employee so Batten knows who they are: anyone in Management gets Attendance automatically.</div>
       <div class="field-row" style="align-items:flex-end;">
         <div class="field"><span class="label">Name</span><input type="text" id="user-new-name" placeholder="e.g. Izak"></div>
         <div class="field"><span class="label">Username</span><input type="text" id="user-new-username" autocomplete="off"></div>
         <div class="field"><span class="label">Password</span><input type="password" id="user-new-password" autocomplete="new-password"></div>
+        <div class="field" style="min-width:200px;" title="Which payroll employee this login belongs to. A login linked to someone in the Management department gets Attendance."><span class="label">Employee</span><select id="user-new-employee"><option value="">(not linked)</option></select></div>
         <div class="field">
           <span class="label">Role</span>
           <select id="user-new-role">
@@ -1257,7 +1258,8 @@
     { key:'rateCard', label:'Rate Card only', hint:'View and edit the Rate Card, without New Quote, Quotes or Costing settings. Not needed if Costing is ticked.' },
     { key:'production', label:'Production board', hint:'View the workshop production board.' },
     { key:'tickProgress', label:'Tick off production progress', hint:'Mark a job’s checklist sections done on the production board (needs Production board too).' },
-    { key:'payroll', label:'Payroll', hint:'Salaries, payslips and payroll runs — sensitive, only tick this for someone who should see it.' }
+    { key:'payroll', label:'Payroll', hint:'Salaries, payslips and payroll runs — sensitive, only tick this for someone who should see it.' },
+    { key:'attendance', label:'Attendance', hint:'Daily attendance, shifts, public holidays, leave, missed clock-ins and BioTime link-up (no pay amounts). Automatic for anyone linked to a Management employee. Signing off leave and missed clock-ins stays with Management.' }
   ];
   function allowedModesFor_(user){
     if(!user || user.role==='owner') return ['costing','payroll','production','attendance','admin'];
@@ -5274,6 +5276,14 @@
       }
       usersCache = (res && res.users) || [];
       usersEmployees_ = (res && res.employees) || [];
+      var ne = document.getElementById('user-new-employee');
+      if(ne){
+        var keepNe = ne.value, linked = {};
+        usersCache.forEach(function(u){ if(u.employeeId) linked[u.employeeId] = true; });
+        ne.innerHTML = '<option value="">(not linked)</option>' + usersEmployees_.filter(function(e){ return e.active && !linked[e.id]; }).map(function(e){
+          return '<option value="'+esc(e.id)+'"'+(keepNe===e.id?' selected':'')+'>'+esc(e.name)+(e.department?' · '+esc(e.department):'')+'</option>';
+        }).join('');
+      }
       renderUsersAdmin_();
     }).catch(function(){
       document.getElementById('users-list-mgr').innerHTML = '<div class="status-msg error">Couldn\'t load users.</div>';
@@ -5283,11 +5293,15 @@
   // Shared between the "add user" form and each existing user's edit row — one checkbox
   // per EMPLOYEE_PERMISSIONS entry, `selected` pre-ticked, `cls` is the CSS class the
   // save/add handler below reads back off (e.g. 'u-perm' or 'un-perm').
-  function permissionCheckboxesHtml_(selected, cls){
+  // fromManagement: this login is linked to a Management employee, so Attendance is theirs
+  // automatically — shown ticked and greyed out (and never saved as a ticked permission, so
+  // it goes away by itself if they leave Management).
+  function permissionCheckboxesHtml_(selected, cls, fromManagement){
     selected = selected || [];
     return EMPLOYEE_PERMISSIONS.map(function(p){
+      var auto = p.key==='attendance' && fromManagement;
       return '<label class="chk-label" style="display:flex;min-width:190px;margin-top:4px;" title="'+esc(p.hint)+'">' +
-        '<input type="checkbox" class="'+cls+'" value="'+p.key+'"'+(selected.indexOf(p.key)!==-1?' checked':'')+'> '+esc(p.label) +
+        '<input type="checkbox" class="'+cls+'" value="'+p.key+'"'+((auto || selected.indexOf(p.key)!==-1)?' checked':'')+(auto?' disabled':'')+'> '+esc(p.label)+(auto?' <span style="font-size:11px;color:var(--ink-soft);">&nbsp;(from Management)</span>':'') +
       '</label>';
     }).join('');
   }
@@ -5322,7 +5336,7 @@
             }).join('') +
           '</select></div>' +
         '</div>' +
-        '<div class="field-row u-perms">'+permissionCheckboxesHtml_(u.permissions, 'u-perm')+'</div>' +
+        '<div class="field-row u-perms">'+permissionCheckboxesHtml_(u.permissions, 'u-perm', u.attendanceFromManagement)+'</div>' +
         '<div class="field-row" style="margin-top:8px;align-items:center;">' +
           '<label class="chk-label"><input type="checkbox" class="u-active"'+(u.active?' checked':'')+'> Active</label>' +
           '<button class="btn small u-save">Save</button>' +
@@ -5343,7 +5357,7 @@
           username: row.querySelector('.u-username').value.trim(),
           role: role,
           active: row.querySelector('.u-active').checked,
-          permissions: Array.prototype.map.call(row.querySelectorAll('.u-perm:checked'), function(cb){ return cb.value; }),
+          permissions: Array.prototype.map.call(row.querySelectorAll('.u-perm:checked:not(:disabled)'), function(cb){ return cb.value; }),
           employeeId: row.querySelector('.u-employee').value
         };
         var pwd = row.querySelector('.u-password').value;
@@ -5411,13 +5425,15 @@
     var permsContainer = document.getElementById('user-new-permissions');
     var permissions = Array.prototype.map.call(permsContainer.querySelectorAll('.un-perm:checked'), function(cb){ return cb.value; });
     var token = uid();
-    apiWrite('addUser', { user: { name:name, username:username, password:password, role:roleInput.value, permissions:permissions }, actingUserId: currentUser.id, token: token }).then(function(){
+    var newEmpSel = document.getElementById('user-new-employee');
+    apiWrite('addUser', { user: { name:name, username:username, password:password, role:roleInput.value, permissions:permissions, employeeId: newEmpSel ? newEmpSel.value : '' }, actingUserId: currentUser.id, token: token }).then(function(){
       return pollTokenResult_('getAddUserResult', token);
     }).then(function(res){
       if(res && res.result && res.result.id){
         statusEl.textContent = 'Added.';
         nameInput.value = ''; usernameInput.value = ''; passwordInput.value = '';
         permsContainer.querySelectorAll('.un-perm').forEach(function(cb){ cb.checked = false; });
+        if(newEmpSel) newEmpSel.value = '';
         loadUsersAdmin_();
       } else {
         statusEl.className = 'status-msg error';
