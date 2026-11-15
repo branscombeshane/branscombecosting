@@ -861,6 +861,16 @@
       <h2 style="font-size:15px;margin:0 0 8px;">Payroll employees not linked to BioTime</h2>
       <div id="bt-unlinked-emps"></div>
     </div>
+    <div class="panel" style="margin-top:16px;" id="bt-renumber" hidden>
+      <h2 style="font-size:15px;margin:0 0 8px;">A BioTime number was changed</h2>
+      <div class="sub">After you change someone's Employee ID in BioTime (e.g. to match their payroll number) and the next sync has run, BioTime's new number shows above as a new, unlinked person. Move Batten's records — clock-ins, shift, leave, missed clock-ins and the payroll link — from the old number to the new one here.</div>
+      <div class="field-row" style="align-items:flex-end;margin-top:8px;flex-wrap:wrap;">
+        <div class="field" style="min-width:220px;"><span class="label">Old number (no longer active)</span><select id="bt-rn-from"></select></div>
+        <div class="field" style="min-width:220px;"><span class="label">New number</span><select id="bt-rn-to"></select></div>
+        <button class="btn small primary" id="bt-rn-go">Move records</button>
+      </div>
+      <div id="bt-rn-status" class="status-msg" style="display:none;margin-top:10px;"></div>
+    </div>
   </section>
 
   <section class="view" id="view-admin" hidden>
@@ -5212,7 +5222,24 @@
     document.getElementById('bt-unlinked-emps').innerHTML = activeFree.length
       ? '<div style="font-size:13px;">'+activeFree.map(function(e){ return esc(e.name)+(e.employeeNumber?' (#'+esc(e.employeeNumber)+')':'')+(e.department?' · '+esc(e.department):''); }).join('<br>')+'</div>'
       : '<div class="empty">Every active payroll employee is linked.</div>';
+    // owner tool: a BioTime number was changed
+    var rn = document.getElementById('bt-renumber');
+    var oldOnes = (d.staff||[]).filter(function(p){ return !p.active && !p.resignDate; });
+    var newOnes = (d.staff||[]).filter(function(p){ return p.active && !p.link; });
+    rn.hidden = !attIsOwner_();
+    document.getElementById('bt-rn-from').innerHTML = '<option value="">Choose…</option>' + oldOnes.map(function(p){ return '<option value="'+esc(p.empCode)+'">#'+esc(p.empCode)+' '+esc(p.name)+(p.link?' → '+esc(p.link.employeeName):'')+'</option>'; }).join('');
+    document.getElementById('bt-rn-to').innerHTML = '<option value="">Choose…</option>' + newOnes.map(function(p){ return '<option value="'+esc(p.empCode)+'">#'+esc(p.empCode)+' '+esc(p.name)+'</option>'; }).join('');
+    if(d.message){ var st=document.getElementById('bt-rn-status'); st.style.display='block'; st.className='status-msg'; st.textContent=d.message; }
   }
+  document.getElementById('bt-rn-go').addEventListener('click', function(){
+    var b=this, from=document.getElementById('bt-rn-from').value, to=document.getElementById('bt-rn-to').value, st=document.getElementById('bt-rn-status');
+    if(!from || !to){ alert('Choose the old and the new number.'); return; }
+    if(!confirm('Move all of Batten\'s records for BioTime #'+from+' to #'+to+'? Only do this if it is the same person and the number was changed in BioTime.')) return;
+    withBusy_(b, apiRead('renumberBiotimePerson', { from: from, to: to }), 'Moving…').then(function(res){
+      if(res && res.ok){ btData_ = res; renderBiotimeLinkup_(); }
+      else { st.style.display='block'; st.className='status-msg error'; st.textContent=(res && res.error) || 'Couldn\'t move the records.'; }
+    });
+  });
   function btSetLink_(btn, code, employeeId){
     withBusy_(btn, apiRead('setBiotimeLink', { empCode: code, employeeId: employeeId }), employeeId ? 'Linking…' : 'Unlinking…').then(function(res){
       if(res && res.ok){ btData_ = res; renderBiotimeLinkup_(); }
