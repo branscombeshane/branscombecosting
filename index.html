@@ -592,6 +592,7 @@
         <button class="navbtn" data-tab="roster">Roster</button>
         <button class="navbtn" data-tab="adjustments">Pay Adjustments</button>
         <button class="navbtn" data-tab="run">Run Payroll</button>
+        <button class="navbtn" data-tab="clockins">Clock-ins to pay</button>
         <button class="navbtn" data-tab="reports">Reports</button>
         <button class="navbtn" data-view="payroll-settings">Settings</button>
       </div>
@@ -5341,7 +5342,7 @@
   // Display-only helper for the +/- prefix in the Pay Adjustments "This month" summary
   // column — spans both pre-tax (Absent, reduces Gross) and post-tax (Deduction,
   // AdvanceRepayment, reduce Net) subtraction types; it isn't used for any tax math.
-  var ADJ_NET_SUBTRACT_TYPES = ['Absent','Deduction','AdvanceRepayment'];
+  var ADJ_NET_SUBTRACT_TYPES = ['Absent','Late','Deduction','AdvanceRepayment'];
 
   function defaultPayrollMonth_(){
     var d = new Date(); var m = d.getMonth()+1;
@@ -5373,6 +5374,58 @@
     else if(payrollTab==='adjustments') loadPayrollAdjustments();
     else if(payrollTab==='run') loadPayrollRun();
     else if(payrollTab==='reports') loadReports();
+    else if(payrollTab==='clockins') loadClockinsToPay_();
+  }
+
+  // -------- Clock-ins to pay (BioTime step 6) --------
+  // Code.gs c2pView_/c2pAccept_: per payroll month, the matching attendance period (20th of
+  // the previous month to the 19th) gives suggested Absent days, Late minutes (only if over
+  // 100 in the period) and Overtime hours. Nothing reaches pay until Accept is clicked.
+  function loadClockinsToPay_(){
+    apiRead('getClockinsToPay', { month: payrollMonth }).then(renderClockinsToPay_).catch(function(e){
+      document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
+    });
+  }
+  function renderClockinsToPay_(res){
+    if(payrollTab!=='clockins') return;
+    var body = document.getElementById('payroll-body'), stats = document.getElementById('payroll-stats');
+    if(!res || !res.ok){
+      var msg = (res && res.error && /^Unknown action/.test(res.error)) ? 'The backend (Code.gs) needs to be updated to the latest version for Clock-ins to pay.' : ((res && res.error) || 'Couldn\'t load.');
+      body.innerHTML = '<div class="status-msg error">'+esc(msg)+'</div>'; if(stats) stats.innerHTML=''; return;
+    }
+    var rows = res.rows||[];
+    var tot = rows.reduce(function(a,r){ a.abs+=r.absentAmount||0; a.late+=r.lateAmount||0; a.ot+=r.overtimeAmount||0; return a; }, {abs:0,late:0,ot:0});
+    if(stats) stats.innerHTML =
+      '<div class="stat"><span class="label">Attendance period</span><span class="value" style="font-size:15px;">'+esc(res.periodStart)+' to '+esc(res.periodEnd)+'</span></div>' +
+      '<div class="stat"><span class="label">Absent (deduct)</span><span class="value num">'+money(tot.abs)+'</span></div>' +
+      '<div class="stat"><span class="label">Late (deduct)</span><span class="value num">'+money(tot.late)+'</span></div>' +
+      '<div class="stat total"><span class="label">Overtime ('+res.overtimeMultiplier+'×)</span><span class="value num">'+money(tot.ot)+'</span></div>';
+    var head = '<div class="sub" style="margin-bottom:10px;">Suggestions from clock-ins for payroll month <b>'+esc(payrollMonth)+'</b>. '+
+      (res.inProgress ? '<b>This period isn\'t over yet</b>: figures run up to '+esc(res.upTo)+' and will change. ' : '') +
+      'Late is only deducted when the period\'s total is over '+res.lateThreshold+' minutes. Missed clock-ins that aren\'t signed off yet are left out. Accept turns a row into Pay Adjustments; accepting again replaces the earlier ones.</div>' +
+      (res.message ? '<div class="status-msg" style="margin-bottom:10px;">'+esc(res.message)+'</div>' : '') +
+      (rows.length && rows[0].monthHasRun ? '<div class="status-msg error" style="margin-bottom:10px;">Payroll for '+esc(payrollMonth)+' has already been run: re-run it after accepting to include these.</div>' : '');
+    var table = rows.length ? '<div class="table-wrap"><table><thead><tr><th>Employee</th><th class="num">Absent</th><th class="num">Late</th><th class="num">Overtime</th><th>Check</th><th>Accepted</th><th></th></tr></thead><tbody>' +
+      rows.map(function(r){
+        var abs = r.absentDays ? r.absentDays+' day(s)<div style="font-size:11px;">-'+(r.absentAmount!=null?money(r.absentAmount):'?')+'</div>' : '';
+        var late = r.lateTotal ? r.lateTotal+' min'+(r.lateDeduct ? '<div style="font-size:11px;">-'+(r.lateAmount!=null?money(r.lateAmount):'?')+'</div>' : '<div style="font-size:11px;color:var(--ink-soft);">under '+res.lateThreshold+', not deducted</div>') : '';
+        var ot = r.overtimeHrs ? r.overtimeHrs.toFixed(1)+' h<div style="font-size:11px;">+'+(r.overtimeAmount!=null?money(r.overtimeAmount):'?')+'</div>' : '';
+        var check = (r.checkDates.length ? '<span class="chip amber" title="'+esc(r.checkDates.join('\n'))+'">'+r.checkDates.length+' day(s) with a missing clock-in/out</span>' : '') + (r.hasRates ? '' : ' <span class="chip warn">no day rate on Roster</span>') + (r.finalized ? ' <span class="chip good">Finalized</span>' : '');
+        var acc = r.accepted ? r.accepted.map(function(a){ return esc(a.type)+' '+money(a.amount); }).join('<br>') : '';
+        var nothing = !r.absentDays && !r.lateDeduct && !r.overtimeHrs;
+        var btn = (r.finalized || !r.hasRates) ? '' : '<button class="btn small '+(r.accepted?'':'primary ')+'c2p-accept" data-id="'+esc(r.employeeId)+'">'+(r.accepted ? 'Accept again' : (nothing ? 'Nothing to add' : 'Accept'))+'</button>';
+        return '<tr><td>'+esc(r.name)+'<div style="font-size:11px;color:var(--ink-soft);">'+esc(r.department||'')+'</div>'+(r.absentDates.length?'<div style="font-size:11px;color:var(--ink-soft);">Absent: '+esc(r.absentDates.join(', '))+'</div>':'')+'</td>' +
+          '<td class="num">'+abs+'</td><td class="num">'+late+'</td><td class="num">'+ot+'</td><td>'+check+'</td><td style="font-size:12px;">'+acc+'</td><td>'+btn+'</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No linked employees have clock-ins in this period yet.</div>';
+    var extra = '';
+    if((res.notLinked||[]).length) extra += '<div class="sub" style="margin-top:10px;">Not linked to a payroll employee (left out): '+res.notLinked.map(function(x){ return esc(x.name); }).join(', ')+'. Link them under Attendance → BioTime link-up.</div>';
+    if((res.notOnPayroll||[]).length) extra += '<div class="sub" style="margin-top:6px;">Not on Batten payroll (attendance only, left out): '+res.notOnPayroll.map(function(x){ return esc(x.name); }).join(', ')+'.</div>';
+    body.innerHTML = head + table + extra;
+    body.querySelectorAll('.c2p-accept').forEach(function(b){ b.addEventListener('click', function(){
+      withBusy_(b, apiRead('acceptClockinsToPay', { month: payrollMonth, employeeId: b.dataset.id }), 'Accepting…').then(function(x){
+        if(x && x.ok) renderClockinsToPay_(x); else alert((x && x.error) || 'Couldn\'t accept.');
+      });
+    }); });
   }
 
   // -------- Roster --------
@@ -5992,14 +6045,14 @@
     var itemsHtml = items.length ? (
       '<table><thead><tr><th>Type</th><th class="num">Amount</th><th>Note</th><th></th></tr></thead><tbody>' +
       items.map(function(it){
-        var qtySuffix = it.type==='Overtime' && it.hours ? ' ('+it.hours+'h)' : (it.type==='Absent' && it.hours ? ' ('+it.hours+'d)' : '');
+        var qtySuffix = it.type==='Overtime' && it.hours ? ' ('+it.hours+'h)' : (it.type==='Absent' && it.hours ? ' ('+it.hours+'d)' : (it.type==='Late' && it.hours ? ' ('+it.hours+' min)' : ''));
         return '<tr data-id="'+it.id+'"><td>'+esc(it.type)+qtySuffix+'</td><td class="num">'+money(it.amount)+'</td><td>'+esc(it.note||'')+'</td><td><button class="btn small danger adj-item-del">Delete</button></td></tr>';
       }).join('') + '</tbody></table>'
     ) : '<div class="empty">No adjustments yet this month.</div>';
 
     // AdvanceGiven isn't offered here — a cash advance is recorded any time through
     // the separate "Give advance" button below, not as a month-scoped adjustment.
-    var typeOptions = ['Commission','Bonus','Overtime','Absent','Deduction','AdvanceRepayment'].map(function(t){
+    var typeOptions = ['Commission','Bonus','Overtime','Absent','Late','Deduction','AdvanceRepayment'].map(function(t){
       return '<option value="'+t+'">'+t+'</option>';
     }).join('');
 
@@ -6083,7 +6136,8 @@
     function syncOvertimeFields(){
       var isOt = typeSel.value==='Overtime';
       var isAbsent = typeSel.value==='Absent';
-      hoursField.hidden = !(isOt || isAbsent);
+      var isLate = typeSel.value==='Late';
+      hoursField.hidden = !(isOt || isAbsent || isLate);
       if(isOt){
         hoursLabel.textContent = 'Hours (paid at ' + OVERTIME_RATE_MULTIPLIER + '× ' + (e.hourRate ? money(e.hourRate) + '/hr' : 'the hourly rate') + ')';
         amountInput.value = (hoursInput.value && e.hourRate) ? round2Js_(Number(hoursInput.value)*e.hourRate*OVERTIME_RATE_MULTIPLIER) : '';
@@ -6091,6 +6145,11 @@
       } else if(isAbsent){
         hoursLabel.textContent = 'Days absent';
         amountInput.value = (hoursInput.value && e.dayRate) ? round2Js_(Number(hoursInput.value)*e.dayRate) : '';
+        amountInput.readOnly = true; amountField.style.opacity = .7;
+      } else if(isLate){
+        // Late: minutes not worked, at the hourly rate, off Gross before tax (like Absent)
+        hoursLabel.textContent = 'Minutes late (only deducted when the month\'s total is over 100)';
+        amountInput.value = (hoursInput.value && e.hourRate) ? round2Js_(Number(hoursInput.value)/60*e.hourRate) : '';
         amountInput.readOnly = true; amountField.style.opacity = .7;
       } else {
         amountInput.readOnly = false; amountField.style.opacity = 1;
@@ -6119,7 +6178,8 @@
       errBox.textContent = '';
       if(type==='Overtime' && (!hours||hours<=0)){ errBox.textContent='Enter the number of overtime hours.'; return; }
       if(type==='Absent' && (!hours||hours<=0)){ errBox.textContent='Enter the number of days absent.'; return; }
-      if(type!=='Overtime' && type!=='Absent' && (!amount||amount<=0)){ errBox.textContent='Amount must be a positive number.'; return; }
+      if(type==='Late' && (!hours||hours<=0)){ errBox.textContent='Enter the number of minutes late.'; return; }
+      if(type!=='Overtime' && type!=='Absent' && type!=='Late' && (!amount||amount<=0)){ errBox.textContent='Amount must be a positive number.'; return; }
 
       withBusy_(addBtn, apiRead('addAdjustment', { employeeId:e.id, month:payrollMonth, type:type, amount:amount, hours:hours, note:note }), 'Adding…').then(function(res){
         if(res && res.ok) loadPayrollAdjustments();
@@ -6689,7 +6749,8 @@
     if(adj.Bonus) earnings.push([withNote_('Bonus','Bonus'), money(adj.Bonus)]);
     if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs @ '+OVERTIME_RATE_MULTIPLIER+'x)':''),'Overtime'), money(adj.Overtime)]);
     if(adj.Absent) earnings.push([withNote_('Absent'+(c.absentDays?' ('+c.absentDays+' days)':''),'Absent'), '-'+money(adj.Absent)]);
-    var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0);
+    if(adj.Late) earnings.push([withNote_('Late'+(c.lateMinutes?' ('+c.lateMinutes+' min)':''),'Late'), '-'+money(adj.Late)]);
+    var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0) - (adj.Late||0);
 
     var deductions = [];
     deductions.push(['Paye As You Earn (PAYE)', money(c.paye)]);
@@ -6835,7 +6896,8 @@
     if(adj.Bonus) earnings.push([withNote_('Bonus','Bonus'), money(adj.Bonus)]);
     if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs @ '+OVERTIME_RATE_MULTIPLIER+'x)':''),'Overtime'), money(adj.Overtime)]);
     if(adj.Absent) earnings.push([withNote_('Absent'+(c.absentDays?' ('+c.absentDays+' days)':''),'Absent'), '-'+money(adj.Absent)]);
-    var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0);
+    if(adj.Late) earnings.push([withNote_('Late'+(c.lateMinutes?' ('+c.lateMinutes+' min)':''),'Late'), '-'+money(adj.Late)]);
+    var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0) - (adj.Late||0);
 
     var deductions = [];
     deductions.push(['Paye As You Earn (PAYE)', money(c.paye)]);
