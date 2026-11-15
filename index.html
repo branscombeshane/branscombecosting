@@ -593,7 +593,6 @@
         <button class="navbtn" data-tab="roster">Roster</button>
         <button class="navbtn" data-tab="adjustments">Pay Adjustments</button>
         <button class="navbtn" data-tab="run">Run Payroll</button>
-        <button class="navbtn" data-tab="clockins">Clock-ins to pay</button>
         <button class="navbtn" data-tab="reports">Reports</button>
         <button class="navbtn" data-view="payroll-settings">Settings</button>
       </div>
@@ -5472,35 +5471,29 @@
     else if(payrollTab==='adjustments') loadPayrollAdjustments();
     else if(payrollTab==='run') loadPayrollRun();
     else if(payrollTab==='reports') loadReports();
-    else if(payrollTab==='clockins') loadClockinsToPay_();
   }
 
   // -------- Clock-ins to pay (BioTime step 6) --------
-  // Code.gs c2pView_/c2pAccept_: per payroll month, the matching attendance period (20th of
-  // the previous month to the 19th) gives suggested Absent days, Late minutes (only if over
-  // 100 in the period) and Overtime hours. Nothing reaches pay until Accept is clicked.
-  function loadClockinsToPay_(){
-    apiRead('getClockinsToPay', { month: payrollMonth }).then(renderClockinsToPay_).catch(function(e){
-      document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>';
-    });
-  }
-  function renderClockinsToPay_(res){
-    if(payrollTab!=='clockins') return;
-    var body = document.getElementById('payroll-body'), stats = document.getElementById('payroll-stats');
-    if(!res || !res.ok){
-      var msg = (res && res.error && /^Unknown action/.test(res.error)) ? 'The backend (Code.gs) needs to be updated to the latest version for Clock-ins to pay.' : ((res && res.error) || 'Couldn\'t load.');
-      body.innerHTML = '<div class="status-msg error">'+esc(msg)+'</div>'; if(stats) stats.innerHTML=''; return;
+  // Shown as a panel at the top of Pay Adjustments, so it all sits together. Code.gs
+  // c2pView_/c2pAccept_: per payroll month, the attendance period (20th of the previous month
+  // to the 19th) gives suggested Absent days, Late minutes (only if over 100 in the period) and
+  // Overtime hours. Nothing reaches pay until Accept is clicked; the rows then appear in the
+  // list below as ordinary adjustments.
+  var c2pData_ = null;
+  function renderC2pPanel_(){
+    var el = document.getElementById('c2p-panel');
+    if(!el) return;
+    var res = c2pData_;
+    var title = '<h2 style="margin:0 0 6px;">Suggestions from clock-ins'+(res && res.periodStart ? ' — '+esc(res.periodStart)+' to '+esc(res.periodEnd) : '')+'</h2>';
+    if(!res){ el.innerHTML = title + '<div class="empty">Loading…</div>'; return; }
+    if(!res.ok){
+      var msg = (res.error && /^Unknown action/.test(res.error)) ? 'The backend (Code.gs) needs to be updated to the latest version for clock-in suggestions.' : (res.error==='forbidden' ? 'Clock-in suggestions need the Payroll permission.' : (res.error || 'Couldn\'t load.'));
+      el.innerHTML = title + '<div class="status-msg error">'+esc(msg)+'</div>'; return;
     }
     var rows = res.rows||[];
-    var tot = rows.reduce(function(a,r){ a.abs+=r.absentAmount||0; a.late+=r.lateAmount||0; a.ot+=r.overtimeAmount||0; return a; }, {abs:0,late:0,ot:0});
-    if(stats) stats.innerHTML =
-      '<div class="stat"><span class="label">Attendance period</span><span class="value" style="font-size:15px;">'+esc(res.periodStart)+' to '+esc(res.periodEnd)+'</span></div>' +
-      '<div class="stat"><span class="label">Absent (deduct)</span><span class="value num">'+money(tot.abs)+'</span></div>' +
-      '<div class="stat"><span class="label">Late (deduct)</span><span class="value num">'+money(tot.late)+'</span></div>' +
-      '<div class="stat total"><span class="label">Overtime ('+res.overtimeMultiplier+'×)</span><span class="value num">'+money(tot.ot)+'</span></div>';
-    var head = '<div class="sub" style="margin-bottom:10px;">Suggestions from clock-ins for payroll month <b>'+esc(payrollMonth)+'</b>. '+
-      (res.inProgress ? '<b>This period isn\'t over yet</b>: figures run up to '+esc(res.upTo)+' and will change. ' : '') +
-      'Late is only deducted when the period\'s total is over '+res.lateThreshold+' minutes. Missed clock-ins that aren\'t signed off yet are left out. Accept turns a row into Pay Adjustments; accepting again replaces the earlier ones.</div>' +
+    var head = '<div class="sub" style="margin-bottom:10px;">'+
+      (res.inProgress ? '<b>This period isn\'t over yet</b>: figures run up to '+esc(res.upTo)+' and will change; accept after the 19th (or Accept again then). ' : '') +
+      'Absent at the day rate, Late only when the period\'s total is over '+res.lateThreshold+' minutes, Overtime at '+res.overtimeMultiplier+'× the hourly rate. Missed clock-ins not yet signed off are left out. Accept adds the row to the adjustments below; Accept again replaces it.</div>' +
       (res.message ? '<div class="status-msg" style="margin-bottom:10px;">'+esc(res.message)+'</div>' : '') +
       (rows.length && rows[0].monthHasRun ? '<div class="status-msg error" style="margin-bottom:10px;">Payroll for '+esc(payrollMonth)+' has already been run: re-run it after accepting to include these.</div>' : '');
     var table = rows.length ? '<div class="table-wrap"><table><thead><tr><th>Employee</th><th class="num">Absent</th><th class="num">Late</th><th class="num">Overtime</th><th>Check</th><th>Accepted</th><th></th></tr></thead><tbody>' +
@@ -5511,17 +5504,18 @@
         var check = (r.checkDates.length ? '<span class="chip amber" title="'+esc(r.checkDates.join('\n'))+'">'+r.checkDates.length+' day(s) with a missing clock-in/out</span>' : '') + (r.hasRates ? '' : ' <span class="chip warn">no day rate on Roster</span>') + (r.finalized ? ' <span class="chip good">Finalized</span>' : '');
         var acc = r.accepted ? r.accepted.map(function(a){ return esc(a.type)+' '+money(a.amount); }).join('<br>') : '';
         var nothing = !r.absentDays && !r.lateDeduct && !r.overtimeHrs;
-        var btn = (r.finalized || !r.hasRates) ? '' : '<button class="btn small '+(r.accepted?'':'primary ')+'c2p-accept" data-id="'+esc(r.employeeId)+'">'+(r.accepted ? 'Accept again' : (nothing ? 'Nothing to add' : 'Accept'))+'</button>';
-        return '<tr><td>'+esc(r.name)+'<div style="font-size:11px;color:var(--ink-soft);">'+esc(r.department||'')+'</div>'+(r.absentDates.length?'<div style="font-size:11px;color:var(--ink-soft);">Absent: '+esc(r.absentDates.join(', '))+'</div>':'')+'</td>' +
+        var btn = (r.finalized || !r.hasRates || (nothing && !r.accepted)) ? '' : '<button class="btn small '+(r.accepted?'':'primary ')+'c2p-accept" data-id="'+esc(r.employeeId)+'">'+(r.accepted ? 'Accept again' : 'Accept')+'</button>';
+        return '<tr><td>'+esc(r.name)+(r.absentDates.length?'<div style="font-size:11px;color:var(--ink-soft);">Absent: '+esc(r.absentDates.join(', '))+'</div>':'')+'</td>' +
           '<td class="num">'+abs+'</td><td class="num">'+late+'</td><td class="num">'+ot+'</td><td>'+check+'</td><td style="font-size:12px;">'+acc+'</td><td>'+btn+'</td></tr>';
       }).join('') + '</tbody></table></div>' : '<div class="empty">No linked employees have clock-ins in this period yet.</div>';
     var extra = '';
     if((res.notLinked||[]).length) extra += '<div class="sub" style="margin-top:10px;">Not linked to a payroll employee (left out): '+res.notLinked.map(function(x){ return esc(x.name); }).join(', ')+'. Link them under Attendance → BioTime link-up.</div>';
     if((res.notOnPayroll||[]).length) extra += '<div class="sub" style="margin-top:6px;">Not on Batten payroll (attendance only, left out): '+res.notOnPayroll.map(function(x){ return esc(x.name); }).join(', ')+'.</div>';
-    body.innerHTML = head + table + extra;
-    body.querySelectorAll('.c2p-accept').forEach(function(b){ b.addEventListener('click', function(){
+    el.innerHTML = title + head + table + extra;
+    el.querySelectorAll('.c2p-accept').forEach(function(b){ b.addEventListener('click', function(){
       withBusy_(b, apiRead('acceptClockinsToPay', { month: payrollMonth, employeeId: b.dataset.id }), 'Accepting…').then(function(x){
-        if(x && x.ok) renderClockinsToPay_(x); else alert((x && x.error) || 'Couldn\'t accept.');
+        if(x && x.ok){ c2pData_ = x; loadPayrollAdjustments(true); }
+        else alert((x && x.error) || 'Couldn\'t accept.');
       });
     }); });
   }
@@ -5842,8 +5836,11 @@
   }
 
   // -------- Pay adjustments --------
-  function loadPayrollAdjustments(){
+  // keepC2p: after an Accept, keep the suggestion data (and its "Added …" message) that the
+  // accept call already returned instead of fetching it again.
+  function loadPayrollAdjustments(keepC2p){
     var body = document.getElementById('payroll-body');
+    if(!keepC2p) c2pData_ = null;
     Promise.all([
       apiRead('getPayroll', { month: payrollMonth }),
       apiRead('getPayrollAdjustments', { month: payrollMonth })
@@ -5852,6 +5849,13 @@
       payrollAdjustmentsData = (results[1] && results[1].payrollAdjustments) || null;
       if(payrollTab==='adjustments') renderPayrollAdjustments();
     }).catch(function(e){ body.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+    if(!keepC2p){
+      var forMonth = payrollMonth;
+      apiRead('getClockinsToPay', { month: forMonth }).then(function(res){
+        if(forMonth !== payrollMonth) return;
+        c2pData_ = res || { ok:false, error:'Couldn\'t load.' }; renderC2pPanel_();
+      }).catch(function(){ c2pData_ = { ok:false, error:'Couldn\'t reach the backend for clock-in suggestions.' }; renderC2pPanel_(); });
+    }
   }
 
   function renderPayrollAdjustments(){
@@ -5889,6 +5893,7 @@
 
     body.innerHTML =
       dedHtml +
+      '<div class="panel" id="c2p-panel" style="margin-bottom:16px;"></div>' +
       '<div class="panel">' +
         '<h2 style="margin:0 0 10px;">Pay adjustments — '+esc(payrollMonth)+'</h2>' +
         '<div class="sub" style="margin-bottom:14px;">Click an employee to add commission, bonus, overtime, deductions or advances, then Finalize once they\'re done for the month — Run Payroll refuses to run until every active employee is finalized.</div>' +
@@ -5896,6 +5901,7 @@
         (rowsHtml || '<tr><td colspan="5" class="empty">No active employees.</td></tr>') +
         '</tbody></table></div>' +
       '</div>';
+    renderC2pPanel_();
 
     Array.prototype.forEach.call(document.querySelectorAll('.adj-emp-row'), function(tr){
       tr.addEventListener('click', function(){
