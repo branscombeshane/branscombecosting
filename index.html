@@ -574,6 +574,7 @@
         <button class="navbtn" data-view="att-leave">Leave</button>
         <button class="navbtn" data-view="att-missed">Missed clock-ins</button>
         <button class="navbtn" data-view="attendance">BioTime link-up</button>
+        <button class="navbtn" data-view="att-push">Send to BioTime</button>
       </div>
     </div>
     <div class="nav-section" data-mode="admin">
@@ -829,6 +830,18 @@
       <div id="att-missed-status" class="status-msg" style="display:none;margin-top:10px;"></div>
       <div id="att-missed-list" style="margin-top:14px;"></div>
     </div>
+  </section>
+
+  <section class="view" id="view-att-push" hidden>
+    <div class="sheet-head">
+      <h1>Send to BioTime</h1>
+      <div class="sub">Batten's payroll is the source of truth for staff. Changes it would make in BioTime are listed here; the workshop PC only applies them (at its next 15-minute sync) once the owner switches sending on. Nobody is ever deleted, employee numbers are never changed, and fingerprints/faces are still enrolled at the machine.</div>
+    </div>
+    <div class="panel" id="bp-switch"></div>
+    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Planned changes</h2><div id="bp-items"></div><div id="bp-notes" style="margin-top:12px;"></div></div>
+    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Payroll department → BioTime department</h2><div id="bp-map"></div></div>
+    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Who goes in BioTime</h2><div id="bp-skip"></div></div>
+    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Recent results from the PC</h2><div id="bp-log"></div></div>
   </section>
 
   <section class="view" id="view-attendance" hidden>
@@ -1466,7 +1479,7 @@
       if(okViews.indexOf(v) === -1 && okViews.length) v = okViews[0];
     }
     view = v;
-    ['new','quotes','rates','payroll','payroll-settings','settings','production','att-daily','att-shifts','att-holidays','att-leave','att-missed','attendance','admin'].forEach(function(name){
+    ['new','quotes','rates','payroll','payroll-settings','settings','production','att-daily','att-shifts','att-holidays','att-leave','att-missed','attendance','att-push','admin'].forEach(function(name){
       document.getElementById('view-'+name).hidden = (name!==v);
     });
     Array.prototype.forEach.call(document.querySelectorAll('.navbtn'), function(b){
@@ -1486,6 +1499,7 @@
     if(v==='att-holidays') loadAttHolidays_();
     if(v==='att-missed') loadAttMissed_();
     if(v==='att-leave') loadLeave_();
+    if(v==='att-push') loadBtPush_();
   }
 
   // ================= RATE CARD =================
@@ -5054,6 +5068,63 @@
       else { st.className='status-msg error'; st.textContent=(res && res.error) || 'Couldn\'t add.'; }
     });
   });
+
+  // ================= ATTENDANCE: Send to BioTime (step 7) =================
+  // Code.gs btPushView_/btPushSetOn_/btPushSetDeptMap_/btPushSetSkip_. The PC applies the
+  // planned changes only while sending is on.
+  function loadBtPush_(){
+    document.getElementById('bp-items').innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getBiotimePush').then(renderBtPush_).catch(function(e){ document.getElementById('bp-items').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  function btPushAct_(btn, action, params){
+    withBusy_(btn, apiRead(action, params), 'Saving…').then(function(x){ if(x && x.ok) renderBtPush_(x); else alert((x && x.error) || 'Couldn\'t save.'); });
+  }
+  function renderBtPush_(res){
+    if(!res || !res.ok){ attErr_('bp-items', res); return; }
+    var own = attIsOwner_();
+    var sw = document.getElementById('bp-switch');
+    sw.innerHTML = (res.on
+      ? '<div class="status-msg" style="margin:0;"><b>Sending is ON</b>'+(res.onBy?' (switched on by '+esc(res.onBy)+(res.onSince?' '+esc(String(res.onSince).slice(0,10)):'')+')':'')+': the PC applies the planned changes below at its next sync.</div>'
+      : '<div class="status-msg error" style="margin:0;"><b>Sending is OFF</b>: nothing is changed in BioTime. Review the planned changes, then switch it on.</div>') +
+      (own ? '<div style="margin-top:10px;"><button class="btn small '+(res.on?'':'primary ')+'" id="bp-toggle">'+(res.on?'Switch sending off':'Switch sending on')+'</button></div>' : '<div class="sub" style="margin-top:6px;">Only the owner can switch sending on or off.</div>');
+    var tg = document.getElementById('bp-toggle');
+    if(tg) tg.addEventListener('click', function(){
+      if(!res.on && !confirm('Switch sending on? At its next sync the workshop PC will make the '+res.items.length+' planned change(s) in BioTime.')) return;
+      btPushAct_(tg, 'setBiotimePushOn', { on: !res.on });
+    });
+    var label = { create:'Add to BioTime', update:'Update in BioTime', resign:'Resign in BioTime' };
+    document.getElementById('bp-items').innerHTML = res.items.length ? '<div class="table-wrap"><table><thead><tr><th>Change</th><th>Employee</th><th>Details</th><th>Last attempt</th></tr></thead><tbody>' + res.items.map(function(it){
+      var p = it.payload, det = '';
+      if(it.action==='create') det = '#'+esc(p.emp_code)+' · '+esc(p.department)+' · area '+esc(res.area)+(p.hire_date?' · started '+esc(p.hire_date):'')+(it.rehire?' <span class="chip">rehire: reinstate</span>':'');
+      else if(it.action==='update') det = esc(it.changes||'');
+      else if(it.action==='resign') det = '#'+esc(p.emp_code)+' · resign date '+esc(p.resign_date)+' (day after their last day)';
+      var last = it.last ? (it.last.ok ? '<span class="chip good">done</span> ' : '<span class="chip warn">failed</span> <span style="font-size:11px;">'+esc(it.last.error)+'</span> ')+'<span style="font-size:11px;color:var(--ink-soft);">'+esc(String(it.last.at).slice(0,16).replace('T',' '))+'</span>' : '';
+      return '<tr><td>'+esc(label[it.action]||it.action)+'</td><td>'+esc(it.name)+'</td><td>'+det+'</td><td>'+last+'</td></tr>';
+    }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing to change: BioTime matches Batten\'s payroll.</div>';
+    document.getElementById('bp-notes').innerHTML = (res.notes||[]).length ? '<div class="sub"><b>Needs a person:</b><ul style="margin:4px 0 0 18px;padding:0;">'+res.notes.map(function(n){ return '<li>'+esc(n)+'</li>'; }).join('')+'</ul></div>' : '';
+    var opts = function(cur){ return '<option value="">(not in BioTime)</option>' + res.biotimeDepartments.map(function(d){ return '<option'+(d===cur?' selected':'')+'>'+esc(d)+'</option>'; }).join(''); };
+    document.getElementById('bp-map').innerHTML = '<div class="table-wrap"><table><thead><tr><th>Payroll department</th><th>BioTime department</th></tr></thead><tbody>' + res.payrollDepartments.map(function(pd){
+      var cur = res.deptMap[pd]||'';
+      return '<tr><td>'+esc(pd)+'</td><td>'+(own ? '<select class="bp-map-sel" data-dept="'+esc(pd)+'">'+opts(cur)+'</select>' : esc(cur||'(not in BioTime)'))+'</td></tr>';
+    }).join('') + '</tbody></table></div>' + (own ? '<button class="btn small" id="bp-map-save" style="margin-top:8px;">Save mapping</button>' : '') +
+      '<div class="sub" style="margin-top:6px;">People in a payroll department with no BioTime department are not added, and their BioTime department is left as it is.</div>';
+    var ms = document.getElementById('bp-map-save');
+    if(ms) ms.addEventListener('click', function(){
+      var map = {}; document.querySelectorAll('.bp-map-sel').forEach(function(sel){ if(sel.value) map[sel.dataset.dept] = sel.value; });
+      btPushAct_(ms, 'setBiotimeDeptMap', { map: JSON.stringify(map) });
+    });
+    document.getElementById('bp-skip').innerHTML = '<div class="sub" style="margin-bottom:6px;">Untick anyone who shouldn\'t be in BioTime (e.g. someone who never clocks in). They are then never added, changed or resigned there.</div><div class="table-wrap"><table><thead><tr><th>In BioTime</th><th>Employee</th><th>#</th><th>Department</th></tr></thead><tbody>' +
+      res.employees.filter(function(e){ return e.active || e.skip; }).map(function(e){
+        return '<tr><td><input type="checkbox" class="bp-skip-cb" data-id="'+esc(e.id)+'"'+(e.skip?'':' checked')+(own?'':' disabled')+'></td><td>'+esc(e.name)+'</td><td>'+esc(e.employeeNumber)+'</td><td>'+esc(e.department)+'</td></tr>';
+      }).join('') + '</tbody></table></div>';
+    document.querySelectorAll('.bp-skip-cb').forEach(function(cb){ cb.addEventListener('change', function(){
+      cb.disabled = true;
+      apiRead('setBiotimePushSkip', { employeeId: cb.dataset.id, skip: !cb.checked }).then(function(x){ if(x && x.ok) renderBtPush_(x); else { alert((x && x.error) || 'Couldn\'t save.'); cb.disabled=false; cb.checked=!cb.checked; } });
+    }); });
+    document.getElementById('bp-log').innerHTML = (res.log||[]).length ? '<div class="table-wrap"><table><thead><tr><th>When</th><th>Change</th><th>Employee</th><th>Result</th></tr></thead><tbody>' + res.log.map(function(l){
+      return '<tr><td>'+esc(String(l.at).slice(0,16).replace('T',' '))+'</td><td>'+esc(l.action)+'</td><td>'+esc(l.name)+' #'+esc(l.emp_code)+'</td><td>'+(l.ok==='TRUE'?'<span class="chip good">done</span>':'<span class="chip warn">failed</span> <span style="font-size:11px;">'+esc(l.error)+'</span>')+'</td></tr>';
+    }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing sent yet.</div>';
+  }
 
   // ================= ATTENDANCE: BioTime link-up =================
   // Code.gs biotimeLinkup_/biotimeSetLink_. BioTime people arrive from the BioTime PC's
