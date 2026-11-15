@@ -884,8 +884,14 @@
     <div class="panel" id="users-admin-panel" style="max-width:620px;">
       <h2 style="margin:0 0 4px;">Team logins</h2>
       <div class="sub" style="margin-bottom:14px;">Who can log in to Batten. Owner sees and can do everything, including Admin itself and approving a quote into a job — those two are never available to an Employee. An Employee only gets the functions ticked below; tick "Tick off production progress" only alongside "Production board", since it has nothing to act on otherwise.</div>
+      <div id="users-admin-status" class="status-msg" style="display:none;margin-bottom:12px;"></div>
       <div id="users-list-mgr"></div>
-      <div class="field-row" style="margin-top:16px;align-items:flex-end;">
+    </div>
+
+    <div class="panel" id="users-add-panel" style="max-width:620px;margin-top:16px;">
+      <h2 style="margin:0 0 4px;">Add a new login</h2>
+      <div class="sub" style="margin-bottom:14px;">Fill in the details and click Add login. Link them to their payroll employee afterwards, in their box above.</div>
+      <div class="field-row" style="align-items:flex-end;">
         <div class="field"><span class="label">Name</span><input type="text" id="user-new-name" placeholder="e.g. Izak"></div>
         <div class="field"><span class="label">Username</span><input type="text" id="user-new-username" autocomplete="off"></div>
         <div class="field"><span class="label">Password</span><input type="password" id="user-new-password" autocomplete="new-password"></div>
@@ -899,9 +905,9 @@
       </div>
       <div id="user-new-permissions" class="field-row" style="margin-top:8px;"></div>
       <div class="field-row" style="margin-top:12px;">
-        <button class="btn primary" id="btn-add-user">Add user</button>
+        <button class="btn primary" id="btn-add-user">Add login</button>
       </div>
-      <div id="users-admin-status" class="status-msg" style="display:none;margin-top:12px;"></div>
+      <div id="users-add-status" class="status-msg" style="display:none;margin-top:12px;"></div>
     </div>
 
     <div class="panel" style="max-width:440px;">
@@ -5298,7 +5304,13 @@
     if(!wrap) return;
     if(!usersCache.length){ wrap.innerHTML = '<div class="empty">No users yet — add the first one below (make it yourself, role Owner).</div>'; return; }
     wrap.innerHTML = usersCache.map(function(u){
-      return '<div class="user-row" data-id="'+esc(u.id)+'" style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line);">' +
+      return '<div class="user-row" data-id="'+esc(u.id)+'" style="margin-top:12px;padding:14px 16px;border:1px solid var(--line-strong);background:var(--paper);">' +
+        '<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line);">' +
+          '<strong style="font-size:14px;">'+esc(u.name)+'</strong>' +
+          '<span class="chip'+(u.role==='owner'?' good':'')+'">'+esc(ROLE_LABELS[u.role]||u.role)+'</span>' +
+          (u.active ? '' : '<span class="chip warn">inactive</span>') +
+          '<span style="margin-left:auto;font-size:11px;color:var(--ink-soft);">'+esc(u.username)+'</span>' +
+        '</div>' +
         '<div class="field-row" style="align-items:flex-end;">' +
           '<div class="field" style="min-width:110px;"><span class="label">Name</span><input type="text" class="u-name" value="'+esc(u.name)+'"></div>' +
           '<div class="field" style="min-width:110px;"><span class="label">Username</span><input type="text" class="u-username" value="'+esc(u.username)+'"></div>' +
@@ -5386,13 +5398,13 @@
     var roleInput = document.getElementById('user-new-role');
     var name = nameInput.value.trim(), username = usernameInput.value.trim(), password = passwordInput.value;
     if(!name || !username || !password){
-      var statusEl = document.getElementById('users-admin-status');
+      var statusEl = document.getElementById('users-add-status');
       statusEl.style.display = 'block';
       statusEl.className = 'status-msg error';
       statusEl.textContent = 'Name, username and password are all required.';
       return;
     }
-    var statusEl = document.getElementById('users-admin-status');
+    var statusEl = document.getElementById('users-add-status');
     statusEl.style.display = 'block';
     statusEl.className = 'status-msg';
     statusEl.textContent = 'Adding…';
