@@ -4820,8 +4820,8 @@
   // ================= ATTENDANCE: daily, shifts, holidays, missed clock-ins =================
   // Code.gs attDay_/attPerson_/attShiftsView_/attHolidaysView_/attMissedView_ do the maths;
   // these screens only show it. Shifts and company holidays are edited by the owner only.
-  var ATT_STATUS_ORDER = ['Present','In','Not in yet','Absent','On leave','Public holiday','No clock-out','No clock-in','Worked on day off','Off','Future'];
-  var ATT_STATUS_CHIP = { 'Present':'good', 'In':'good', 'Absent':'warn', 'No clock-out':'amber', 'No clock-in':'amber', 'Worked on day off':'amber', 'On leave':'amber' };
+  var ATT_STATUS_ORDER = ['Present','In','Not in yet','Absent','On leave','Public holiday','Worked on public holiday','No clock-out','No clock-in','Worked on day off','Off','Future'];
+  var ATT_STATUS_CHIP = { 'Present':'good', 'In':'good', 'Absent':'warn', 'No clock-out':'amber', 'No clock-in':'amber', 'Worked on day off':'amber', 'Worked on public holiday':'amber', 'On leave':'amber' };
   var ATT_DOW = ['','Mon','Tue','Wed','Thu','Fri','Sat','Sun'];
   var attDayData_ = null, attDayStatusFilter_ = '';
   function attIsOwner_(){ return !!currentUser && currentUser.role==='owner'; }
