@@ -5508,6 +5508,42 @@
   // Overtime hours. Nothing reaches pay until Accept is clicked; the rows then appear in the
   // list below as ordinary adjustments.
   var c2pData_ = null;
+  // The days behind one employee's suggestion: every shift day in the period (and any day off
+  // they clocked on), with the days that count towards Absent / Late / Overtime highlighted.
+  // Shown in the same pop-up as Attendance's 14-day view.
+  function openC2pDetail_(employeeId){
+    var res = c2pData_; if(!res || !res.rows) return;
+    var r = res.rows.filter(function(x){ return x.employeeId===employeeId; })[0]; if(!r) return;
+    var body = document.getElementById('att-person-body');
+    var days = r.days || [];
+    if(!days.length){ body.innerHTML = '<div class="status-msg error">The backend (Code.gs) needs to be updated to the latest version for this breakdown.</div>'; document.getElementById('att-person-modal').hidden = false; return; }
+    var DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    var sum = function(label, value, money_){ return '<div class="stat"><span class="label">'+label+'</span><span class="value num" style="font-size:16px;">'+value+'</span>'+(money_?'<div style="font-size:12px;">'+money_+'</div>':'')+'</div>'; };
+    var lateNote = r.lateTotal ? (r.lateDeduct ? 'over '+res.lateThreshold+': deducted' : 'under '+res.lateThreshold+': not deducted') : '';
+    var head = '<div class="sheet-head" style="margin-bottom:10px;"><h1 style="font-size:18px;">'+esc(r.name)+'</h1><div class="sub">Clock-ins '+esc(res.periodStart)+' to '+esc(res.upTo)+(res.inProgress?' (period not over yet)':'')+(r.dayRate?' · day rate '+money(r.dayRate)+' · hourly rate '+money(r.hourRate):'')+'</div></div>' +
+      '<div class="stats" style="margin-top:0;">' +
+        sum('Absent', r.absentDays+' day(s)', r.absentDays && r.absentAmount!=null ? '-'+money(r.absentAmount) : '') +
+        sum('Late', r.lateTotal+' min', (r.lateDeduct && r.lateAmount!=null ? '-'+money(r.lateAmount)+' · ' : '')+lateNote) +
+        sum('Overtime', r.overtimeHrs.toFixed(1)+' h', r.overtimeHrs && r.overtimeAmount!=null ? '+'+money(r.overtimeAmount)+' at '+res.overtimeMultiplier+'×' : '') +
+        sum('To check', r.checkDates.length+' day(s)', r.checkDates.length ? 'missing clock-in/out' : '') +
+      '</div>';
+    var rows = days.map(function(x){
+      var p = x.date.split('-'), dow = DOW[new Date(Date.UTC(+p[0],+p[1]-1,+p[2])).getUTCDay()];
+      var counts = [];
+      if(x.absent) counts.push('<span class="chip warn">Absent '+(x.absent===0.5?'½ day':'1 day')+'</span>');
+      if(x.lateMin) counts.push('<span class="chip amber">Late '+x.lateMin+' min</span>');
+      if(x.overtimeHrs) counts.push('<span class="chip good">Overtime '+x.overtimeHrs.toFixed(1)+' h</span>');
+      if(x.status==='No clock-in' || x.status==='No clock-out') counts.push('<span class="chip amber">Check: '+esc(x.status.toLowerCase())+'</span>');
+      var hl = counts.length ? ' style="background:var(--paper);"' : '';
+      var t = function(v, manual){ return v ? esc(v)+(manual?' <span style="font-size:11px;color:var(--ink-soft);">(manual)</span>':'') : ''; };
+      return '<tr'+hl+'><td>'+dow+' '+esc(x.date.slice(5))+'</td><td>'+(x.start?esc(x.start+'–'+x.end):'<span style="color:var(--ink-soft);">day off</span>')+'</td>' +
+        '<td>'+t(x.inTime,x.inManual)+'</td><td>'+t(x.outTime,x.outManual)+'</td><td class="num">'+(x.hours!=null?x.hours.toFixed(1):'')+'</td>' +
+        '<td>'+esc(x.status)+(x.note?' <span style="font-size:11px;color:var(--ink-soft);">'+esc(x.note)+'</span>':'')+'</td><td>'+counts.join(' ')+'</td></tr>';
+    }).join('');
+    body.innerHTML = head + '<div class="table-wrap" style="margin-top:12px;"><table><thead><tr><th>Day</th><th>Shift</th><th>In</th><th>Out</th><th class="num">Hours</th><th>Status</th><th>Counts towards</th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
+      '<div class="sub" style="margin-top:8px;">Fix a missing clock-in/out under Attendance → Manual Clock-In (it counts for pay once signed off). If the whole workshop was closed on a day, add it as a company day under Attendance → Public holidays so nobody is marked absent.</div>';
+    document.getElementById('att-person-modal').hidden = false;
+  }
   function renderC2pPanel_(){
     var el = document.getElementById('c2p-panel');
     if(!el) return;
@@ -5533,13 +5569,14 @@
         var acc = r.accepted ? r.accepted.map(function(a){ return esc(a.type)+' '+money(a.amount); }).join('<br>') : '';
         var nothing = !r.absentDays && !r.lateDeduct && !r.overtimeHrs;
         var btn = (r.finalized || !r.hasRates || (nothing && !r.accepted)) ? '' : '<button class="btn small '+(r.accepted?'':'primary ')+'c2p-accept" data-id="'+esc(r.employeeId)+'">'+(r.accepted ? 'Accept again' : 'Accept')+'</button>';
-        return '<tr><td>'+esc(r.name)+(r.absentDates.length?'<div style="font-size:11px;color:var(--ink-soft);">Absent: '+esc(r.absentDates.join(', '))+'</div>':'')+'</td>' +
+        return '<tr><td><a href="#" class="c2p-detail" data-id="'+esc(r.employeeId)+'" title="Show the days behind these figures">'+esc(r.name)+'</a>'+(r.absentDates.length?'<div style="font-size:11px;color:var(--ink-soft);">Absent: '+esc(r.absentDates.join(', '))+'</div>':'')+'</td>' +
           '<td class="num">'+abs+'</td><td class="num">'+late+'</td><td class="num">'+ot+'</td><td>'+check+'</td><td style="font-size:12px;">'+acc+'</td><td>'+btn+'</td></tr>';
       }).join('') + '</tbody></table></div>' : '<div class="empty">No linked employees have clock-ins in this period yet.</div>';
     var extra = '';
     if((res.notLinked||[]).length) extra += '<div class="sub" style="margin-top:10px;">Not linked to a payroll employee (left out): '+res.notLinked.map(function(x){ return esc(x.name); }).join(', ')+'. Link them under Attendance → BioTime link-up.</div>';
     if((res.notOnPayroll||[]).length) extra += '<div class="sub" style="margin-top:6px;">Not on Batten payroll (attendance only, left out): '+res.notOnPayroll.map(function(x){ return esc(x.name); }).join(', ')+'.</div>';
     el.innerHTML = title + head + table + extra;
+    el.querySelectorAll('.c2p-detail').forEach(function(a){ a.addEventListener('click', function(ev){ ev.preventDefault(); openC2pDetail_(a.dataset.id); }); });
     el.querySelectorAll('.c2p-accept').forEach(function(b){ b.addEventListener('click', function(){
       withBusy_(b, apiRead('acceptClockinsToPay', { month: payrollMonth, employeeId: b.dataset.id }), 'Accepting…').then(function(x){
         if(x && x.ok){ c2pData_ = x; loadPayrollAdjustments(true); }
