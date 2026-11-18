@@ -921,6 +921,19 @@
       </div>
     </div>
 
+    <div class="panel" id="audit-panel">
+      <h2 style="margin:0 0 4px;">Activity log</h2>
+      <div class="sub" style="margin-bottom:12px;">Who did what, and when: logins (including failed attempts), logouts and every change made in Batten. Viewing screens isn't recorded. Owners only.</div>
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
+        <div class="field" style="min-width:160px;"><span class="label">Person</span><select id="audit-user"><option value="">Everyone</option></select></div>
+        <div class="field"><span class="label">From</span><input type="date" id="audit-from"></div>
+        <div class="field"><span class="label">To</span><input type="date" id="audit-to"></div>
+        <div class="field" style="min-width:180px;"><span class="label">Search</span><input type="text" id="audit-q" placeholder="e.g. leave, Thabo, failed"></div>
+        <button class="btn small" id="audit-refresh">Show</button>
+      </div>
+      <div id="audit-list" style="margin-top:12px;"></div>
+    </div>
+
     <div class="panel" style="max-width:620px;">
       <h2 style="margin:0 0 4px;">Site settings</h2>
       <div class="sub">Nothing else lives here yet — Costing's own defaults stay on the Costing &gt; Settings screen, and Payroll's on Payroll &gt; Settings, since both are specific to that job. Anything that applies across the whole app, rather than to one of those, belongs here going forward.</div>
@@ -5266,7 +5279,53 @@
   }
   document.getElementById('user-new-permissions').innerHTML = permissionCheckboxesHtml_([], 'un-perm');
   wireRoleTogglesPermissions_(document.getElementById('user-new-role'), document.getElementById('user-new-permissions'));
+  // ---- Activity log (Code.gs auditView_; owner only) ----
+  var AUDIT_LABELS_ = {
+    login:'Logged in', logout:'Logged out', changePassword:'Changed own password',
+    addUser:'Added a login', updateUser:'Changed a login',
+    addRate:'Added a rate', updateRate:'Changed a rate', deleteRate:'Deleted a rate',
+    addJob:'Saved a new quote', updateJob:'Changed a quote', deleteJob:'Deleted a quote', extractDrawing:'Read a drawing', reExtractJob:'Re-read a quote\'s drawing',
+    addCatalogueItem:'Saved a catalogue product', deleteCatalogueItem:'Deleted a catalogue product', saveSettings:'Changed costing settings',
+    addSubcategory:'Added a subcategory', renameSubcategory:'Renamed a subcategory', deleteSubcategory:'Deleted a subcategory',
+    approveJob:'Approved a job', updateJobProgress:'Ticked production progress', updateJobProgressNote:'Wrote a production note',
+    addProductionDrawing:'Added a production drawing', removeProductionDrawing:'Removed a production drawing',
+    addJoiner:'Added a joiner', renameJoiner:'Renamed a joiner', deleteJoiner:'Deleted a joiner',
+    sageCheckCustomer:'Checked a Sage customer', sageQuotePush:'Sent a quote to Sage', sageInvoicePush:'Sent an invoice to Sage',
+    addEmployee:'Added an employee', updateEmployee:'Changed an employee', dischargeEmployee:'Discharged an employee', rehireEmployee:'Rehired an employee',
+    addDepartment:'Added a department', renameDepartment:'Renamed a department', deleteDepartment:'Deleted a department', saveCompanyInfo:'Changed company details',
+    addAdjustment:'Added a pay adjustment', deleteAdjustment:'Deleted a pay adjustment', setPayrollAdjustmentStatus:'Saved / finalized pay adjustments',
+    giveAdvance:'Gave an advance', addDeductionAccount:'Added a deduction account', scheduleAdvanceRepayments:'Scheduled advance repayments', updateDeductionAccount:'Changed a deduction account',
+    setBaseAmountOverride:'Changed a month\'s basic salary', runPayroll:'Ran payroll', importPayrollHistory:'Imported payroll history', acceptClockinsToPay:'Accepted clock-in suggestions',
+    setBiotimeLink:'Linked a BioTime person', saveShiftTime:'Changed a shift time', deleteShiftTime:'Deleted a shift time', saveShift:'Changed a shift', deleteShift:'Deleted a shift',
+    assignShift:'Put someone on a shift', deleteAssignment:'Removed a shift assignment', addCompanyHoliday:'Added a company day', deleteCompanyHoliday:'Removed a company day',
+    addMissedClockIn:'Added a manual clock-in', signOffMissedClockIn:'Signed off a manual clock-in',
+    addLeave:'Added leave', signOffLeave:'Signed off leave', cancelLeave:'Cancelled leave', setBiotimeSwitchOff:'Set the BioTime switch-off date',
+    setBiotimePushOn:'Switched sending to BioTime on/off', setBiotimeDeptMap:'Changed the BioTime department mapping', setBiotimePushSkip:'Changed who goes in BioTime',
+    renumberBiotimePerson:'Moved records to a new BioTime number'
+  };
+  function auditLabel_(a){ return AUDIT_LABELS_[a] || String(a||'').replace(/([a-z])([A-Z])/g,'$1 $2').toLowerCase(); }
+  function loadAuditLog_(){
+    var el = document.getElementById('audit-list');
+    if(!el || !attIsOwner_()) return;
+    el.innerHTML = '<div class="empty">Loading…</div>';
+    apiRead('getAuditLog', { user: document.getElementById('audit-user').value, from: document.getElementById('audit-from').value, to: document.getElementById('audit-to').value, q: document.getElementById('audit-q').value, limit: 300 }).then(function(res){
+      if(!res || !res.ok){
+        el.innerHTML = '<div class="status-msg error">'+esc((res && res.error && /^Unknown action/.test(res.error)) ? 'The backend needs to be updated to the latest version for the activity log.' : ((res && res.error) || 'Couldn\'t load the log.'))+'</div>'; return;
+      }
+      var us = document.getElementById('audit-user'), keep = us.value;
+      us.innerHTML = '<option value="">Everyone</option>' + res.users.map(function(u){ return '<option value="'+esc(u.id)+'"'+(u.id===keep?' selected':'')+'>'+esc(u.name)+'</option>'; }).join('');
+      el.innerHTML = res.rows.length ? '<div class="sub" style="margin-bottom:6px;">Showing '+res.rows.length+' (newest first)'+(res.rows.length>=300?' — narrow it down with the filters to see older entries':'')+'.</div><div class="table-wrap"><table><thead><tr><th>When</th><th>Who</th><th>What</th><th>Details</th><th>Result</th></tr></thead><tbody>' +
+        res.rows.map(function(r){
+          var bad = /^(failed|refused)/.test(r.outcome);
+          return '<tr><td style="white-space:nowrap;">'+esc(r.at.slice(0,16))+'</td><td>'+esc(r.user)+'</td><td>'+esc(auditLabel_(r.action))+'</td><td style="font-size:12px;">'+esc(r.details)+'</td><td>'+(bad?'<span class="chip warn">'+esc(r.outcome)+'</span>':'<span style="font-size:12px;color:var(--ink-soft);">'+esc(r.outcome)+'</span>')+'</td></tr>';
+        }).join('') + '</tbody></table></div>' : '<div class="empty">Nothing recorded for these filters yet.</div>';
+    }).catch(function(e){ el.innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  document.getElementById('audit-refresh').addEventListener('click', loadAuditLog_);
+  document.getElementById('audit-q').addEventListener('keydown', function(ev){ if(ev.key==='Enter') loadAuditLog_(); });
+
   function loadUsersAdmin_(){
+    loadAuditLog_();
     if(!currentUser) return;
     renderJoinerManager();
     apiRead('getUsers', { actingUserId: currentUser.id }).then(function(res){
