@@ -5665,7 +5665,15 @@
         // button row after it, for the Edit case). This panel needs the same thing
         // for Add, or wireEmployeeForm_'s saveBtn lookup silently finds nothing to
         // wire up and clicking has no effect.
+        // Clock-in shift: asked for every new employee (they get it from their start date,
+        // under their employee number = their BioTime number). "Doesn't clock in" also keeps
+        // them out of BioTime (Attendance > Send to BioTime).
+        var shiftOpts = ((payrollData && payrollData.shifts) || []).map(function(x){ return '<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>'; }).join('');
         panel.innerHTML = '<div class="job-detail" style="margin-top:14px;">' + employeeFormHtml_(null) +
+          '<div class="field-row">' +
+            '<div class="field" style="min-width:240px;" title="Which shift they work, for Attendance. Starts on their date employed (or today). Change it later under Attendance → Shifts."><span class="label">Clock-in shift</span>' +
+              '<select class="emp-shift"><option value="">Choose…</option>'+shiftOpts+'<option value="none">Doesn\'t clock in</option></select></div>' +
+          '</div>' +
           '<div class="field-row" style="margin-top:16px;">' +
             '<button class="btn primary emp-save">Add employee</button>' +
             '<span class="save-confirm sub" style="align-self:center;"></span>' +
@@ -5810,6 +5818,11 @@
           if(errSpan) errSpan.textContent = 'Employee # "'+rec.employeeNumber+'" is already used by '+clash.name+'.';
           return;
         }
+      }
+      var shiftSel = container.querySelector('.emp-shift');
+      if(shiftSel && !(e && e.id)){
+        if(!shiftSel.value){ if(errSpan) errSpan.textContent = 'Choose their clock-in shift (or "Doesn\'t clock in").'; return; }
+        rec.shiftId = shiftSel.value;
       }
       rec.uifExempt = String(rec.uifExempt);
       rec.month = payrollMonth;
