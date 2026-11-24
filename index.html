@@ -5759,8 +5759,8 @@
     el.querySelectorAll('.c2p-act').forEach(function(b){ b.addEventListener('click', function(){ c2pAction_(b); }); });
     el.querySelectorAll('.c2p-undo').forEach(function(a){ a.addEventListener('click', function(ev){ ev.preventDefault();
       var id = a.closest('tr').querySelector('.c2p-detail').dataset.id;
-      var dates=a.dataset.date.split(','), last=null;
-      c2pRun_(dates.reduce(function(p, dt){ return p.then(function(){ return apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:a.dataset.kind, date:dt, op:'clear' }).then(function(x){ last=x; }); }); }, Promise.resolve()).then(function(){ return last; }), null);
+      a.textContent='undoing…';
+      c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:a.dataset.kind, date:a.dataset.date, op:'clear' }), null);
     }); });
     var all=el.querySelector('#c2p-accept-all');
     if(all) all.addEventListener('click', function(){
@@ -5773,7 +5773,11 @@
     return withBusy_(btn, promise, 'Working…').then(function(x){
       if(x && x.ok){ c2pData_ = x; if(refreshAdjustments) loadPayrollAdjustments(true); else renderC2pPanel_(); return x; }
       if(x && x.needsUnlock) return x;
-      alert((x && x.error) || 'Couldn\'t do that.'); return x;
+      alert((x && x.error) || 'Couldn\'t do that.'); renderC2pPanel_(); return x;
+    }).catch(function(e){
+      // never leave a button stuck on "Working…": say so and redraw from what we have
+      alert('No answer from the backend ('+((e&&e.message)||'timeout')+'). Nothing may have been saved: check the list, then try again.');
+      renderC2pPanel_();
     });
   }
   function c2pAccept_(params, btn){
@@ -5814,11 +5818,7 @@
     if(act==='accept') return c2pAccept_({ employeeId:id }, b);
     if(act==='payDayOff') return c2pAccept_({ employeeId:id, dayOff:'1' }, b);
     if(act==='nci' || act==='nco' || act==='absent' || act==='dayoff') return c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:act, date:d }), b);
-    if(act==='nciAll' || act==='ncoAll'){
-      var kind=act.slice(0,3), dates=d.split(','), last=null;
-      var chain=dates.reduce(function(p, dt){ return p.then(function(){ return apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:kind, date:dt }).then(function(x){ last=x; }); }); }, Promise.resolve());
-      return c2pRun_(chain.then(function(){ return last; }), b);
-    }
+    if(act==='nciAll' || act==='ncoAll') return c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:act.slice(0,3), date:d }), b);
     if(act==='fix' || act==='open') return c2pOpenDay_(d, b.dataset.code);
     if(act==='review') return c2pReview_(id, d);
     if(act==='leave'){ setAppMode('attendance'); showView('att-leave'); return; }
