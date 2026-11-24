@@ -644,7 +644,7 @@
       </div>
     </div>
   </div>
-  <footer id="sidebar-footer"><span id="sidebar-user"></span>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
+  <footer id="sidebar-footer"><span id="sidebar-user"></span><div id="batten-version" style="font-size:10px;color:var(--ink-soft);margin:2px 0 6px;"></div>Upload a shop drawing, review the extracted bill of materials, cost it against the rate card.
     <button type="button" class="logout-link" id="btn-change-password">Change password</button>
     <button type="button" class="logout-link" id="btn-logout">Log out</button>
   </footer>
@@ -1218,6 +1218,27 @@
     var b = e.target.closest && e.target.closest('.subtabs .subtab'); if(!b) return;
     setTab_(b.closest('.subtabs').dataset.group, b.dataset.tab);
   });
+  // ---- Which version of the page this is, and "a new version is available" ----
+  // BATTEN_VERSION is changed with every front-end change. The page fetches index.html
+  // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
+  // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
+  // old copy a phone or browser held on to.
+  var BATTEN_VERSION = '2026-11-24.2';
+  function checkForNewVersion_(){
+    if(!/^https?:/.test(location.protocol)) return;
+    fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
+      var m = /var BATTEN_VERSION = '([^']+)'/.exec(t||'');
+      if(!m || m[1]===BATTEN_VERSION || document.getElementById('new-version-bar')) return;
+      var bar=document.createElement('div'); bar.id='new-version-bar';
+      bar.style.cssText='position:fixed;left:50%;bottom:16px;transform:translateX(-50%);z-index:9999;background:var(--accent);color:#fff;padding:10px 14px;display:flex;gap:12px;align-items:center;box-shadow:0 4px 18px rgba(0,0,0,.25);font-size:14px;';
+      bar.innerHTML='<span>A new version of Batten is available.</span><button type="button" class="btn small" style="background:#fff;color:var(--accent);">Reload</button>';
+      bar.querySelector('button').addEventListener('click', function(){ location.reload(); });
+      document.body.appendChild(bar);
+    }).catch(function(){});
+  }
+  setInterval(checkForNewVersion_, 5*60*1000);
+  document.addEventListener('visibilitychange', function(){ if(!document.hidden) checkForNewVersion_(); });
+  setTimeout(checkForNewVersion_, 8000);
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function el(html){ var t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
 
@@ -8604,6 +8625,7 @@
   document.getElementById('dsg-new-btn').addEventListener('click', function(){ showView('design-new'); });
   document.getElementById('dsg-search').addEventListener('input', renderDesignList_);
   document.querySelectorAll('.subtabs[data-group]').forEach(function(b){ applyTabs_(b.dataset.group); });
+  (function(){ var v=document.getElementById('batten-version'); if(v) v.textContent='Version '+BATTEN_VERSION; })();
   function boot(){
     if(!apiConfigured()){
       document.body.insertAdjacentHTML('afterbegin',
