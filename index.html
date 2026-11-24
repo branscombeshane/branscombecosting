@@ -457,6 +457,7 @@
   .subtab{ background:none; border:none; border-bottom:3px solid transparent; margin-bottom:-2px; padding:10px 18px; font:inherit; font-size:13px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-soft); cursor:pointer; }
   .subtab:hover{ color:var(--ink); }
   .subtab.active{ color:var(--accent); border-bottom-color:var(--accent); }
+  .subtabs + [data-tabgroup]{ margin-top:0 !important; }
   .c2p-step{ display:grid; grid-template-columns:minmax(0,1fr) 270px; align-items:center; gap:10px; padding:3px 0; }
   .c2p-step + .c2p-step{ border-top:1px dotted var(--line); }
   .c2p-step-btns{ display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap; }
@@ -767,8 +768,12 @@
       <h1>Settings</h1>
       <div class="sub">Defaults applied to every new quote</div>
     </div>
-    <div class="panel" style="max-width:440px;">
-      <div class="field-row">
+    <div class="subtabs" data-group="costsettings" role="tablist">
+      <button type="button" class="subtab" data-tab="defaults" role="tab">Defaults</button>
+      <button type="button" class="subtab" data-tab="subcats" role="tab">Material subcategories</button>
+    </div>
+    <div class="panel" style="max-width:440px;" data-tabgroup="costsettings" data-tabs="defaults">
+      <div class="field-row" style="margin-top:0;">
         <div class="field"><span class="label">Default markup %</span><input type="number" id="set-markup" step="1" min="0"></div>
         <div class="field"><span class="label">Default labour rate (per hour, excl. VAT)</span><div class="input-affix"><span class="affix">R</span><input type="number" id="set-labour" step="1" min="0"></div></div>
         <div class="field"><span class="label">Default waste % (materials &amp; finish)</span><input type="number" id="set-waste" step="1" min="0"></div>
@@ -799,7 +804,7 @@
       <div id="settings-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
 
-    <div class="panel" style="max-width:440px;">
+    <div class="panel" style="max-width:440px;" data-tabgroup="costsettings" data-tabs="subcats">
       <h2 style="margin:0 0 4px;">Material subcategories</h2>
       <div class="sub" style="margin-bottom:14px;">Groups the Materials rate card into sections (Wood, Steel, Veneer…). Renaming one updates every rate card item using it; deleting one leaves those items as Uncategorized rather than losing them.</div>
       <div id="subcategory-list-mgr"></div>
@@ -835,9 +840,14 @@
       <h1>Shifts</h1>
       <div class="sub" id="att-shifts-sub">Shift times, which time applies on which weekday, and who is on which shift</div>
     </div>
-    <div class="panel"><h2 style="font-size:15px;margin:0 0 8px;">Shift times</h2><div id="att-times"></div></div>
-    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Shifts</h2><div id="att-shift-list"></div></div>
-    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Who is on which shift</h2><div id="att-people"></div></div>
+    <div class="subtabs" data-group="shifts" role="tablist">
+      <button type="button" class="subtab" data-tab="people" role="tab">Who is on which shift</button>
+      <button type="button" class="subtab" data-tab="shifts" role="tab">Shifts</button>
+      <button type="button" class="subtab" data-tab="times" role="tab">Shift times</button>
+    </div>
+    <div class="panel" data-tabgroup="shifts" data-tabs="people"><div id="att-people"></div></div>
+    <div class="panel" data-tabgroup="shifts" data-tabs="shifts"><div id="att-shift-list"></div></div>
+    <div class="panel" data-tabgroup="shifts" data-tabs="times"><div id="att-times"></div></div>
   </section>
 
   <section class="view" id="view-att-holidays" hidden>
@@ -861,12 +871,12 @@
       <h1>Leave</h1>
       <div class="sub">Calendar year. Annual leave: 15 days from 1 January; in the year someone starts, 1.25 days per full month worked (only what's built up can be taken). Unused leave is forfeited on 31 December. Days off and public holidays don't use leave.</div>
     </div>
-    <div class="subtabs" id="lv-tabs" role="tablist">
+    <div class="subtabs" id="lv-tabs" data-group="leave" role="tablist">
       <button type="button" class="subtab" data-tab="add" role="tab">Add leave</button>
       <button type="button" class="subtab" data-tab="taken" role="tab">Leave taken</button>
       <button type="button" class="subtab" data-tab="records" role="tab">Leave records</button>
     </div>
-    <div class="panel lv-tab" data-tab="add">
+    <div class="panel" data-tabgroup="leave" data-tabs="add">
       <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;margin-top:0;">
         <div class="field" style="min-width:200px;"><span class="label">Person</span><select id="lv-person"></select></div>
         <div class="field" style="min-width:170px;"><span class="label">Type</span><select id="lv-type"></select></div>
@@ -878,12 +888,12 @@
       </div>
       <div id="lv-status" class="status-msg" style="display:none;margin-top:10px;"></div>
     </div>
-    <div class="panel lv-tab" data-tab="taken records">
+    <div class="panel" data-tabgroup="leave" data-tabs="taken records">
       <div class="field-row" style="align-items:flex-end;margin-top:0;"><div class="field" style="min-width:110px;"><span class="label">Year</span><select id="lv-year"></select></div></div>
-      <div class="lv-tab" data-tab="taken"><div id="lv-people" style="margin-top:12px;"></div></div>
-      <div class="lv-tab" data-tab="records"><div id="lv-records" style="margin-top:12px;"></div></div>
+      <div data-tabgroup="leave" data-tabs="taken"><div id="lv-people" style="margin-top:12px;"></div></div>
+      <div data-tabgroup="leave" data-tabs="records"><div id="lv-records" style="margin-top:12px;"></div></div>
     </div>
-    <div class="panel lv-tab" data-tab="records" style="margin-top:16px;" id="lv-switchoff"></div>
+    <div class="panel" data-tabgroup="leave" data-tabs="records" style="margin-top:16px;" id="lv-switchoff"></div>
   </section>
 
   <section class="view" id="view-att-missed" hidden>
@@ -891,8 +901,12 @@
       <h1>Manual Clock-In</h1>
       <div class="sub">See a person's days and add a missing clock-in or clock-out. Management signs it off for pay; the owner's entries are approved at once.</div>
     </div>
-    <div class="panel">
-      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
+    <div class="subtabs" data-group="missed" role="tablist">
+      <button type="button" class="subtab" data-tab="missing" role="tab">Missing clock-ins</button>
+      <button type="button" class="subtab" data-tab="all" role="tab">All manual clock-ins</button>
+    </div>
+    <div class="panel" data-tabgroup="missed" data-tabs="missing">
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;margin-top:0;">
         <div class="field" style="min-width:220px;"><span class="label">Person</span><select id="att-missed-person"></select></div>
         <div class="field"><span class="label">From</span><input type="date" id="att-mr-from"></div>
         <div class="field"><span class="label">To</span><input type="date" id="att-mr-to"></div>
@@ -901,7 +915,7 @@
       </div>
       <div id="att-mr-days" style="margin-top:14px;"></div>
     </div>
-    <div class="panel">
+    <div class="panel" data-tabgroup="missed" data-tabs="all">
       <h2 style="font-size:15px;margin:0 0 8px;">Add one by date and time</h2>
       <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
         <div class="field"><span class="label">Date and time</span><input type="datetime-local" id="att-missed-time"></div>
@@ -918,11 +932,17 @@
       <h1>Send to BioTime</h1>
       <div class="sub">Batten's payroll is the source of truth for staff. Changes it would make in BioTime are listed here; the workshop PC only applies them (at its next 15-minute sync) once the owner switches sending on. Nobody is ever deleted, employee numbers are never changed, and fingerprints/faces are still enrolled at the machine.</div>
     </div>
-    <div class="panel" id="bp-switch"></div>
-    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Planned changes</h2><div id="bp-items"></div><div id="bp-notes" style="margin-top:12px;"></div></div>
-    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Payroll department → BioTime department</h2><div id="bp-map"></div></div>
-    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Who goes in BioTime</h2><div id="bp-skip"></div></div>
-    <div class="panel" style="margin-top:16px;"><h2 style="font-size:15px;margin:0 0 8px;">Recent results from the PC</h2><div id="bp-log"></div></div>
+    <div class="subtabs" data-group="push" role="tablist">
+      <button type="button" class="subtab" data-tab="plan" role="tab">Planned changes</button>
+      <button type="button" class="subtab" data-tab="dept" role="tab">Departments</button>
+      <button type="button" class="subtab" data-tab="who" role="tab">Who goes in BioTime</button>
+      <button type="button" class="subtab" data-tab="log" role="tab">Results from the PC</button>
+    </div>
+    <div class="panel" id="bp-switch" data-tabgroup="push" data-tabs="plan"></div>
+    <div class="panel" style="margin-top:16px;" data-tabgroup="push" data-tabs="plan"><h2 style="font-size:15px;margin:0 0 8px;">Planned changes</h2><div id="bp-items"></div><div id="bp-notes" style="margin-top:12px;"></div></div>
+    <div class="panel" data-tabgroup="push" data-tabs="dept"><h2 style="font-size:15px;margin:0 0 8px;">Payroll department → BioTime department</h2><div id="bp-map"></div></div>
+    <div class="panel" data-tabgroup="push" data-tabs="who"><h2 style="font-size:15px;margin:0 0 8px;">Who goes in BioTime</h2><div id="bp-skip"></div></div>
+    <div class="panel" data-tabgroup="push" data-tabs="log"><h2 style="font-size:15px;margin:0 0 8px;">Recent results from the PC</h2><div id="bp-log"></div></div>
   </section>
 
   <section class="view" id="view-attendance" hidden>
@@ -930,19 +950,24 @@
       <h1>BioTime link-up</h1>
       <div class="sub">Each person in BioTime linked to their payroll employee</div>
     </div>
-    <div class="panel" id="bt-status"></div>
-    <div class="panel" style="margin-top:16px;">
-      <div class="field-row" style="align-items:flex-end;">
+    <div class="panel" id="bt-status" style="margin-bottom:16px;"></div>
+    <div class="subtabs" data-group="btlink" role="tablist">
+      <button type="button" class="subtab" data-tab="people" role="tab">BioTime people</button>
+      <button type="button" class="subtab" data-tab="unlinked" role="tab">Payroll not linked</button>
+      <button type="button" class="subtab" data-tab="renumber" role="tab">Number changed</button>
+    </div>
+    <div class="panel" data-tabgroup="btlink" data-tabs="people">
+      <div class="field-row" style="align-items:flex-end;margin-top:0;">
         <div class="field" style="min-width:220px;"><span class="label">Search</span><input type="text" id="bt-search" placeholder="Name or number"></div>
         <label class="chk-label"><input type="checkbox" id="bt-show-inactive"> Show people no longer active in BioTime</label>
       </div>
       <div id="bt-staff" style="margin-top:12px;"></div>
     </div>
-    <div class="panel" style="margin-top:16px;">
+    <div class="panel" data-tabgroup="btlink" data-tabs="unlinked">
       <h2 style="font-size:15px;margin:0 0 8px;">Payroll employees not linked to BioTime</h2>
       <div id="bt-unlinked-emps"></div>
     </div>
-    <div class="panel" style="margin-top:16px;" id="bt-renumber" hidden>
+    <div data-tabgroup="btlink" data-tabs="renumber"><div class="panel" id="bt-renumber" hidden>
       <h2 style="font-size:15px;margin:0 0 8px;">A BioTime number was changed</h2>
       <div class="sub">After you change someone's Employee ID in BioTime (e.g. to match their payroll number) and the next sync has run, BioTime's new number shows above as a new, unlinked person. Move Batten's records — clock-ins, shift, leave, manual clock-ins and the payroll link — from the old number to the new one here.</div>
       <div class="field-row" style="align-items:flex-end;margin-top:8px;flex-wrap:wrap;">
@@ -951,7 +976,7 @@
         <button class="btn small primary" id="bt-rn-go">Move records</button>
       </div>
       <div id="bt-rn-status" class="status-msg" style="display:none;margin-top:10px;"></div>
-    </div>
+    </div></div>
   </section>
 
   <section class="view" id="view-admin" hidden>
@@ -963,14 +988,20 @@
     <!-- Owner-only in practice (only an owner can ever reach this view — see
          applyRolePermissions_), but adding/editing a user is also re-checked server-side
          (requireRole_), so that's the actual security boundary, not this screen's visibility. -->
-    <div class="panel" id="users-admin-panel" style="max-width:620px;">
+    <div class="subtabs" data-group="admin" role="tablist">
+      <button type="button" class="subtab" data-tab="logins" role="tab">Logins</button>
+      <button type="button" class="subtab" data-tab="joiners" role="tab">Joiners</button>
+      <button type="button" class="subtab" data-tab="audit" role="tab">Activity log</button>
+      <button type="button" class="subtab" data-tab="perf" role="tab">Speed log</button>
+    </div>
+    <div class="panel" id="users-admin-panel" style="max-width:620px;" data-tabgroup="admin" data-tabs="logins">
       <h2 style="margin:0 0 4px;">Team logins</h2>
       <div class="sub" style="margin-bottom:14px;">Who can log in to Batten. Owner sees and can do everything, including Admin itself and approving a quote into a job — those two are never available to an Employee. An Employee only gets the functions ticked below; tick "Tick off production progress" only alongside "Production board", since it has nothing to act on otherwise.</div>
       <div id="users-admin-status" class="status-msg" style="display:none;margin-bottom:12px;"></div>
       <div id="users-list-mgr"></div>
     </div>
 
-    <div class="panel" id="users-add-panel" style="max-width:620px;margin-top:16px;">
+    <div class="panel" id="users-add-panel" style="max-width:620px;margin-top:16px;" data-tabgroup="admin" data-tabs="logins">
       <h2 style="margin:0 0 4px;">Add a new login</h2>
       <div class="sub" style="margin-bottom:14px;">Fill in the details and click Add login. Pick their payroll employee so Batten knows who they are: anyone in Management gets Attendance automatically.</div>
       <div class="field-row" style="align-items:flex-end;">
@@ -993,7 +1024,7 @@
       <div id="users-add-status" class="status-msg" style="display:none;margin-top:12px;"></div>
     </div>
 
-    <div class="panel" style="max-width:440px;">
+    <div class="panel" style="max-width:440px;" data-tabgroup="admin" data-tabs="joiners">
       <h2 style="margin:0 0 4px;">Joiners / carpenters</h2>
       <div class="sub" style="margin-bottom:14px;">Who's available to assign a job to, in the dropdown Natalie sees when approving a quote into a job. Renaming one updates every job already assigned to it; deleting one leaves those jobs Unassigned rather than losing them.</div>
       <div id="joiner-list-mgr"></div>
@@ -1003,7 +1034,7 @@
       </div>
     </div>
 
-    <div class="panel" id="audit-panel">
+    <div class="panel" id="audit-panel" data-tabgroup="admin" data-tabs="audit">
       <h2 style="margin:0 0 4px;">Activity log</h2>
       <div class="sub" style="margin-bottom:12px;">Who did what, and when: logins (including failed attempts), logouts and every change made in Batten. Viewing screens isn't recorded. Owners only.</div>
       <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
@@ -1016,7 +1047,7 @@
       <div id="audit-list" style="margin-top:12px;"></div>
     </div>
 
-    <div class="panel" id="perf-panel">
+    <div class="panel" id="perf-panel" data-tabgroup="admin" data-tabs="perf">
       <h2 style="margin:0 0 4px;">Speed log</h2>
       <div class="sub" style="margin-bottom:12px;">What makes Batten slow: every request's time on the server, time spent waiting for another user (lock) and which sheets it read. Last 6 hours, kept by Google for at most 6 hours. "This device" compares the round trip you waited with the server time; the difference is Google starting up plus the network. Owners only.</div>
       <div class="field-row" style="align-items:center;margin-top:0;">
@@ -1027,10 +1058,6 @@
       <div id="perf-body" style="margin-top:12px;"></div>
     </div>
 
-    <div class="panel" style="max-width:620px;">
-      <h2 style="margin:0 0 4px;">Site settings</h2>
-      <div class="sub">Nothing else lives here yet — Costing's own defaults stay on the Costing &gt; Settings screen, and Payroll's on Payroll &gt; Settings, since both are specific to that job. Anything that applies across the whole app, rather than to one of those, belongs here going forward.</div>
-    </div>
   </section>
 
   <section class="view" id="view-payroll-settings" hidden>
@@ -1039,7 +1066,12 @@
       <div class="sub">Departments, company letterhead details, and a one-off import of payroll from before this app was used</div>
     </div>
 
-    <div class="panel" style="max-width:440px;">
+    <div class="subtabs" data-group="paysettings" role="tablist">
+      <button type="button" class="subtab" data-tab="company" role="tab">Company details</button>
+      <button type="button" class="subtab" data-tab="departments" role="tab">Departments</button>
+      <button type="button" class="subtab" data-tab="import" role="tab">Import previous payrolls</button>
+    </div>
+    <div class="panel" style="max-width:440px;" data-tabgroup="paysettings" data-tabs="departments">
       <h2 style="margin:0 0 4px;">Departments</h2>
       <div class="sub" style="margin-bottom:14px;">Groups the roster (Management, Production, Admin…). Renaming one updates every employee in it; deleting one leaves those employees Unassigned rather than losing them.</div>
       <div id="department-list-mgr"></div>
@@ -1049,7 +1081,7 @@
       </div>
     </div>
 
-    <div class="panel" style="max-width:440px;">
+    <div class="panel" style="max-width:440px;" data-tabgroup="paysettings" data-tabs="company">
       <h2 style="margin:0 0 4px;">Company details</h2>
       <div class="sub" style="margin-bottom:14px;">Printed on every payslip's letterhead and used for EMP201/IRP5 reference — this is a single-company payroll, so there's just the one record.</div>
       <div class="field-row">
@@ -1077,7 +1109,7 @@
       <div id="company-saved" class="status-msg" style="display:none; margin-top:14px;">Saved.</div>
     </div>
 
-    <div class="panel" style="max-width:640px;">
+    <div class="panel" style="max-width:640px;" data-tabgroup="paysettings" data-tabs="import">
       <h2 style="margin:0 0 4px;">Import previous payrolls</h2>
       <div class="sub" style="margin-bottom:10px;">One-off backfill for months from before this app was used — e.g. this tax year's earlier months from an old spreadsheet. Drop a CSV file below, or paste the lines directly into the box — one line per employee per month, 27 comma-separated columns each (see SETUP.md for the exact column order and a worked example). An employee is matched by Employee # only, never by name — if no employee has that number yet, one is created for you to check over on the Roster afterwards. Importing the same employee/month twice overwrites rather than duplicating.</div>
       <div class="dropzone" id="import-payroll-dropzone" style="padding:16px; margin-bottom:12px;">
@@ -1164,6 +1196,28 @@
     FUSED_TERM_SPLITS_.forEach(function(pair){ out = out.replace(pair[0], pair[1]); });
     return out;
   }
+  // ---- Tabs inside a screen ----
+  // Markup: <div class="subtabs" data-group="G"><button class="subtab" data-tab="x">…</button>…</div>
+  // and any element with data-tabgroup="G" data-tabs="x y" (shown on tabs x and y). The last
+  // tab picked per group is remembered while the page is open. A tab button can be hidden
+  // (e.g. owner-only); applyTabs_ then falls back to the first visible one.
+  var TAB_STATE_ = { leave:'taken' };
+  function setTab_(group, t){
+    TAB_STATE_[group] = t;
+    document.querySelectorAll('.subtabs[data-group="'+group+'"] .subtab').forEach(function(b){ var on=b.dataset.tab===t; b.classList.toggle('active', on); b.setAttribute('aria-selected', on?'true':'false'); });
+    document.querySelectorAll('[data-tabgroup="'+group+'"]').forEach(function(el){ el.hidden = (' '+el.dataset.tabs+' ').indexOf(' '+t+' ')===-1; });
+  }
+  function applyTabs_(group, fallback){
+    var barEl = document.querySelector('.subtabs[data-group="'+group+'"]'); if(!barEl) return;
+    var vis = function(t){ var b=barEl.querySelector('.subtab[data-tab="'+t+'"]'); return b && !b.hidden; };
+    var t = TAB_STATE_[group];
+    if(!t || !vis(t)) t = (fallback && vis(fallback)) ? fallback : ((barEl.querySelector('.subtab:not([hidden])')||{}).dataset||{}).tab;
+    if(t) setTab_(group, t);
+  }
+  document.addEventListener('click', function(e){
+    var b = e.target.closest && e.target.closest('.subtabs .subtab'); if(!b) return;
+    setTab_(b.closest('.subtabs').dataset.group, b.dataset.tab);
+  });
   function esc(s){ return (s==null?'':String(s)).replace(/[&<>"']/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
   function el(html){ var t=document.createElement('template'); t.innerHTML=html.trim(); return t.content.firstElementChild; }
 
@@ -5161,15 +5215,8 @@
   document.getElementById('lv-from').addEventListener('change', function(){ var t=document.getElementById('lv-to'); if(!t.value || t.value < this.value) t.value=this.value; lvSyncHalf_(); });
   document.getElementById('lv-to').addEventListener('change', lvSyncHalf_);
   document.getElementById('lv-year').addEventListener('change', loadLeave_);
-  // Leave screen tabs: Add leave / Leave taken / Leave records (the year picker serves the last two).
-  var lvTab_ = 'taken';
-  function setLvTab_(t){
-    lvTab_ = t;
-    document.querySelectorAll('#lv-tabs .subtab').forEach(function(b){ var on=b.dataset.tab===t; b.classList.toggle('active', on); b.setAttribute('aria-selected', on?'true':'false'); });
-    document.querySelectorAll('#view-att-leave .lv-tab').forEach(function(el){ el.hidden = el.dataset.tab.split(' ').indexOf(t)===-1; });
-  }
-  document.querySelectorAll('#lv-tabs .subtab').forEach(function(b){ b.addEventListener('click', function(){ setLvTab_(b.dataset.tab); }); });
-  setLvTab_(lvTab_);
+  // Leave screen tabs (generic tabs: setTab_ / applyTabs_). Opens on Leave taken.
+  function setLvTab_(t){ setTab_('leave', t); }
   document.getElementById('lv-add').addEventListener('click', function(){
     var b=this, st=document.getElementById('lv-status');
     withBusy_(b, apiRead('addLeave', { empCode: document.getElementById('lv-person').value, type: document.getElementById('lv-type').value, from: document.getElementById('lv-from').value, to: document.getElementById('lv-to').value, half: document.getElementById('lv-half').checked, note: document.getElementById('lv-note').value }), 'Adding…').then(function(res){
@@ -5421,6 +5468,8 @@
     var oldOnes = (d.staff||[]).filter(function(p){ return !p.active && !p.resignDate; });
     var newOnes = (d.staff||[]).filter(function(p){ return p.active && !p.link; });
     rn.hidden = !attIsOwner_();
+    var rnTab = document.querySelector('.subtabs[data-group="btlink"] .subtab[data-tab="renumber"]'); if(rnTab) rnTab.hidden = rn.hidden;
+    applyTabs_('btlink');
     document.getElementById('bt-rn-from').innerHTML = '<option value="">Choose…</option>' + oldOnes.map(function(p){ return '<option value="'+esc(p.empCode)+'">#'+esc(p.empCode)+' '+esc(p.name)+(p.link?' → '+esc(p.link.employeeName):'')+'</option>'; }).join('');
     document.getElementById('bt-rn-to').innerHTML = '<option value="">Choose…</option>' + newOnes.map(function(p){ return '<option value="'+esc(p.empCode)+'">#'+esc(p.empCode)+' '+esc(p.name)+'</option>'; }).join('');
     if(d.message){ var st=document.getElementById('bt-rn-status'); st.style.display='block'; st.className='status-msg'; st.textContent=d.message; }
@@ -6474,16 +6523,23 @@
 
     var dedHtml = renderDeductionAccountsPanelHtml_();
 
+    // Tabs: From clock-ins / Pay adjustments / Deductions & advances (only when there are any).
+    var tabBar = '<div class="subtabs" data-group="payadj" role="tablist">' +
+      '<button type="button" class="subtab" data-tab="clockins">From clock-ins</button>' +
+      '<button type="button" class="subtab" data-tab="adjust">Pay adjustments</button>' +
+      (dedHtml ? '<button type="button" class="subtab" data-tab="deduct">Deductions &amp; advances</button>' : '') + '</div>';
     body.innerHTML =
-      dedHtml +
-      '<div class="panel" id="c2p-panel" style="margin-bottom:16px;"></div>' +
-      '<div class="panel">' +
+      tabBar +
+      (dedHtml ? '<div data-tabgroup="payadj" data-tabs="deduct">' + dedHtml + '</div>' : '') +
+      '<div class="panel" id="c2p-panel" data-tabgroup="payadj" data-tabs="clockins"></div>' +
+      '<div class="panel" data-tabgroup="payadj" data-tabs="adjust">' +
         '<h2 style="margin:0 0 10px;">Pay adjustments — '+esc(payrollMonth)+'</h2>' +
         '<div class="sub" style="margin-bottom:14px;">Click an employee to add commission, bonus, overtime, deductions or advances, then Finalize once they\'re done for the month — Run Payroll refuses to run until every active employee is finalized.</div>' +
         '<div class="table-wrap"><table><thead><tr><th>Name</th><th>Department</th><th>This month</th><th>Status</th><th></th></tr></thead><tbody>' +
         (rowsHtml || '<tr><td colspan="5" class="empty">No active employees.</td></tr>') +
         '</tbody></table></div>' +
       '</div>';
+    applyTabs_('payadj', 'clockins');
     renderC2pPanel_();
 
     Array.prototype.forEach.call(document.querySelectorAll('.adj-emp-row'), function(tr){
@@ -8544,6 +8600,7 @@
 
   document.getElementById('dsg-new-btn').addEventListener('click', function(){ showView('design-new'); });
   document.getElementById('dsg-search').addEventListener('input', renderDesignList_);
+  document.querySelectorAll('.subtabs[data-group]').forEach(function(b){ applyTabs_(b.dataset.group); });
   function boot(){
     if(!apiConfigured()){
       document.body.insertAdjacentHTML('afterbegin',
