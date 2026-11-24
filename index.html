@@ -452,6 +452,11 @@
   .add-rate-form{ display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
   .add-rate-form .field{ min-width:120px; }
   /* Design section */
+  .c2p-step{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .btn.c2p-btn{ padding:4px 10px; font-size:11px; background:var(--paper-raised); border:1px solid var(--ink); }
+  .btn.c2p-btn.primary{ background:var(--accent, #2f5d6b); border-color:var(--accent, #2f5d6b); }
+  .btn.c2p-btn:hover{ background:var(--accent-soft); }
+  .btn.c2p-btn.primary:hover{ filter:brightness(1.1); background:var(--accent, #2f5d6b); }
   .dsg-cards{ display:grid; grid-template-columns:repeat(auto-fill,minmax(300px,1fr)); gap:18px; margin-bottom:14px; }
   .dsg-card{ margin:0; }
   .dsg-table{ width:100%; border-collapse:collapse; font-size:14px; }
@@ -5647,6 +5652,9 @@
     var s=[];
     r.noClockIn.forEach(function(d){ s.push({ kind:'missing', html:'No clock-in on '+c2pDay_(d), btns:[['fix','Fix',d],['nci','It\'s fine',d]] }); });
     r.noClockOut.forEach(function(d){ s.push({ kind:'missing', html:'No clock-out on '+c2pDay_(d), btns:[['fix','Fix',d],['nco','It\'s fine',d]] }); });
+    // several of a kind: settle them all in one click
+    if(r.noClockIn.length>1) s.push({ kind:'missing', html:r.noClockIn.length+' missing clock-ins above', btns:[['nciAll','All '+r.noClockIn.length+' are fine',r.noClockIn.join(',')]] });
+    if(r.noClockOut.length>1) s.push({ kind:'missing', html:r.noClockOut.length+' missing clock-outs above', btns:[['ncoAll','All '+r.noClockOut.length+' are fine',r.noClockOut.join(',')]] });
     if(r.toAccept.indexOf('Absent')!==-1) r.absentUnchecked.forEach(function(d){ s.push({ kind:'absent', html:'Absent on '+c2pDay_(d)+': check it', btns:[['absent','Confirm absent',d]].concat(c2pCanAttendance_()?[['leave','Add leave',d]]:[]).concat([['open','Open',d]]) }); });
     r.warnings.forEach(function(w){ s.push({ kind:'stale', html:'<span style="color:var(--warn);font-weight:600;">⚠ '+esc(w)+'</span>', raw:true, btns:[] }); });
     var acc = r.toAccept.filter(function(t){ return !(t==='Absent' && r.absentUnchecked.length); });
@@ -5721,7 +5729,7 @@
         var late = r.lateTotal ? (r.lateDeduct ? r.lateTotal+' min' : r.lateTotal+' (under '+res.lateThreshold+')') : '';
         var ot = (r.overtimeHrs ? c2pNum_(r.overtimeHrs)+' h' : '') + (r.dayOffHours ? '<div style="font-size:11px;">+ '+c2pNum_(r.dayOffHours)+' h day off</div>' : '');
         var steps = r._t.done ? '<span class="chip good">✓ Done</span>' : r._t.steps.map(function(s){
-          return '<div class="c2p-step" style="margin-bottom:6px;">'+(s.raw?s.html:esc(s.html))+' '+s.btns.map(function(b){ return '<button type="button" class="btn small'+(b[0]==='accept'||b[0]==='payDayOff'?' primary':' ghost')+' c2p-act" data-act="'+b[0]+'" data-id="'+esc(r.employeeId)+'" data-date="'+esc(b[2]||'')+'" data-code="'+esc(r.empCode)+'">'+esc(b[1])+'</button>'; }).join(' ')+'</div>';
+          return '<div class="c2p-step" style="margin-bottom:6px;">'+(s.raw?s.html:esc(s.html))+' '+s.btns.map(function(b){ return '<button type="button" class="btn small c2p-btn'+(b[0]==='accept'||b[0]==='payDayOff'?' primary':'')+' c2p-act" data-act="'+b[0]+'" data-id="'+esc(r.employeeId)+'" data-date="'+esc(b[2]||'')+'" data-code="'+esc(r.empCode)+'">'+esc(b[1])+'</button>'; }).join(' ')+'</div>';
         }).join('');
         var settled = c2pSettled_(r);
         return '<tr><td><a href="#" class="c2p-detail" data-id="'+esc(r.employeeId)+'">'+esc(r.name)+'</a></td><td>'+esc(r.department||'')+'</td>' +
@@ -5794,6 +5802,11 @@
     if(act==='accept') return c2pAccept_({ employeeId:id }, b);
     if(act==='payDayOff') return c2pAccept_({ employeeId:id, dayOff:'1' }, b);
     if(act==='nci' || act==='nco' || act==='absent' || act==='dayoff') return c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:act, date:d }), b);
+    if(act==='nciAll' || act==='ncoAll'){
+      var kind=act.slice(0,3), dates=d.split(','), last=null;
+      var chain=dates.reduce(function(p, dt){ return p.then(function(){ return apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:kind, date:dt }).then(function(x){ last=x; }); }); }, Promise.resolve());
+      return c2pRun_(chain.then(function(){ return last; }), b);
+    }
     if(act==='fix' || act==='open') return c2pOpenDay_(d, b.dataset.code);
     if(act==='leave'){ setAppMode('attendance'); showView('att-leave'); return; }
   }
