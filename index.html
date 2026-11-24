@@ -1671,6 +1671,9 @@
       var active = b.dataset.tab ? (v==='payroll' && b.dataset.tab===payrollTab) : (b.dataset.view===v);
       b.classList.toggle('active', active);
     });
+    // set up this screen's tabs every time it opens (safety net besides the one at page load)
+    var secEl=document.getElementById('view-'+v);
+    if(secEl) secEl.querySelectorAll('.subtabs[data-group]').forEach(function(b){ applyTabs_(b.dataset.group); });
     if(v==='design-list') loadDesigns_();
     if(v==='design-new') renderDesignNew_();
     if(v==='design-edit') renderDesignEditor_();
