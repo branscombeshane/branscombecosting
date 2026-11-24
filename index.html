@@ -452,7 +452,9 @@
   .add-rate-form{ display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
   .add-rate-form .field{ min-width:120px; }
   /* Design section */
-  .c2p-step{ display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+  .c2p-step{ display:grid; grid-template-columns:minmax(0,1fr) 270px; align-items:center; gap:10px; padding:3px 0; }
+  .c2p-step + .c2p-step{ border-top:1px dotted var(--line); }
+  .c2p-step-btns{ display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap; }
   .btn.c2p-btn{ padding:4px 10px; font-size:11px; background:var(--paper-raised); border:1px solid var(--ink); }
   .btn.c2p-btn.primary{ background:var(--accent, #2f5d6b); border-color:var(--accent, #2f5d6b); }
   .btn.c2p-btn:hover{ background:var(--accent-soft); }
@@ -5650,12 +5652,17 @@
   // the person's steps, in order; kind decides which tile they fall under
   function c2pSteps_(r){
     var s=[];
-    r.noClockIn.forEach(function(d){ s.push({ kind:'missing', html:'No clock-in on '+c2pDay_(d), btns:[['fix','Fix',d],['nci','It\'s fine',d]] }); });
-    r.noClockOut.forEach(function(d){ s.push({ kind:'missing', html:'No clock-out on '+c2pDay_(d), btns:[['fix','Fix',d],['nco','It\'s fine',d]] }); });
-    // several of a kind: settle them all in one click
-    if(r.noClockIn.length>1) s.push({ kind:'missing', html:r.noClockIn.length+' missing clock-ins above', btns:[['nciAll','All '+r.noClockIn.length+' are fine',r.noClockIn.join(',')]] });
-    if(r.noClockOut.length>1) s.push({ kind:'missing', html:r.noClockOut.length+' missing clock-outs above', btns:[['ncoAll','All '+r.noClockOut.length+' are fine',r.noClockOut.join(',')]] });
-    if(r.toAccept.indexOf('Absent')!==-1) r.absentUnchecked.forEach(function(d){ s.push({ kind:'absent', html:'Absent on '+c2pDay_(d)+': check it', btns:[['absent','Confirm absent',d]].concat(c2pCanAttendance_()?[['leave','Add leave',d]]:[]).concat([['open','Open',d]]) }); });
+    // One line per kind; the individual days are in the Review pop-up (c2pReview_).
+    [['nci','No clock-in',r.noClockIn],['nco','No clock-out',r.noClockOut]].forEach(function(k){
+      var ds=k[2]; if(!ds.length) return;
+      if(ds.length===1) s.push({ kind:'missing', html:k[1]+' on '+c2pDay_(ds[0]), btns:[['fix','Fix',ds[0]],[k[0],'It\'s fine',ds[0]]] });
+      else s.push({ kind:'missing', html:k[1]+' on '+ds.length+' days', btns:[['review','Review',k[0]],[k[0]+'All','All fine',ds.join(',')]] });
+    });
+    if(r.toAccept.indexOf('Absent')!==-1 && r.absentUnchecked.length){
+      var ad=r.absentUnchecked;
+      if(ad.length===1) s.push({ kind:'absent', html:'Absent on '+c2pDay_(ad[0]), btns:[['absent','Confirm absent',ad[0]]].concat(c2pCanAttendance_()?[['leave','Add leave',ad[0]]]:[]).concat([['open','Open',ad[0]]]) });
+      else s.push({ kind:'absent', html:ad.length+' absent days to check', btns:[['review','Review','absent']] });
+    }
     r.warnings.forEach(function(w){ s.push({ kind:'stale', html:'<span style="color:var(--warn);font-weight:600;">⚠ '+esc(w)+'</span>', raw:true, btns:[] }); });
     var acc = r.toAccept.filter(function(t){ return !(t==='Absent' && r.absentUnchecked.length); });
     if(acc.length){
@@ -5668,7 +5675,11 @@
   }
   function c2pSettled_(r){
     var out=[], lab={ nco:'No clock-out', nci:'No clock-in', absent:'Absent', dayoff:'Day-off hours' }, how={ nco:'fine', nci:'fine', absent:'confirmed', dayoff:'not paid' };
-    r.settled.forEach(function(x){ out.push('<span>'+esc(lab[x.kind])+(x.date?' '+esc(c2pShort_(x.date)):'')+': '+how[x.kind]+' ('+esc(x.by||'?')+') <a href="#" class="c2p-undo" data-kind="'+x.kind+'" data-date="'+esc(x.date||'')+'">undo</a></span>'); });
+    var groups={}, order=[];
+    r.settled.forEach(function(x){ var k=x.kind+'|'+(x.by||'?'); if(!groups[k]){ groups[k]={ kind:x.kind, by:x.by||'?', dates:[] }; order.push(k); } groups[k].dates.push(x.date||''); });
+    order.forEach(function(k){ var g=groups[k], n=g.dates.length;
+      var what = !g.dates[0] ? lab[g.kind] : n===1 ? lab[g.kind]+' '+c2pShort_(g.dates[0]) : lab[g.kind]+' on '+n+' days';
+      out.push('<span title="'+esc(g.dates.filter(Boolean).map(c2pShort_).join(', '))+'">'+esc(what)+': '+how[g.kind]+' ('+esc(g.by)+') <a href="#" class="c2p-undo" data-kind="'+g.kind+'" data-date="'+esc(g.dates.join(','))+'">undo</a></span>'); });
     var unit={ Absent:' day(s)', Late:' min', Overtime:' h' };
     Object.keys(r.accepted||{}).forEach(function(t){ var a=r.accepted[t]; out.push('<span>✓ '+esc(t==='Late'?'Late in':t)+' '+c2pNum_(a.qty)+unit[t]+' accepted'+(a.by?' ('+esc(a.by)+')':'')+'</span>'); });
     if(r.acceptedDayOff) out.push('<span>✓ Day-off '+c2pNum_(r.acceptedDayOff.qty)+' h paid as overtime'+(r.acceptedDayOff.by?' ('+esc(r.acceptedDayOff.by)+')':'')+'</span>');
@@ -5729,7 +5740,7 @@
         var late = r.lateTotal ? (r.lateDeduct ? r.lateTotal+' min' : r.lateTotal+' (under '+res.lateThreshold+')') : '';
         var ot = (r.overtimeHrs ? c2pNum_(r.overtimeHrs)+' h' : '') + (r.dayOffHours ? '<div style="font-size:11px;">+ '+c2pNum_(r.dayOffHours)+' h day off</div>' : '');
         var steps = r._t.done ? '<span class="chip good">✓ Done</span>' : r._t.steps.map(function(s){
-          return '<div class="c2p-step" style="margin-bottom:6px;">'+(s.raw?s.html:esc(s.html))+' '+s.btns.map(function(b){ return '<button type="button" class="btn small c2p-btn'+(b[0]==='accept'||b[0]==='payDayOff'?' primary':'')+' c2p-act" data-act="'+b[0]+'" data-id="'+esc(r.employeeId)+'" data-date="'+esc(b[2]||'')+'" data-code="'+esc(r.empCode)+'">'+esc(b[1])+'</button>'; }).join(' ')+'</div>';
+          return '<div class="c2p-step"><span class="c2p-step-text">'+(s.raw?s.html:esc(s.html))+'</span><span class="c2p-step-btns">'+s.btns.map(function(b){ return '<button type="button" class="btn small c2p-btn'+(b[0]==='accept'||b[0]==='payDayOff'?' primary':'')+' c2p-act" data-act="'+b[0]+'" data-id="'+esc(r.employeeId)+'" data-date="'+esc(b[2]||'')+'" data-code="'+esc(r.empCode)+'">'+esc(b[1])+'</button>'; }).join('')+'</span></div>';
         }).join('');
         var settled = c2pSettled_(r);
         return '<tr><td><a href="#" class="c2p-detail" data-id="'+esc(r.employeeId)+'">'+esc(r.name)+'</a></td><td>'+esc(r.department||'')+'</td>' +
@@ -5748,7 +5759,8 @@
     el.querySelectorAll('.c2p-act').forEach(function(b){ b.addEventListener('click', function(){ c2pAction_(b); }); });
     el.querySelectorAll('.c2p-undo').forEach(function(a){ a.addEventListener('click', function(ev){ ev.preventDefault();
       var id = a.closest('tr').querySelector('.c2p-detail').dataset.id;
-      c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:a.dataset.kind, date:a.dataset.date, op:'clear' }), null);
+      var dates=a.dataset.date.split(','), last=null;
+      c2pRun_(dates.reduce(function(p, dt){ return p.then(function(){ return apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:a.dataset.kind, date:dt, op:'clear' }).then(function(x){ last=x; }); }); }, Promise.resolve()).then(function(){ return last; }), null);
     }); });
     var all=el.querySelector('#c2p-accept-all');
     if(all) all.addEventListener('click', function(){
@@ -5808,7 +5820,34 @@
       return c2pRun_(chain.then(function(){ return last; }), b);
     }
     if(act==='fix' || act==='open') return c2pOpenDay_(d, b.dataset.code);
+    if(act==='review') return c2pReview_(id, d);
     if(act==='leave'){ setAppMode('attendance'); showView('att-leave'); return; }
+  }
+  // The individual days behind a summary step (missing clock-ins / clock-outs, absent days),
+  // each with its own buttons. Closes itself once nothing is left.
+  function c2pReview_(employeeId, kind){
+    var ov=document.getElementById('c2p-review'); if(ov) ov.remove();
+    ov=document.createElement('div'); ov.className='modal-overlay'; ov.id='c2p-review';
+    document.body.appendChild(ov);
+    function draw(){
+      var r=(c2pData_.rows||[]).filter(function(x){ return x.employeeId===employeeId; })[0];
+      var days = !r ? [] : kind==='nci' ? r.noClockIn : kind==='nco' ? r.noClockOut : r.absentUnchecked;
+      if(!days.length){ ov.remove(); return; }
+      var title = kind==='nci' ? 'No clock-in' : kind==='nco' ? 'No clock-out' : 'Absent days to check';
+      var btns = function(d){ return kind==='absent'
+        ? [['absent','Confirm absent']].concat(c2pCanAttendance_()?[['leave','Add leave']]:[]).concat([['open','Open']])
+        : [['fix','Fix'],[kind,'It\'s fine']]; };
+      ov.innerHTML='<div class="modal-panel modal-panel-plain" style="max-width:560px;"><h2 style="margin-top:0;">'+esc(r.name)+': '+esc(title)+'</h2>'+
+        '<div class="sub" style="margin-bottom:10px;">'+(kind==='absent' ? 'Confirm each day, or turn it into leave if there\'s a reason (e.g. a sick note). Absent is only deducted once every day is checked.' : 'Fix adds the missing time (Attendance → Manual Clock-In); It\'s fine means they left / arrived at the normal time, so nothing counts.')+'</div>'+
+        days.map(function(d){ return '<div class="c2p-step"><span class="c2p-step-text">'+esc(c2pDay_(d))+'</span><span class="c2p-step-btns">'+btns(d).map(function(b){ return '<button type="button" class="btn small c2p-btn c2p-act" data-act="'+b[0]+'" data-id="'+esc(employeeId)+'" data-date="'+esc(d)+'" data-code="'+esc(r.empCode)+'">'+esc(b[1])+'</button>'; }).join('')+'</span></div>'; }).join('')+
+        '<div class="field-row">'+(kind!=='absent' ? '<button type="button" class="btn c2p-btn c2p-act" data-act="'+kind+'All" data-id="'+esc(employeeId)+'" data-date="'+esc(days.join(','))+'">All '+days.length+' are fine</button>' : '')+'<button type="button" class="btn ghost" id="c2p-review-close">Close</button></div></div>';
+      ov.querySelector('#c2p-review-close').addEventListener('click', function(){ ov.remove(); });
+      ov.querySelectorAll('.c2p-act').forEach(function(b){ b.addEventListener('click', function(){
+        if(b.dataset.act==='fix' || b.dataset.act==='open' || b.dataset.act==='leave') ov.remove();
+        var p=c2pAction_(b); if(p && p.then) p.then(function(){ if(document.body.contains(ov)) draw(); });
+      }); });
+    }
+    draw();
   }
   // Daily attendance on that date, with the person opened.
   function c2pOpenDay_(date, code){
