@@ -5145,7 +5145,7 @@
     var b=this, st=document.getElementById('lv-status');
     withBusy_(b, apiRead('addLeave', { empCode: document.getElementById('lv-person').value, type: document.getElementById('lv-type').value, from: document.getElementById('lv-from').value, to: document.getElementById('lv-to').value, half: document.getElementById('lv-half').checked, note: document.getElementById('lv-note').value }), 'Adding…').then(function(res){
       st.style.display='block';
-      if(res && res.ok){ st.className='status-msg'; st.textContent='Leave added. It counts now and needs a sign-off from someone else in Management.'; document.getElementById('lv-note').value=''; document.getElementById('lv-year').value=String(res.year); renderLeave_(res); }
+      if(res && res.ok){ st.className='status-msg'; st.textContent = (currentUser && currentUser.role==='owner') ? 'Leave added and signed off (entered by the owner).' : 'Leave added. It counts now and needs a sign-off from someone else in Management.'; document.getElementById('lv-note').value=''; document.getElementById('lv-year').value=String(res.year); renderLeave_(res); }
       else { st.className='status-msg error'; st.textContent=(res && res.error) || 'Couldn\'t add the leave.'; }
     });
   });
