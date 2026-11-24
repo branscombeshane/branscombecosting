@@ -5627,88 +5627,231 @@
     else if(payrollTab==='reports') loadReports();
   }
 
-  // -------- Clock-ins to pay (BioTime step 6) --------
-  // Shown as a panel at the top of Pay Adjustments, so it all sits together. Code.gs
-  // c2pView_/c2pAccept_: per payroll month, the attendance period (20th of the previous month
-  // to the 19th) gives suggested Absent days, Late minutes (only if over 100 in the period) and
-  // Overtime hours. Nothing reaches pay until Accept is clicked; the rows then appear in the
-  // list below as ordinary adjustments.
-  var c2pData_ = null;
-  // The days behind one employee's suggestion: every shift day in the period (and any day off
-  // they clocked on), with the days that count towards Absent / Late / Overtime highlighted.
-  // Shown in the same pop-up as Attendance's 14-day view.
-  function openC2pDetail_(employeeId){
-    var res = c2pData_; if(!res || !res.rows) return;
-    var r = res.rows.filter(function(x){ return x.employeeId===employeeId; })[0]; if(!r) return;
-    var body = document.getElementById('att-person-body');
-    var days = r.days || [];
-    if(!days.length){ body.innerHTML = '<div class="status-msg error">The backend (Code.gs) needs to be updated to the latest version for this breakdown.</div>'; document.getElementById('att-person-modal').hidden = false; return; }
-    var DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    var sum = function(label, value, money_){ return '<div class="stat"><span class="label">'+label+'</span><span class="value num" style="font-size:16px;">'+value+'</span>'+(money_?'<div style="font-size:12px;">'+money_+'</div>':'')+'</div>'; };
-    var lateNote = r.lateTotal ? (r.lateDeduct ? 'over '+res.lateThreshold+': deducted' : 'under '+res.lateThreshold+': not deducted') : '';
-    var head = '<div class="sheet-head" style="margin-bottom:10px;"><h1 style="font-size:18px;">'+esc(r.name)+'</h1><div class="sub">Clock-ins '+esc(res.periodStart)+' to '+esc(res.upTo)+(res.inProgress?' (period not over yet)':'')+(r.dayRate?' · day rate '+money(r.dayRate)+' · hourly rate '+money(r.hourRate):'')+'</div></div>' +
-      '<div class="stats" style="margin-top:0;">' +
-        sum('Absent', r.absentDays+' day(s)', r.absentDays && r.absentAmount!=null ? '-'+money(r.absentAmount) : '') +
-        sum('Late', r.lateTotal+' min', (r.lateDeduct && r.lateAmount!=null ? '-'+money(r.lateAmount)+' · ' : '')+lateNote) +
-        sum('Overtime', r.overtimeHrs.toFixed(1)+' h', r.overtimeHrs && r.overtimeAmount!=null ? '+'+money(r.overtimeAmount)+' at '+res.overtimeMultiplier+'×' : '') +
-        sum('To check', r.checkDates.length+' day(s)', r.checkDates.length ? 'missing clock-in/out' : '') +
-      '</div>';
-    var rows = days.map(function(x){
-      var p = x.date.split('-'), dow = DOW[new Date(Date.UTC(+p[0],+p[1]-1,+p[2])).getUTCDay()];
-      var counts = [];
-      if(x.absent) counts.push('<span class="chip warn">Absent '+(x.absent===0.5?'½ day':'1 day')+'</span>');
-      if(x.lateMin) counts.push('<span class="chip amber">Late '+x.lateMin+' min</span>');
-      if(x.overtimeHrs) counts.push('<span class="chip good">Overtime '+x.overtimeHrs.toFixed(1)+' h</span>');
-      if(x.status==='No clock-in' || x.status==='No clock-out') counts.push('<span class="chip amber">Check: '+esc(x.status.toLowerCase())+'</span>');
-      var hl = counts.length ? ' style="background:var(--paper);"' : '';
-      var t = function(v, manual){ return v ? esc(v)+(manual?' <span style="font-size:11px;color:var(--ink-soft);">(manual)</span>':'') : ''; };
-      return '<tr'+hl+'><td>'+dow+' '+esc(x.date.slice(5))+'</td><td>'+(x.start?esc(x.start+'–'+x.end):'<span style="color:var(--ink-soft);">day off</span>')+'</td>' +
-        '<td>'+t(x.inTime,x.inManual)+'</td><td>'+t(x.outTime,x.outManual)+'</td><td class="num">'+(x.hours!=null?x.hours.toFixed(1):'')+'</td>' +
-        '<td>'+esc(x.status)+(x.note?' <span style="font-size:11px;color:var(--ink-soft);">'+esc(x.note)+'</span>':'')+'</td><td>'+counts.join(' ')+'</td></tr>';
-    }).join('');
-    body.innerHTML = head + '<div class="table-wrap" style="margin-top:12px;"><table><thead><tr><th>Day</th><th>Shift</th><th>In</th><th>Out</th><th class="num">Hours</th><th>Status</th><th>Counts towards</th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
-      '<div class="sub" style="margin-top:8px;">Fix a missing clock-in/out under Attendance → Manual Clock-In (it counts for pay once signed off). If the whole workshop was closed on a day, add it as a company day under Attendance → Public holidays so nobody is marked absent.</div>';
-    document.getElementById('att-person-modal').hidden = false;
+  // -------- From clock-ins (BioTime step 6, reworked 24 Nov 2026) --------
+  // A to-do list per person, at the top of Pay Adjustments. Code.gs c2pView_ works out, for
+  // the attendance period (20th of the previous month to the 19th): Absent days, Late minutes
+  // (deducted only over 100 in the period), Overtime (incl. public holidays) and day-off hours.
+  // Each person's Next step: fix or OK missing clock-ins/outs, check absent days (Confirm or
+  // turn into leave), Accept, decide day-off hours (Pay as overtime / Don't pay). Accepted lines
+  // are never changed: if the clock-ins or the rate change, a red warning says to delete the
+  // line and accept again. Hand-typed Absent/Late/Overtime count as paid. After payroll has run
+  // for a month, accepting needs the Owner's password and marks "re-run payroll needed".
+  var c2pData_ = null, c2pFilter_ = 'todo', c2pBusy_ = false;
+  var C2P_DOW_ = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'], C2P_MON_ = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function c2pDay_(d){ var p=String(d).slice(0,10).split('-'); var dt=new Date(Date.UTC(+p[0],+p[1]-1,+p[2])); return C2P_DOW_[dt.getUTCDay()]+' '+(+p[2])+' '+C2P_MON_[+p[1]-1]; }
+  function c2pShort_(d){ var p=String(d).slice(0,10).split('-'); return (+p[2])+' '+C2P_MON_[+p[1]-1]; }
+  function c2pNum_(n){ return String(Math.round(n*100)/100); }
+  function c2pCanAttendance_(){ return allowedModesFor_(currentUser).indexOf('attendance')!==-1; }
+  // the person's steps, in order; kind decides which tile they fall under
+  function c2pSteps_(r){
+    var s=[];
+    r.noClockIn.forEach(function(d){ s.push({ kind:'missing', html:'No clock-in on '+c2pDay_(d), btns:[['fix','Fix',d],['nci','It\'s fine',d]] }); });
+    r.noClockOut.forEach(function(d){ s.push({ kind:'missing', html:'No clock-out on '+c2pDay_(d), btns:[['fix','Fix',d],['nco','It\'s fine',d]] }); });
+    if(r.toAccept.indexOf('Absent')!==-1) r.absentUnchecked.forEach(function(d){ s.push({ kind:'absent', html:'Absent on '+c2pDay_(d)+': check it', btns:[['absent','Confirm absent',d]].concat(c2pCanAttendance_()?[['leave','Add leave',d]]:[]).concat([['open','Open',d]]) }); });
+    r.warnings.forEach(function(w){ s.push({ kind:'stale', html:'<span style="color:var(--warn);font-weight:600;">⚠ '+esc(w)+'</span>', raw:true, btns:[] }); });
+    var acc = r.toAccept.filter(function(t){ return !(t==='Absent' && r.absentUnchecked.length); });
+    if(acc.length){
+      var parts = acc.map(function(t){ return t==='Absent' ? 'Absent '+c2pNum_(r.absentDays)+' day(s)' : t==='Late' ? 'Late in '+r.lateDeduct+' min' : 'Overtime '+c2pNum_(r.overtimeHrs)+' h'; });
+      var block = !r.hasRates ? 'no salary / days per week on the Roster' : (r.finalized && !r.payrollRun ? 'Finalized: click Save on them below first' : '');
+      s.push({ kind:'accept', html:'Accept: '+parts.join(' · ')+(block?' <span class="chip warn">'+esc(block)+'</span>':''), raw:true, btns: block ? [] : [['accept','Accept','']] });
+    }
+    if(r.dayOffOpen) s.push({ kind:'dayoff', html:'Worked on a day off: '+c2pNum_(r.dayOffHours)+' h ('+r.dayOff.map(function(x){ return c2pShort_(x.date); }).join(', ')+')', btns: r.hasRates ? [['payDayOff','Pay as overtime',''],['dayoff','Don\'t pay','']] : [['dayoff','Don\'t pay','']] });
+    return s;
+  }
+  function c2pSettled_(r){
+    var out=[], lab={ nco:'No clock-out', nci:'No clock-in', absent:'Absent', dayoff:'Day-off hours' }, how={ nco:'fine', nci:'fine', absent:'confirmed', dayoff:'not paid' };
+    r.settled.forEach(function(x){ out.push('<span>'+esc(lab[x.kind])+(x.date?' '+esc(c2pShort_(x.date)):'')+': '+how[x.kind]+' ('+esc(x.by||'?')+') <a href="#" class="c2p-undo" data-kind="'+x.kind+'" data-date="'+esc(x.date||'')+'">undo</a></span>'); });
+    var unit={ Absent:' day(s)', Late:' min', Overtime:' h' };
+    Object.keys(r.accepted||{}).forEach(function(t){ var a=r.accepted[t]; out.push('<span>✓ '+esc(t==='Late'?'Late in':t)+' '+c2pNum_(a.qty)+unit[t]+' accepted'+(a.by?' ('+esc(a.by)+')':'')+'</span>'); });
+    if(r.acceptedDayOff) out.push('<span>✓ Day-off '+c2pNum_(r.acceptedDayOff.qty)+' h paid as overtime'+(r.acceptedDayOff.by?' ('+esc(r.acceptedDayOff.by)+')':'')+'</span>');
+    Object.keys(r.byHand||{}).forEach(function(t){ out.push('<span>✓ '+esc(t==='Late'?'late in':t.toLowerCase())+' '+c2pNum_(r.byHand[t])+unit[t]+' added by hand</span>'); });
+    return out;
+  }
+  function c2pTileOf_(r){
+    var st=c2pSteps_(r), k={}; st.forEach(function(x){ k[x.kind]=1; });
+    return { steps:st, kinds:k, done:!st.length };
   }
   function renderC2pPanel_(){
     var el = document.getElementById('c2p-panel');
     if(!el) return;
     var res = c2pData_;
-    var title = '<h2 style="margin:0 0 6px;">Suggestions from clock-ins'+(res && res.periodStart ? ' — '+esc(res.periodStart)+' to '+esc(res.periodEnd) : '')+'</h2>';
+    var title = '<h2 style="margin:0 0 6px;">From clock-ins'+(res && res.periodStart ? ' — '+esc(c2pShort_(res.periodStart))+' to '+esc(c2pShort_(res.periodEnd)) : '')+'</h2>';
     if(!res){ el.innerHTML = title + '<div class="empty">Loading…</div>'; return; }
     if(!res.ok){
       var msg = (res.error && /^Unknown action/.test(res.error)) ? 'The backend (Code.gs) needs to be updated to the latest version for clock-in suggestions.' : (res.error==='forbidden' ? 'Clock-in suggestions need the Payroll permission.' : (res.error || 'Couldn\'t load.'));
       el.innerHTML = title + '<div class="status-msg error">'+esc(msg)+'</div>'; return;
     }
-    var rows = res.rows||[];
-    var head = '<div class="sub" style="margin-bottom:10px;">'+
-      (res.inProgress ? '<b>This period isn\'t over yet</b>: figures run up to '+esc(res.upTo)+' and will change; accept after the 19th (or Accept again then). ' : '') +
-      'Absent at the day rate, Late only when the period\'s total is over '+res.lateThreshold+' minutes, Overtime at '+res.overtimeMultiplier+'× the hourly rate. Manual clock-ins not yet signed off are left out. Accept adds the row to the adjustments below; Accept again replaces it.</div>' +
+    if(!res.rows || (res.rows[0] && !res.rows[0].toAccept)){ el.innerHTML = title + '<div class="status-msg error">The backend (Code.gs) needs to be updated to the latest version for this screen.</div>'; return; }
+    var rows = res.rows.map(function(r){ var t=c2pTileOf_(r); r._t=t; return r; });
+    var q = ((document.getElementById('c2p-q')||{}).value||'').toLowerCase(), dept = (document.getElementById('c2p-dept')||{}).value||'';
+    var base = rows.filter(function(r){ return (!dept || r.department===dept) && (!q || r.name.toLowerCase().indexOf(q)!==-1); });
+    var cnt = function(f){ return base.filter(f).length; };
+    var tiles = [
+      ['todo','To do', cnt(function(r){ return !r._t.done; })],
+      ['missing','Missing clock-ins/outs', cnt(function(r){ return r._t.kinds.missing; })],
+      ['absent','Absent days to check', cnt(function(r){ return r._t.kinds.absent; })],
+      ['accept','To accept', cnt(function(r){ return r._t.kinds.accept; })],
+      ['dayoff','Days off', cnt(function(r){ return r._t.kinds.dayoff; })],
+      ['stale','Out of date', cnt(function(r){ return r._t.kinds.stale; })],
+      ['done','Done', cnt(function(r){ return r._t.done; })],
+      ['all','Everyone', base.length]
+    ].filter(function(t){ return t[0]!=='stale' || t[2]; });
+    if(c2pFilter_==='stale' && !tiles.some(function(t){ return t[0]==='stale'; })) c2pFilter_='todo';
+    var shown = base.filter(function(r){ return c2pFilter_==='all' ? true : c2pFilter_==='todo' ? !r._t.done : c2pFilter_==='done' ? r._t.done : r._t.kinds[c2pFilter_]; });
+    var allDone = rows.length && rows.every(function(r){ return r._t.done; });
+    var depts = []; rows.forEach(function(r){ if(r.department && depts.indexOf(r.department)===-1) depts.push(r.department); }); depts.sort();
+    var stale = rows.filter(function(r){ return r._t.kinds.stale; }).map(function(r){ return r.name; });
+    var acceptable = shown.filter(function(r){ return r._t.steps.some(function(s){ return s.kind==='accept' && s.btns.length; }); });
+    var head =
+      (res.inProgress ? '<div class="status-msg" style="margin-bottom:10px;"><b>Figures so far</b>: the period runs to '+esc(c2pShort_(res.periodEnd))+', these are up to '+esc(c2pShort_(res.upTo))+'. Accept after the 19th.</div>' : '') +
+      ((res.rerunNeeded||[]).length ? '<div class="status-msg error" style="margin-bottom:10px;">Payroll for '+esc(payrollMonth)+' was already run. Re-run it (Run Payroll) to include the changes for: '+esc(res.rerunNeeded.join(', '))+'.</div>' : '') +
+      (stale.length ? '<div class="status-msg error" style="margin-bottom:10px;">Accepted lines no longer match the clock-ins for: '+esc(stale.join(', '))+'. Nothing changes pay by itself: delete the line under the employee below and accept again.</div>' : '') +
       (res.message ? '<div class="status-msg" style="margin-bottom:10px;">'+esc(res.message)+'</div>' : '') +
-      (rows.length && rows[0].monthHasRun ? '<div class="status-msg error" style="margin-bottom:10px;">Payroll for '+esc(payrollMonth)+' has already been run: re-run it after accepting to include these.</div>' : '');
-    var table = rows.length ? '<div class="table-wrap"><table><thead><tr><th>Employee</th><th class="num">Absent</th><th class="num">Late</th><th class="num">Overtime</th><th>Check</th><th>Accepted</th><th></th></tr></thead><tbody>' +
-      rows.map(function(r){
-        var abs = r.absentDays ? r.absentDays+' day(s)<div style="font-size:11px;">-'+(r.absentAmount!=null?money(r.absentAmount):'?')+'</div>' : '';
-        var late = r.lateTotal ? r.lateTotal+' min'+(r.lateDeduct ? '<div style="font-size:11px;">-'+(r.lateAmount!=null?money(r.lateAmount):'?')+'</div>' : '<div style="font-size:11px;color:var(--ink-soft);">under '+res.lateThreshold+', not deducted</div>') : '';
-        var ot = r.overtimeHrs ? r.overtimeHrs.toFixed(1)+' h<div style="font-size:11px;">+'+(r.overtimeAmount!=null?money(r.overtimeAmount):'?')+'</div>' : '';
-        var check = (r.checkDates.length ? '<span class="chip amber" title="'+esc(r.checkDates.join('\n'))+'">'+r.checkDates.length+' day(s) with a missing clock-in/out</span>' : '') + (r.hasRates ? '' : ' <span class="chip warn">no day rate on Roster</span>') + (r.finalized ? ' <span class="chip good">Finalized</span>' : '');
-        var acc = r.accepted ? r.accepted.map(function(a){ return esc(a.type)+' '+money(a.amount); }).join('<br>') : '';
-        var nothing = !r.absentDays && !r.lateDeduct && !r.overtimeHrs;
-        var btn = (r.finalized || !r.hasRates || (nothing && !r.accepted)) ? '' : '<button class="btn small '+(r.accepted?'':'primary ')+'c2p-accept" data-id="'+esc(r.employeeId)+'">'+(r.accepted ? 'Accept again' : 'Accept')+'</button>';
-        return '<tr><td><a href="#" class="c2p-detail" data-id="'+esc(r.employeeId)+'" title="Show the days behind these figures">'+esc(r.name)+'</a>'+(r.absentDates.length?'<div style="font-size:11px;color:var(--ink-soft);">Absent: '+esc(r.absentDates.join(', '))+'</div>':'')+'</td>' +
-          '<td class="num">'+abs+'</td><td class="num">'+late+'</td><td class="num">'+ot+'</td><td>'+check+'</td><td style="font-size:12px;">'+acc+'</td><td>'+btn+'</td></tr>';
-      }).join('') + '</tbody></table></div>' : '<div class="empty">No linked employees have clock-ins in this period yet.</div>';
+      ((res.skipped||[]).length ? '<div class="status-msg error" style="margin-bottom:10px;">'+res.skipped.map(esc).join('<br>')+'</div>' : '') +
+      (allDone ? '<div class="status-msg" style="margin-bottom:10px;background:var(--good-soft);color:var(--good);font-weight:600;">✓ All '+rows.length+' people are done for '+esc(payrollMonth)+' pay</div>' : '') +
+      '<div class="stats" id="c2p-tiles" style="margin-top:0;">'+tiles.map(function(t){ return '<div class="stat'+(c2pFilter_===t[0]?' total':'')+'" data-f="'+t[0]+'" style="cursor:pointer;"><span class="label">'+esc(t[1])+'</span><span class="value num"'+(t[0]==='stale'?' style="color:var(--warn);"':'')+'>'+t[2]+'</span></div>'; }).join('')+'</div>' +
+      '<div class="field-row" style="align-items:flex-end;margin-top:10px;">' +
+        '<div class="field" style="min-width:180px;"><span class="label">Search</span><input type="text" id="c2p-q" placeholder="Name" value="'+esc(q)+'"></div>' +
+        '<div class="field" style="min-width:160px;"><span class="label">Department</span><select id="c2p-dept"><option value="">All departments</option>'+depts.map(function(d){ return '<option'+(d===dept?' selected':'')+'>'+esc(d)+'</option>'; }).join('')+'</select></div>' +
+        (acceptable.length ? '<button type="button" class="btn primary" id="c2p-accept-all">Accept all ('+acceptable.length+')</button>' : '') +
+      '</div>';
+    var fig = function(r, kind, txt, grey){ return txt ? '<a href="#" class="c2p-fig" data-id="'+esc(r.employeeId)+'" data-kind="'+kind+'" style="'+(grey?'color:var(--ink-soft);text-decoration:underline dotted;':'')+'" title="Show the days">'+txt+'</a>' : ''; };
+    var table = shown.length ? '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Employee</th><th>Department</th><th class="num">Absent</th><th class="num">Late in</th><th class="num">Overtime</th><th>Next step</th></tr></thead><tbody>' +
+      shown.map(function(r){
+        var late = r.lateTotal ? (r.lateDeduct ? r.lateTotal+' min' : r.lateTotal+' (under '+res.lateThreshold+')') : '';
+        var ot = (r.overtimeHrs ? c2pNum_(r.overtimeHrs)+' h' : '') + (r.dayOffHours ? '<div style="font-size:11px;">+ '+c2pNum_(r.dayOffHours)+' h day off</div>' : '');
+        var steps = r._t.done ? '<span class="chip good">✓ Done</span>' : r._t.steps.map(function(s){
+          return '<div class="c2p-step" style="margin-bottom:6px;">'+(s.raw?s.html:esc(s.html))+' '+s.btns.map(function(b){ return '<button type="button" class="btn small'+(b[0]==='accept'||b[0]==='payDayOff'?' primary':' ghost')+' c2p-act" data-act="'+b[0]+'" data-id="'+esc(r.employeeId)+'" data-date="'+esc(b[2]||'')+'" data-code="'+esc(r.empCode)+'">'+esc(b[1])+'</button>'; }).join(' ')+'</div>';
+        }).join('');
+        var settled = c2pSettled_(r);
+        return '<tr><td><a href="#" class="c2p-detail" data-id="'+esc(r.employeeId)+'">'+esc(r.name)+'</a></td><td>'+esc(r.department||'')+'</td>' +
+          '<td class="num">'+fig(r,'absent', r.absentDays ? c2pNum_(r.absentDays)+' day(s)' : '')+'</td><td class="num">'+fig(r,'late', late, r.lateTotal && !r.lateDeduct)+'</td><td class="num">'+fig(r,'ot', ot)+'</td>' +
+          '<td>'+steps+(settled.length ? '<div style="font-size:11px;color:var(--ink-soft);margin-top:4px;">'+settled.join(' · ')+'</div>' : '')+'</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty" style="margin-top:10px;">'+(rows.length ? 'Nobody here.' : 'No linked employees have clock-ins in this period yet.')+'</div>';
     var extra = '';
     if((res.notLinked||[]).length) extra += '<div class="sub" style="margin-top:10px;">Not linked to a payroll employee (left out): '+res.notLinked.map(function(x){ return esc(x.name); }).join(', ')+'. Link them under Attendance → BioTime link-up.</div>';
     if((res.notOnPayroll||[]).length) extra += '<div class="sub" style="margin-top:6px;">Not on Batten payroll (attendance only, left out): '+res.notOnPayroll.map(function(x){ return esc(x.name); }).join(', ')+'.</div>';
+    extra += '<div class="sub" style="margin-top:8px;">Absent at the day rate, Late in only when the period\'s total is over '+res.lateThreshold+' minutes, Overtime at '+res.overtimeMultiplier+'× the hourly rate (1× above the BCEA earnings threshold), public holidays worked count as overtime. Rates come from the standing salary on the Roster. Use this screen, not a hand-typed line, for absent, late and overtime.</div>';
     el.innerHTML = title + head + table + extra;
-    el.querySelectorAll('.c2p-detail').forEach(function(a){ a.addEventListener('click', function(ev){ ev.preventDefault(); openC2pDetail_(a.dataset.id); }); });
-    el.querySelectorAll('.c2p-accept').forEach(function(b){ b.addEventListener('click', function(){
-      withBusy_(b, apiRead('acceptClockinsToPay', { month: payrollMonth, employeeId: b.dataset.id }), 'Accepting…').then(function(x){
-        if(x && x.ok){ c2pData_ = x; loadPayrollAdjustments(true); }
-        else alert((x && x.error) || 'Couldn\'t accept.');
-      });
+    el.querySelectorAll('#c2p-tiles .stat').forEach(function(t){ t.addEventListener('click', function(){ c2pFilter_=t.dataset.f; renderC2pPanel_(); }); });
+    var qi=el.querySelector('#c2p-q'); qi.addEventListener('input', function(){ var pos=qi.selectionStart; renderC2pPanel_(); var n=document.getElementById('c2p-q'); n.focus(); n.setSelectionRange(pos,pos); });
+    el.querySelector('#c2p-dept').addEventListener('change', renderC2pPanel_);
+    el.querySelectorAll('.c2p-detail, .c2p-fig').forEach(function(a){ a.addEventListener('click', function(ev){ ev.preventDefault(); openC2pDetail_(a.dataset.id); }); });
+    el.querySelectorAll('.c2p-act').forEach(function(b){ b.addEventListener('click', function(){ c2pAction_(b); }); });
+    el.querySelectorAll('.c2p-undo').forEach(function(a){ a.addEventListener('click', function(ev){ ev.preventDefault();
+      var id = a.closest('tr').querySelector('.c2p-detail').dataset.id;
+      c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:a.dataset.kind, date:a.dataset.date, op:'clear' }), null);
     }); });
+    var all=el.querySelector('#c2p-accept-all');
+    if(all) all.addEventListener('click', function(){
+      if(!confirm('Accept the clock-in figures for '+acceptable.length+' people? Day-off hours are never included: those stay a separate decision.')) return;
+      c2pAccept_({ employeeIds: acceptable.map(function(r){ return r.employeeId; }).join(',') }, all);
+    });
+  }
+  // Runs a call that returns a fresh c2p view, with a busy button, then redraws.
+  function c2pRun_(promise, btn, refreshAdjustments){
+    return withBusy_(btn, promise, 'Working…').then(function(x){
+      if(x && x.ok){ c2pData_ = x; if(refreshAdjustments) loadPayrollAdjustments(true); else renderC2pPanel_(); return x; }
+      if(x && x.needsUnlock) return x;
+      alert((x && x.error) || 'Couldn\'t do that.'); return x;
+    });
+  }
+  function c2pAccept_(params, btn){
+    params.month = payrollMonth;
+    return c2pRun_(apiRead('acceptClockinsToPay', params), btn, true).then(function(x){
+      if(x && x.needsUnlock) c2pUnlock_(x.error, function(){ c2pAccept_(params, null); });
+    });
+  }
+  // Owner's password for a month payroll has already been run for. Sent by form POST (never in
+  // a URL), then the result is collected with getUnlockPayrollMonthResult.
+  function c2pUnlock_(why, then){
+    var ov=document.createElement('div'); ov.className='modal-overlay';
+    ov.innerHTML='<div class="modal-panel modal-panel-plain" style="max-width:420px;"><h2 style="margin-top:0;">Owner\'s password needed</h2><div class="sub" style="margin-bottom:10px;">'+esc(why)+' After this, payroll for the month has to be re-run.</div>'+
+      '<div class="field"><span class="label">Owner\'s password</span><input type="password" id="c2p-unlock-pw" autocomplete="off"></div><div id="c2p-unlock-err" style="color:var(--warn);margin-top:6px;"></div>'+
+      '<div class="field-row"><button type="button" class="btn primary" id="c2p-unlock-ok">Unlock</button><button type="button" class="btn ghost" id="c2p-unlock-cancel">Cancel</button></div></div>';
+    document.body.appendChild(ov);
+    var pw=ov.querySelector('#c2p-unlock-pw'); pw.focus();
+    ov.querySelector('#c2p-unlock-cancel').addEventListener('click', function(){ ov.remove(); });
+    ov.querySelector('#c2p-unlock-ok').addEventListener('click', function(){
+      var okBtn=this, token=secureToken_(); okBtn.disabled=true; okBtn.textContent='Checking…';
+      apiWrite('unlockPayrollMonth', { month:payrollMonth, password:pw.value, token:token }).then(function(){
+        var n=0;
+        (function tick(){
+          n++;
+          apiRead('getUnlockPayrollMonthResult', { token:token }).then(function(r){
+            if(r && r.status==='done'){
+              if(r.result && r.result.ok){ ov.remove(); then(); }
+              else { okBtn.disabled=false; okBtn.textContent='Unlock'; ov.querySelector('#c2p-unlock-err').textContent=(r.result&&r.result.error)||'Not unlocked.'; }
+            } else if(n<25) setTimeout(tick, 400);
+            else { okBtn.disabled=false; okBtn.textContent='Unlock'; ov.querySelector('#c2p-unlock-err').textContent='No answer from the backend. Try again.'; }
+          }).catch(function(){ if(n<25) setTimeout(tick, 400); });
+        })();
+      });
+    });
+  }
+  function c2pAction_(b){
+    var act=b.dataset.act, id=b.dataset.id, d=b.dataset.date;
+    if(act==='accept') return c2pAccept_({ employeeId:id }, b);
+    if(act==='payDayOff') return c2pAccept_({ employeeId:id, dayOff:'1' }, b);
+    if(act==='nci' || act==='nco' || act==='absent' || act==='dayoff') return c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:act, date:d }), b);
+    if(act==='fix' || act==='open') return c2pOpenDay_(d, b.dataset.code);
+    if(act==='leave'){ setAppMode('attendance'); showView('att-leave'); return; }
+  }
+  // Daily attendance on that date, with the person opened.
+  function c2pOpenDay_(date, code){
+    if(!c2pCanAttendance_()){ openC2pDetail_(null, code); return; }
+    setAppMode('attendance');
+    var input=document.getElementById('att-day-date'); if(input) input.value=date;
+    showView('att-daily');
+    if(code) setTimeout(function(){ openAttPerson_(code); }, 900);
+  }
+  // The days behind one employee's figures (same pop-up as Attendance's person view).
+  function openC2pDetail_(employeeId, empCode){
+    var res = c2pData_; if(!res || !res.rows) return;
+    var r = res.rows.filter(function(x){ return employeeId ? x.employeeId===employeeId : x.empCode===empCode; })[0]; if(!r) return;
+    var body = document.getElementById('att-person-body');
+    var days = r.days || [];
+    var sum = function(label, value, money_){ return '<div class="stat"><span class="label">'+label+'</span><span class="value num" style="font-size:16px;">'+value+'</span>'+(money_?'<div style="font-size:12px;">'+money_+'</div>':'')+'</div>'; };
+    var am = r.amounts || {};
+    var lateNote = r.lateTotal ? (r.lateDeduct ? 'over '+res.lateThreshold+': deducted' : 'under '+res.lateThreshold+': not deducted') : '';
+    var head = '<div class="sheet-head" style="margin-bottom:10px;"><h1 style="font-size:18px;">'+esc(r.name)+'</h1><div class="sub">Clock-ins '+esc(c2pShort_(res.periodStart))+' to '+esc(c2pShort_(res.upTo))+(res.inProgress?' (figures so far)':'')+(r.dayRate?' · day rate '+money(r.dayRate)+' · hourly rate '+money(r.hourRate)+' · overtime '+r.otFactor+'×':'')+'</div></div>' +
+      '<div class="stats" style="margin-top:0;">' +
+        sum('Absent', c2pNum_(r.absentDays)+' day(s)', r.absentDays && am.Absent!=null ? '-'+money(am.Absent) : '') +
+        sum('Late in', r.lateTotal+' min', (r.lateDeduct && am.Late!=null ? '-'+money(am.Late)+' · ' : '')+lateNote) +
+        sum('Overtime', c2pNum_(r.overtimeHrs)+' h', r.overtimeHrs && am.Overtime!=null ? '+'+money(am.Overtime) : '') +
+        sum('Day off worked', c2pNum_(r.dayOffHours)+' h', r.dayOffHours ? (r.acceptedDayOff ? 'paid' : r.dayOffDontPay ? 'not paid' : 'not decided') : '') +
+      '</div>';
+    var rows = days.map(function(x){
+      var counts = [];
+      if(x.absent) counts.push('<span class="chip warn">Absent '+(x.absent===0.5?'½ day':'1 day')+'</span>');
+      if(x.lateMin) counts.push('<span class="chip amber">Late '+x.lateMin+' min</span>');
+      if(x.overtimeHrs) counts.push('<span class="chip good">Overtime '+c2pNum_(x.overtimeHrs)+' h</span>');
+      if(x.dayOffHrs) counts.push('<span class="chip amber">Day off '+c2pNum_(x.dayOffHrs)+' h</span>');
+      if(x.status==='No clock-in' || x.status==='No clock-out') counts.push('<span class="chip amber">Check: '+esc(x.status.toLowerCase())+'</span>');
+      var hl = counts.length ? ' style="background:var(--paper);"' : '';
+      var t = function(v, manual){ return v ? esc(v)+(manual?' <span style="font-size:11px;color:var(--ink-soft);">(manual)</span>':'') : ''; };
+      return '<tr'+hl+'><td>'+esc(c2pDay_(x.date))+'</td><td>'+(x.start?esc(x.start+'–'+x.end):'<span style="color:var(--ink-soft);">day off</span>')+'</td>' +
+        '<td>'+t(x.inTime,x.inManual)+'</td><td>'+t(x.outTime,x.outManual)+'</td><td class="num">'+(x.hours!=null?x.hours.toFixed(1):'')+'</td>' +
+        '<td>'+esc(x.status)+(x.note?' <span style="font-size:11px;color:var(--ink-soft);">'+esc(x.note)+'</span>':'')+'</td><td>'+counts.join(' ')+'</td>' +
+        '<td>'+(c2pCanAttendance_()?'<button type="button" class="btn small ghost c2p-open-day" data-date="'+esc(x.date)+'">Open</button>':'')+'</td></tr>';
+    }).join('');
+    body.innerHTML = head + '<div class="table-wrap" style="margin-top:12px;"><table><thead><tr><th>Day</th><th>Shift</th><th>In</th><th>Out</th><th class="num">Hours</th><th>Status</th><th>Counts towards</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>' +
+      '<div class="sub" style="margin-top:8px;">Fix a missing clock-in/out under Attendance → Manual Clock-In (it counts for pay once signed off). If the whole workshop was closed on a day, add it as a company day under Attendance → Public holidays so nobody is marked absent.</div>';
+    body.querySelectorAll('.c2p-open-day').forEach(function(b){ b.addEventListener('click', function(){ document.getElementById('att-person-modal').hidden = true; c2pOpenDay_(b.dataset.date, r.empCode); }); });
+    document.getElementById('att-person-modal').hidden = false;
+  }
+  // Clock-in notes ("Paid by X: From clock-ins A to B: 10-20 1h, …") as a short grey line + day chips.
+  function c2pNoteHtml_(note){
+    var m = /^Paid by ([^:]+): (From clock-ins|Worked on a day off \(clock-ins) (\d{4}-\d{2}-\d{2}) to (\d{4}-\d{2}-\d{2})\)?: (.*)$/.exec(String(note||''));
+    if(!m) return esc(note||'');
+    var what = /day off/.test(m[2]) ? 'Day off worked' : 'From clock-ins';
+    var chips = m[5].split(', ').filter(Boolean).map(function(x){
+      var dm=/^(\d{2})-(\d{2})(.*)$/.exec(x); if(!dm) return '<span class="chip">'+esc(x)+'</span>';
+      var y = (+dm[1] >= +m[3].slice(5,7) && m[3].slice(0,4)!==m[4].slice(0,4)) ? m[3].slice(0,4) : m[4].slice(0,4);
+      var rest = dm[3].trim().replace(/^(\d+)min$/,'$1 min').replace(/^(.*?)\s*(\d+(?:\.\d+)?)h$/,'$1 $2 h').trim();
+      return '<span class="chip" style="margin:2px 2px 0 0;">'+esc(c2pDay_(y+'-'+dm[1]+'-'+dm[2]))+(rest?' · '+esc(rest):'')+'</span>';
+    }).join('');
+    return '<div style="font-size:11px;color:var(--ink-soft);">'+what+' · clock-ins '+esc(c2pShort_(m[3]))+' – '+esc(c2pShort_(m[4]))+' · paid by '+esc(m[1])+'</div><div>'+chips+'</div>';
   }
 
   // -------- Roster --------
@@ -6354,7 +6497,7 @@
       '<table><thead><tr><th>Type</th><th class="num">Amount</th><th>Note</th><th></th></tr></thead><tbody>' +
       items.map(function(it){
         var qtySuffix = it.type==='Overtime' && it.hours ? ' ('+it.hours+'h)' : (it.type==='Absent' && it.hours ? ' ('+it.hours+'d)' : (it.type==='Late' && it.hours ? ' ('+it.hours+' min)' : ''));
-        return '<tr data-id="'+it.id+'"><td>'+esc(it.type)+qtySuffix+'</td><td class="num">'+money(it.amount)+'</td><td>'+esc(it.note||'')+'</td><td><button class="btn small danger adj-item-del">Delete</button></td></tr>';
+        return '<tr data-id="'+it.id+'"><td>'+esc(it.type)+qtySuffix+'</td><td class="num">'+money(it.amount)+'</td><td>'+c2pNoteHtml_(it.note)+'</td><td><button class="btn small danger adj-item-del">Delete</button></td></tr>';
       }).join('') + '</tbody></table>'
     ) : '<div class="empty">No adjustments yet this month.</div>';
 
@@ -6649,6 +6792,7 @@
   function loadPayrollRun(){
     apiRead('getPayrollRun', { month: payrollMonth }).then(function(res){
       payrollRunData = (res && res.payrollRun) || null;
+      if(payrollRunData) payrollRunData.rerunNeeded_ = (res && res.rerunNeeded) || [];
       if(payrollTab==='run') renderPayrollRun();
     }).catch(function(e){ document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
   }
@@ -6683,6 +6827,7 @@
         '</div>' +
         (payrollRunData.hasRun ? '' : '<div class="empty" style="margin-top:10px;">Payroll hasn\'t been run for this month yet — run it once every active employee is Finalized in Pay Adjustments.</div>') +
         '<div id="run-payroll-error"></div>' +
+        ((payrollRunData.rerunNeeded_||[]).length ? '<div class="status-msg error" style="margin-top:10px;">Re-run payroll needed: clock-in pay was accepted after this month was run for '+esc(payrollRunData.rerunNeeded_.join(', '))+'.</div>' : '') +
       '</div>' +
       (payrollRunData.hasRun ? (
         '<div class="panel">' +
