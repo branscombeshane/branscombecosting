@@ -1009,6 +1009,17 @@
       <div id="audit-list" style="margin-top:12px;"></div>
     </div>
 
+    <div class="panel" id="perf-panel">
+      <h2 style="margin:0 0 4px;">Speed log</h2>
+      <div class="sub" style="margin-bottom:12px;">What makes Batten slow: every request's time on the server, time spent waiting for another user (lock) and which sheets it read. Last 6 hours, kept by Google for at most 6 hours. "This device" compares the round trip you waited with the server time; the difference is Google starting up plus the network. Owners only.</div>
+      <div class="field-row" style="align-items:center;margin-top:0;">
+        <button class="btn small" id="perf-refresh">Refresh</button>
+        <button class="btn small ghost" id="perf-csv">Download CSV</button>
+        <span class="sub" id="perf-when"></span>
+      </div>
+      <div id="perf-body" style="margin-top:12px;"></div>
+    </div>
+
     <div class="panel" style="max-width:620px;">
       <h2 style="margin:0 0 4px;">Site settings</h2>
       <div class="sub">Nothing else lives here yet — Costing's own defaults stay on the Costing &gt; Settings screen, and Payroll's on Payroll &gt; Settings, since both are specific to that job. Anything that applies across the whole app, rather than to one of those, belongs here going forward.</div>
@@ -1173,8 +1184,10 @@
         try{ window[cbName] = undefined; delete window[cbName]; }catch(e){}
         if(script.parentNode) script.parentNode.removeChild(script);
       }
+      var tStart = Date.now();
       window[cbName] = function(data){
         if(done) return; done=true; cleanup();
+        perfDeviceNote_(action, Date.now()-tStart, data && data._perf);
         if(data && data.error==='session_expired' && !KIOSK_MODE){ handleSessionExpired_(); }
         resolve(data);
       };
@@ -5469,8 +5482,84 @@
   document.getElementById('audit-refresh').addEventListener('click', loadAuditLog_);
   document.getElementById('audit-q').addEventListener('keydown', function(ev){ if(ev.key==='Enter') loadAuditLog_(); });
 
+  // ---- Speed log (owner): Code.gs getPerfLog_ + this device's own round trips ----
+  var PERF_DEVICE_ = [];   // last 200 reads from this browser: { at, action, roundMs, serverMs, lockMs, reads }
+  function perfDeviceNote_(action, roundMs, perf){
+    try {
+      if(action==='getPerfLog') return;
+      PERF_DEVICE_.push({ at:new Date(), action:action, roundMs:roundMs, serverMs: perf ? perf.ms : null, lockMs: perf ? perf.lockMs : null,
+        reads: perf && perf.reads ? perf.reads.slice(0,4).map(function(r){ return r.sheet+' '+r.rows+' rows '+r.ms+' ms'; }).join('; ') : '' });
+      if(PERF_DEVICE_.length>200) PERF_DEVICE_.shift();
+    } catch(e){}
+  }
+  var perfData_ = null, perfView_ = 'actions';
+  function perfName_(a){ return (typeof AUDIT_LABELS_!=='undefined' && AUDIT_LABELS_[a]) ? AUDIT_LABELS_[a]+' ('+a+')' : a; }
+  function perfMs_(ms){ return ms==null ? '' : (ms>=1000 ? (Math.round(ms/100)/10)+' s' : ms+' ms'); }
+  function loadPerfLog_(btn){
+    var el=document.getElementById('perf-body');
+    if(!el || !attIsOwner_()) return;
+    var p=apiRead('getPerfLog');
+    if(btn) withBusy_(btn, p, 'Loading…'); else el.innerHTML='<div class="empty">Loading…</div>';
+    p.then(function(res){
+      if(!res || !res.ok){ el.innerHTML='<div class="status-msg error">'+esc((res && res.error && /^Unknown action/.test(res.error)) ? 'The backend needs to be updated to the latest version for the speed log.' : ((res && res.error) || 'Couldn\'t load the speed log.'))+'</div>'; return; }
+      perfData_=res; renderPerfLog_();
+    }).catch(function(e){ el.innerHTML='<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  function perfByAction_(){
+    var m={};
+    (perfData_.requests||[]).forEach(function(r){ var a=m[r.action]||(m[r.action]={ action:r.action, count:0, totalMs:0, maxMs:0, errors:0 }); a.count+=r.count; a.totalMs+=r.avgMs*r.count; a.maxMs=Math.max(a.maxMs,r.maxMs); a.errors+=r.errors; });
+    return Object.keys(m).map(function(k){ var a=m[k]; a.avgMs=Math.round(a.totalMs/Math.max(1,a.count)); return a; }).sort(function(a,b){ return b.totalMs-a.totalMs; });
+  }
+  function renderPerfLog_(){
+    var el=document.getElementById('perf-body'); if(!perfData_ || !el) return;
+    document.getElementById('perf-when').textContent='as at '+new Date(perfData_.generatedAt).toLocaleTimeString('en-ZA');
+    var acts=perfByAction_(), all=acts.reduce(function(t,a){ t.count+=a.count; t.ms+=a.totalMs; t.err+=a.errors; return t; },{count:0,ms:0,err:0});
+    var slowCount=(perfData_.slow||[]).filter(function(x){ return x.ms>=perfData_.slowMs; }).length;
+    var tile=function(id,label,val){ return '<div class="stat'+(perfView_===id?' total':'')+'" data-v="'+id+'" style="cursor:pointer;"><span class="label">'+label+'</span><span class="value num">'+val+'</span></div>'; };
+    var html='<div class="stats" id="perf-tiles" style="margin-top:0;">'+
+      tile('actions','Requests (6 h)', all.count)+
+      tile('actions','Avg server time', perfMs_(Math.round(all.ms/Math.max(1,all.count))))+
+      tile('slow','Slow (over '+(perfData_.slowMs/1000)+' s)', slowCount)+
+      tile('errors','Errors', all.err)+
+      tile('device','This device', PERF_DEVICE_.length)+
+    '</div>';
+    if(perfView_==='actions'){
+      html+='<h3 style="font-size:13px;margin:14px 0 6px;">By action, most server time first</h3>'+(acts.length?'<div class="table-wrap"><table><thead><tr><th>Action</th><th class="num">Requests</th><th class="num">Avg</th><th class="num">Slowest</th><th class="num">Total</th><th class="num">Errors</th></tr></thead><tbody>'+
+        acts.map(function(a){ return '<tr><td>'+esc(perfName_(a.action))+'</td><td class="num">'+a.count+'</td><td class="num"'+(a.avgMs>=perfData_.slowMs?' style="color:var(--warn);font-weight:600;"':'')+'>'+perfMs_(a.avgMs)+'</td><td class="num">'+perfMs_(a.maxMs)+'</td><td class="num">'+Math.round(a.totalMs/1000)+' s</td><td class="num">'+(a.errors||'')+'</td></tr>'; }).join('')+'</tbody></table></div>':'<div class="empty">Nothing recorded yet. Use Batten for a while, then Refresh.</div>');
+      html+='<h3 style="font-size:13px;margin:14px 0 6px;">By hour</h3><div class="table-wrap"><table><thead><tr><th>Hour</th><th>Action</th><th class="num">Requests</th><th class="num">Avg</th><th class="num">Slowest</th><th class="num">Total</th></tr></thead><tbody>'+
+        (perfData_.requests||[]).map(function(r){ return '<tr><td>'+esc(r.hour.slice(5))+':00</td><td>'+esc(perfName_(r.action))+'</td><td class="num">'+r.count+'</td><td class="num">'+perfMs_(r.avgMs)+'</td><td class="num">'+perfMs_(r.maxMs)+'</td><td class="num">'+r.totalSec+' s</td></tr>'; }).join('')+'</tbody></table></div>';
+    } else if(perfView_==='slow' || perfView_==='errors'){
+      var list=(perfData_.slow||[]).filter(function(x){ return perfView_==='errors' ? !x.ok : true; });
+      html+='<h3 style="font-size:13px;margin:14px 0 6px;">'+(perfView_==='errors'?'Errors':'Slow requests, every save and every error, newest first')+'</h3>'+(list.length?'<div class="table-wrap"><table><thead><tr><th>When</th><th>Action</th><th class="num">Server</th><th class="num">Waiting for a lock</th><th>Sheets read (slowest first)</th><th>Error</th></tr></thead><tbody>'+
+        list.map(function(x){ return '<tr><td style="white-space:nowrap;">'+esc(new Date(x.at).toLocaleTimeString('en-ZA'))+'</td><td>'+esc(perfName_(x.action))+(x.kind==='post'?' <span class="chip">save</span>':'')+'</td><td class="num"'+(x.ms>=perfData_.slowMs?' style="color:var(--warn);font-weight:600;"':'')+'>'+perfMs_(x.ms)+'</td><td class="num">'+(x.lockMs?perfMs_(x.lockMs):'')+'</td><td style="font-size:11px;">'+esc(x.reads||'')+'</td><td style="font-size:11px;color:var(--warn);">'+esc(x.error||'')+'</td></tr>'; }).join('')+'</tbody></table></div>':'<div class="empty">None in the last 6 hours.</div>');
+    } else {
+      var dev=PERF_DEVICE_.slice().reverse();
+      html+='<h3 style="font-size:13px;margin:14px 0 6px;">This device since the page was opened (newest first)</h3>'+(dev.length?'<div class="table-wrap"><table><thead><tr><th>When</th><th>Action</th><th class="num">You waited</th><th class="num">Server</th><th class="num">Google start-up + network</th><th>Sheets read</th></tr></thead><tbody>'+
+        dev.map(function(x){ var gap=x.serverMs!=null ? x.roundMs-x.serverMs : null; return '<tr><td style="white-space:nowrap;">'+esc(x.at.toLocaleTimeString('en-ZA'))+'</td><td>'+esc(perfName_(x.action))+'</td><td class="num">'+perfMs_(x.roundMs)+'</td><td class="num">'+perfMs_(x.serverMs)+'</td><td class="num">'+perfMs_(gap)+'</td><td style="font-size:11px;">'+esc(x.reads)+'</td></tr>'; }).join('')+'</tbody></table></div>':'<div class="empty">Nothing yet on this device.</div>');
+    }
+    el.innerHTML=html;
+    el.querySelectorAll('#perf-tiles .stat').forEach(function(t){ t.addEventListener('click', function(){ perfView_=t.dataset.v; renderPerfLog_(); }); });
+  }
+  function perfCsv_(){
+    if(!perfData_){ alert('Refresh the speed log first.'); return; }
+    var q=function(v){ v=v==null?'':String(v); return /[",\n]/.test(v) ? '"'+v.replace(/"/g,'""')+'"' : v; };
+    var lines=['sep=,','Requests per hour'], add=function(a){ lines.push(a.map(q).join(',')); };
+    add(['hour','action','count','avg ms','max ms','total s','errors']);
+    (perfData_.requests||[]).forEach(function(r){ add([r.hour,r.action,r.count,r.avgMs,r.maxMs,r.totalSec,r.errors]); });
+    lines.push('','Slow requests, saves and errors'); add(['at','kind','action','ms','lock ms','ok','reads','error']);
+    (perfData_.slow||[]).forEach(function(x){ add([x.at,x.kind,x.action,x.ms,x.lockMs,x.ok,x.reads,x.error]); });
+    lines.push('','This device'); add(['at','action','round trip ms','server ms','reads']);
+    PERF_DEVICE_.forEach(function(x){ add([x.at.toISOString(),x.action,x.roundMs,x.serverMs,x.reads]); });
+    var blob=new Blob([lines.join('\r\n')],{type:'text/csv'}), a=document.createElement('a');
+    a.href=URL.createObjectURL(blob); a.download='Batten speed log '+new Date().toISOString().slice(0,16).replace(':','-')+'.csv';
+    document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  }
+  document.getElementById('perf-refresh').addEventListener('click', function(){ loadPerfLog_(this); });
+  document.getElementById('perf-csv').addEventListener('click', perfCsv_);
+
   function loadUsersAdmin_(){
     loadAuditLog_();
+    loadPerfLog_();
     if(!currentUser) return;
     renderJoinerManager();
     apiRead('getUsers', { actingUserId: currentUser.id }).then(function(res){
