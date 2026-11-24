@@ -882,11 +882,21 @@
   <section class="view" id="view-att-missed" hidden>
     <div class="sheet-head">
       <h1>Manual Clock-In</h1>
-      <div class="sub">Add a clock-in someone missed, with a reason. It counts straight away, but is only used for pay once someone else in Management signs it off (never your own, and never one you entered).</div>
+      <div class="sub">See a person's days and add a missing clock-in or clock-out. Management signs it off for pay; the owner's entries are approved at once.</div>
     </div>
     <div class="panel">
       <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
-        <div class="field" style="min-width:200px;"><span class="label">Person</span><select id="att-missed-person"></select></div>
+        <div class="field" style="min-width:220px;"><span class="label">Person</span><select id="att-missed-person"></select></div>
+        <div class="field"><span class="label">From</span><input type="date" id="att-mr-from"></div>
+        <div class="field"><span class="label">To</span><input type="date" id="att-mr-to"></div>
+        <label class="sub" style="display:flex;align-items:center;gap:6px;margin-bottom:8px;"><input type="checkbox" id="att-mr-only"> Only days with something missing</label>
+        <button class="btn primary small" id="att-mr-show">Show days</button>
+      </div>
+      <div id="att-mr-days" style="margin-top:14px;"></div>
+    </div>
+    <div class="panel">
+      <h2 style="font-size:15px;margin:0 0 8px;">Add one by date and time</h2>
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
         <div class="field"><span class="label">Date and time</span><input type="datetime-local" id="att-missed-time"></div>
         <div class="field" style="min-width:260px;"><span class="label">Reason</span><input type="text" id="att-missed-reason" placeholder="e.g. forgot to clock out, left at 16:05" maxlength="500"></div>
         <button class="btn primary small" id="att-missed-add">Add</button>
@@ -5147,6 +5157,11 @@
       if(res && res.ok){
         var sel = document.getElementById('att-missed-person'), keep = sel.value;
         sel.innerHTML = '<option value="">Choose person…</option>' + res.staff.map(function(p){ return '<option value="'+esc(p.empCode)+'"'+(p.empCode===keep?' selected':'')+'>'+esc(p.name)+' · #'+esc(p.empCode)+'</option>'; }).join('');
+        attMrDefaults_();
+        if(attMrPending_){
+          sel.value=attMrPending_.code; document.getElementById('att-mr-from').value=attMrPending_.from; document.getElementById('att-mr-to').value=attMrPending_.to;
+          document.getElementById('att-mr-only').checked=true; attMrPending_=null; attMrShow_(null);
+        }
       }
     });
     apiRead('getMissedClockIns').then(renderAttMissed_).catch(function(e){ document.getElementById('att-missed-list').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
@@ -5164,11 +5179,67 @@
       withBusy_(b, apiRead('signOffMissedClockIn', { id: b.dataset.id, decision: decision }), 'Saving…').then(function(r){ if(r && r.ok) renderAttMissed_(r); else alert((r && r.error) || 'Couldn\'t save.'); });
     }); });
   }
+  // ---- range: every day of one person, with the missing time added in place ----
+  var attMrPending_ = null;   // { code, from, to } from From clock-ins' Fix, applied once the person list loads
+  function attMrDefaults_(){
+    var t=attTodayStr_(), p=t.split('-'), y=+p[0], m=+p[1];
+    if(+p[2] < 20){ m -= 1; if(!m){ m=12; y-=1; } }
+    var f=document.getElementById('att-mr-from'), to=document.getElementById('att-mr-to');
+    if(!f.value) f.value = y+'-'+('0'+m).slice(-2)+'-20';
+    if(!to.value) to.value = t;
+  }
+  function attMrShow_(btn){
+    var code=document.getElementById('att-missed-person').value, el=document.getElementById('att-mr-days');
+    if(!code){ el.innerHTML='<div class="sub">Choose a person.</div>'; return; }
+    var p=apiRead('getMissedRange', { empCode:code, from:document.getElementById('att-mr-from').value, to:document.getElementById('att-mr-to').value });
+    if(btn) withBusy_(btn, p, 'Loading…'); else el.innerHTML='<div class="empty">Loading…</div>';
+    p.then(function(res){ if(!res || !res.ok){ attErr_('att-mr-days', res); return; } attMrData_=res; attMrRender_(); })
+      .catch(function(e){ el.innerHTML='<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  var attMrData_ = null;
+  function attMrRender_(){
+    var res=attMrData_, el=document.getElementById('att-mr-days'); if(!res) return;
+    var MISSING={ 'No clock-in':1, 'No clock-out':1, 'Absent':1 };
+    var only=document.getElementById('att-mr-only').checked;
+    var miss=res.days.filter(function(d){ return MISSING[d.status]; }).length;
+    var rows=res.days.filter(function(d){ return !only || MISSING[d.status]; });
+    var tcell=function(v, manual, pending){ return v ? esc(v)+(manual?' <span style="font-size:11px;color:var(--ink-soft);">(manual'+(pending?', awaiting sign-off':'')+')</span>':'') : ''; };
+    el.innerHTML = '<div class="sub" style="margin-bottom:8px;"><b>'+esc(res.name)+'</b> · '+esc(c2pShort_(res.from))+' to '+esc(c2pShort_(res.to))+' · '+(miss ? '<span style="color:var(--warn);font-weight:600;">'+miss+' day(s) missing a clock-in or clock-out</span>' : 'nothing missing')+'</div>' +
+      (rows.length ? '<div class="table-wrap"><table><thead><tr><th>Day</th><th>Shift</th><th>In</th><th>Out</th><th>Status</th><th>Add the missing time</th></tr></thead><tbody>' + rows.map(function(d){
+        var add='';
+        if(MISSING[d.status]){
+          var needIn = d.status!=='No clock-out', needOut = d.status!=='No clock-in';
+          add = '<div class="att-mr-add" data-date="'+esc(d.date)+'" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">' +
+            (needIn ? '<label style="font-size:11px;">In <input type="time" class="att-mr-in" value="'+esc(d.start||'')+'"></label>' : '') +
+            (needOut ? '<label style="font-size:11px;">Out <input type="time" class="att-mr-out" value="'+esc(d.end||'')+'"></label>' : '') +
+            '<input type="text" class="att-mr-reason" placeholder="Reason" maxlength="500" style="width:170px;">' +
+            '<button type="button" class="btn small c2p-btn att-mr-go">Add</button></div>';
+        }
+        var hl = MISSING[d.status] ? ' style="background:var(--amber-soft);"' : '';
+        return '<tr'+hl+'><td style="white-space:nowrap;">'+esc(c2pDay_(d.date))+'</td><td>'+(d.start?esc(d.start+'–'+d.end):'<span style="color:var(--ink-soft);">day off</span>')+'</td>' +
+          '<td>'+tcell(d.inTime,d.inManual,d.inPending)+'</td><td>'+tcell(d.outTime,d.outManual,d.outPending)+'</td><td>'+attChip_(d.status)+(d.note?' <span style="font-size:11px;color:var(--ink-soft);">'+esc(d.note)+'</span>':'')+'</td><td>'+add+'</td></tr>';
+      }).join('') + '</tbody></table></div>' : '<div class="empty">No days to show.</div>');
+    el.querySelectorAll('.att-mr-go').forEach(function(b){ b.addEventListener('click', function(){
+      var box=b.closest('.att-mr-add'), d=box.dataset.date, times=[];
+      var i=box.querySelector('.att-mr-in'), o=box.querySelector('.att-mr-out'), reason=box.querySelector('.att-mr-reason').value.trim();
+      if(i){ if(!i.value){ alert('Enter the clock-in time.'); return; } times.push(d+' '+i.value); }
+      if(o){ if(!o.value){ alert('Enter the clock-out time.'); return; } times.push(d+' '+o.value); }
+      if(!reason){ alert('Give a reason, e.g. "forgot to clock out".'); box.querySelector('.att-mr-reason').focus(); return; }
+      withBusy_(b, apiRead('addMissedClockIn', { empCode:res.empCode, time:times.join(','), reason:reason }), 'Adding…').then(function(x){
+        if(x && x.ok){ renderAttMissed_(x); attMrShow_(null); }
+        else alert((x && x.error) || 'Couldn\'t add.');
+      });
+    }); });
+  }
+  document.getElementById('att-mr-show').addEventListener('click', function(){ attMrShow_(this); });
+  document.getElementById('att-mr-only').addEventListener('change', attMrRender_);
+  document.getElementById('att-missed-person').addEventListener('change', function(){ attMrShow_(null); });
+
   document.getElementById('att-missed-add').addEventListener('click', function(){
     var b=this, st=document.getElementById('att-missed-status');
     withBusy_(b, apiRead('addMissedClockIn', { empCode: document.getElementById('att-missed-person').value, time: document.getElementById('att-missed-time').value, reason: document.getElementById('att-missed-reason').value }), 'Adding…').then(function(res){
       st.style.display='block';
-      if(res && res.ok){ st.className='status-msg'; st.textContent='Added. It now needs someone else in Management to sign it off.'; document.getElementById('att-missed-reason').value=''; renderAttMissed_(res); }
+      if(res && res.ok){ st.className='status-msg'; st.textContent = res.autoApproved ? 'Added and approved (entered by the owner).' : 'Added. It now needs someone else in Management to sign it off.'; document.getElementById('att-missed-reason').value=''; renderAttMissed_(res); if(attMrData_) attMrShow_(null); }
       else { st.className='status-msg error'; st.textContent=(res && res.error) || 'Couldn\'t add.'; }
     });
   });
@@ -5819,7 +5890,8 @@
     if(act==='payDayOff') return c2pAccept_({ employeeId:id, dayOff:'1' }, b);
     if(act==='nci' || act==='nco' || act==='absent' || act==='dayoff') return c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:act, date:d }), b);
     if(act==='nciAll' || act==='ncoAll') return c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:act.slice(0,3), date:d }), b);
-    if(act==='fix' || act==='open') return c2pOpenDay_(d, b.dataset.code);
+    if(act==='fix') return c2pFix_(b.dataset.code);
+    if(act==='open') return c2pOpenDay_(d, b.dataset.code);
     if(act==='review') return c2pReview_(id, d);
     if(act==='leave'){ setAppMode('attendance'); showView('att-leave'); return; }
   }
@@ -5848,6 +5920,13 @@
       }); });
     }
     draw();
+  }
+  // Manual Clock-In for that person over the pay period, showing only the days missing something.
+  function c2pFix_(code){
+    if(!c2pCanAttendance_()){ alert('Fixing a clock-in needs the Attendance permission.'); return; }
+    var res=c2pData_||{}, today=attTodayStr_();
+    attMrPending_={ code:code, from:res.periodStart, to:(res.periodEnd && res.periodEnd<today ? res.periodEnd : today) };
+    setAppMode('attendance'); showView('att-missed');
   }
   // Daily attendance on that date, with the person opened.
   function c2pOpenDay_(date, code){
