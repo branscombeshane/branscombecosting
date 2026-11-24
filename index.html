@@ -452,6 +452,11 @@
   .add-rate-form{ display:flex; gap:8px; flex-wrap:wrap; align-items:flex-end; margin-top:14px; padding-top:14px; border-top:1px solid var(--line); }
   .add-rate-form .field{ min-width:120px; }
   /* Design section */
+  /* tabs inside a screen (Attendance > Leave) */
+  .subtabs{ display:flex; gap:0; border-bottom:2px solid var(--line); margin:0 0 16px; flex-wrap:wrap; }
+  .subtab{ background:none; border:none; border-bottom:3px solid transparent; margin-bottom:-2px; padding:10px 18px; font:inherit; font-size:13px; font-weight:600; letter-spacing:.04em; text-transform:uppercase; color:var(--ink-soft); cursor:pointer; }
+  .subtab:hover{ color:var(--ink); }
+  .subtab.active{ color:var(--accent); border-bottom-color:var(--accent); }
   .c2p-step{ display:grid; grid-template-columns:minmax(0,1fr) 270px; align-items:center; gap:10px; padding:3px 0; }
   .c2p-step + .c2p-step{ border-top:1px dotted var(--line); }
   .c2p-step-btns{ display:flex; gap:6px; justify-content:flex-end; flex-wrap:wrap; }
@@ -856,9 +861,13 @@
       <h1>Leave</h1>
       <div class="sub">Calendar year. Annual leave: 15 days from 1 January; in the year someone starts, 1.25 days per full month worked (only what's built up can be taken). Unused leave is forfeited on 31 December. Days off and public holidays don't use leave.</div>
     </div>
-    <div class="panel">
-      <h2 style="font-size:15px;margin:0 0 8px;">Add leave</h2>
-      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;">
+    <div class="subtabs" id="lv-tabs" role="tablist">
+      <button type="button" class="subtab" data-tab="add" role="tab">Add leave</button>
+      <button type="button" class="subtab" data-tab="taken" role="tab">Leave taken</button>
+      <button type="button" class="subtab" data-tab="records" role="tab">Leave records</button>
+    </div>
+    <div class="panel lv-tab" data-tab="add">
+      <div class="field-row" style="align-items:flex-end;flex-wrap:wrap;margin-top:0;">
         <div class="field" style="min-width:200px;"><span class="label">Person</span><select id="lv-person"></select></div>
         <div class="field" style="min-width:170px;"><span class="label">Type</span><select id="lv-type"></select></div>
         <div class="field"><span class="label">First day</span><input type="date" id="lv-from"></div>
@@ -869,14 +878,12 @@
       </div>
       <div id="lv-status" class="status-msg" style="display:none;margin-top:10px;"></div>
     </div>
-    <div class="panel" style="margin-top:16px;">
-      <div class="field-row" style="align-items:flex-end;"><div class="field" style="min-width:110px;"><span class="label">Year</span><select id="lv-year"></select></div></div>
-      <h2 style="font-size:15px;margin:14px 0 8px;">Leave taken</h2>
-      <div id="lv-people"></div>
-      <h2 style="font-size:15px;margin:18px 0 8px;">Leave records</h2>
-      <div id="lv-records"></div>
+    <div class="panel lv-tab" data-tab="taken records">
+      <div class="field-row" style="align-items:flex-end;margin-top:0;"><div class="field" style="min-width:110px;"><span class="label">Year</span><select id="lv-year"></select></div></div>
+      <div class="lv-tab" data-tab="taken"><div id="lv-people" style="margin-top:12px;"></div></div>
+      <div class="lv-tab" data-tab="records"><div id="lv-records" style="margin-top:12px;"></div></div>
     </div>
-    <div class="panel" style="margin-top:16px;" id="lv-switchoff"></div>
+    <div class="panel lv-tab" data-tab="records" style="margin-top:16px;" id="lv-switchoff"></div>
   </section>
 
   <section class="view" id="view-att-missed" hidden>
@@ -5154,6 +5161,15 @@
   document.getElementById('lv-from').addEventListener('change', function(){ var t=document.getElementById('lv-to'); if(!t.value || t.value < this.value) t.value=this.value; lvSyncHalf_(); });
   document.getElementById('lv-to').addEventListener('change', lvSyncHalf_);
   document.getElementById('lv-year').addEventListener('change', loadLeave_);
+  // Leave screen tabs: Add leave / Leave taken / Leave records (the year picker serves the last two).
+  var lvTab_ = 'taken';
+  function setLvTab_(t){
+    lvTab_ = t;
+    document.querySelectorAll('#lv-tabs .subtab').forEach(function(b){ var on=b.dataset.tab===t; b.classList.toggle('active', on); b.setAttribute('aria-selected', on?'true':'false'); });
+    document.querySelectorAll('#view-att-leave .lv-tab').forEach(function(el){ el.hidden = el.dataset.tab.split(' ').indexOf(t)===-1; });
+  }
+  document.querySelectorAll('#lv-tabs .subtab').forEach(function(b){ b.addEventListener('click', function(){ setLvTab_(b.dataset.tab); }); });
+  setLvTab_(lvTab_);
   document.getElementById('lv-add').addEventListener('click', function(){
     var b=this, st=document.getElementById('lv-status');
     withBusy_(b, apiRead('addLeave', { empCode: document.getElementById('lv-person').value, type: document.getElementById('lv-type').value, from: document.getElementById('lv-from').value, to: document.getElementById('lv-to').value, half: document.getElementById('lv-half').checked, note: document.getElementById('lv-note').value }), 'Adding…').then(function(res){
@@ -5982,7 +5998,7 @@
     if(act==='fix') return c2pFix_(b.dataset.code);
     if(act==='open') return c2pOpenDay_(d, b.dataset.code);
     if(act==='review') return c2pReview_(id, d);
-    if(act==='leave'){ setAppMode('attendance'); showView('att-leave'); return; }
+    if(act==='leave'){ setAppMode('attendance'); showView('att-leave'); setLvTab_('add'); return; }
   }
   // The individual days behind a summary step (missing clock-ins / clock-outs, absent days),
   // each with its own buttons. Closes itself once nothing is left.
