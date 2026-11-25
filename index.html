@@ -633,10 +633,13 @@
        setAppMode()/mode-btn mechanism (see the delegated click listener on .sidebar
        below, which covers both boxes). -->
   <div class="sidenav" id="mode-switch-payroll">
+    <div class="nav-section" data-mode="roster">
+      <button class="mode-btn" data-mode="roster"><span>Roster</span></button>
+    </div>
     <div class="nav-section" data-mode="payroll">
       <button class="mode-btn" data-mode="payroll"><span>Payroll</span><span class="chev">&#9662;</span></button>
       <div class="nav-section-body" data-mode-group="payroll" hidden>
-        <button class="navbtn" data-tab="roster">Roster</button>
+        <button class="navbtn" data-tab="status">Pay status</button>
         <button class="navbtn" data-tab="adjustments">Pay Adjustments</button>
         <button class="navbtn" data-tab="run">Run Payroll</button>
         <button class="navbtn" data-tab="reports">Reports</button>
@@ -1223,7 +1226,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-25.1';
+  var BATTEN_VERSION = '2026-11-25.3';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -1447,14 +1450,14 @@
     { key:'attendance', label:'Attendance', hint:'Daily attendance, shifts, public holidays, leave, manual clock-ins and BioTime link-up (no pay amounts). Automatic for anyone linked to a Management employee. Signing off leave and manual clock-ins stays with Management.' }
   ];
   function allowedModesFor_(user){
-    if(!user || user.role==='owner') return ['costing','design','payroll','production','attendance','admin'];
+    if(!user || user.role==='owner') return ['costing','design','payroll','roster','production','attendance','admin'];
     var perms = user.permissions||[];
     // 'attendance' isn't a tick box: Code.gs grants it to logins linked to a Management
     // employee (withDerivedPermissions_), and it arrives in user.permissions like the rest.
-    return ['costing','design','payroll','production','attendance'].filter(function(m){
+    return ['costing','design','payroll','roster','production','attendance'].filter(function(m){
       // 'rateCard' (Rate Card only) still opens the Costing section, just with only the
-      // Rate Card screen in it — see allowedCostingViews_.
-      return perms.indexOf(m)!==-1 || (m==='costing' && perms.indexOf('rateCard')!==-1);
+      // Rate Card screen in it — see allowedCostingViews_. Roster comes with Payroll.
+      return perms.indexOf(m)!==-1 || (m==='costing' && perms.indexOf('rateCard')!==-1) || (m==='roster' && perms.indexOf('payroll')!==-1);
     });
   }
   // Which screens inside the Costing section this user gets. Full Costing = all four;
@@ -1642,7 +1645,8 @@
       b.classList.toggle('active', b.dataset.mode===mode);
     });
     ['design','costing','payroll','attendance'].forEach(function(m){ setAccordionOpen_(m, m===mode); });
-    if(mode==='payroll') showView('payroll');
+    if(mode==='payroll'){ payrollTab = lastPayrollTab_; showView('payroll'); }
+    else if(mode==='roster'){ payrollTab = 'roster'; showView('payroll'); }
     else if(mode==='design') showView('design-list');
     else if(mode==='production') showView('production');
     else if(mode==='admin') showView('admin');
@@ -1669,7 +1673,7 @@
     }
     var navBtn = e.target.closest('.navbtn');
     if(!navBtn) return;
-    if(navBtn.dataset.tab){ payrollTab = navBtn.dataset.tab; showView('payroll'); return; }
+    if(navBtn.dataset.tab){ payrollTab = navBtn.dataset.tab; lastPayrollTab_ = payrollTab; showView('payroll'); return; }
     showView(navBtn.dataset.view);
   });
   document.querySelector('.mode-btn[data-mode="costing"]').classList.add('active');
@@ -5833,7 +5837,8 @@
   // calc engine and the full set of actions. Every Payroll call goes through apiRead
   // (JSONP), never apiWrite — see the note at the top of Code.gs for why.
   var payrollMonth = null;              // 'yyyy-MM', set to the current month on first visit
-  var payrollTab = 'roster';            // roster | adjustments | run | reports
+  var payrollTab = 'status';            // status | adjustments | run | reports, or roster (its own heading)
+  var lastPayrollTab_ = 'status';       // Payroll opens on Pay status, then on the last Payroll page used
   var payrollData = null;               // {month, employees[], departments[], headcount, totalMonthlyCost, processedCount}
   var payrollAdjustmentsData = null;    // {month, items[], advanceBalances[], deductionAccounts[]}
   var payrollRunData = null;            // {month, hasRun, payslips[], emp201}
@@ -5877,7 +5882,13 @@
   function loadPayrollForTab(){
     var body = document.getElementById('payroll-body');
     body.innerHTML = '<div class="empty">Loading…</div>';
-    if(payrollTab==='roster') loadPayrollRoster();
+    var h1 = document.querySelector('#view-payroll .sheet-head h1'), sub = document.getElementById('payroll-sub');
+    if(h1) h1.textContent = payrollTab==='roster' ? 'Roster' : 'Payroll';
+    if(sub) sub.textContent = payrollTab==='roster'
+      ? 'Employee details: add, edit or discharge. Who is finalized for the month is under Payroll > Pay status.'
+      : 'Salaries, PAYE/UIF/SDL and payslips for Natalie Branscombe (Pty) Ltd\'s staff';
+    if(payrollTab==='status') loadPayStatus_();
+    else if(payrollTab==='roster') loadPayrollRoster();
     else if(payrollTab==='adjustments') loadPayrollAdjustments();
     else if(payrollTab==='run') loadPayrollRun();
     else if(payrollTab==='reports') loadReports();
@@ -6182,21 +6193,20 @@
     }).join('');
   }
 
+  function payStatusChip_(st){
+    return st==='finalized' ? '<span class="chip good">Finalized</span>' : (st==='in_progress' ? '<span class="chip">In progress</span>' : '<span class="chip warn">Not started</span>');
+  }
   function employeeRowHtml_(e){
-    var statusChip = !e.active
-      ? '<span class="chip warn">Discharged</span>'
-      : (e.status==='finalized' ? '<span class="chip good">Finalized</span>' : (e.status==='in_progress' ? '<span class="chip">Saved</span>' : '<span class="chip warn">Not started</span>'));
     var rateStr = e.days ? (e.days+' d/wk · '+money(e.dayRate)+'/day · '+money(e.hourRate)+'/hr') : 'Salaried';
     return '<tr class="roster-row'+(expandedEmployeeId===e.id?' active-row':'')+'" data-id="'+e.id+'">' +
       '<td>'+esc(e.name)+(e.etiEligible?' <span class="chip good" title="Eligible for the Employment Tax Incentive this month">ETI</span>':'')+'</td>' +
       '<td>'+esc(e.department||'—')+'</td>' +
       '<td style="font-size:11.5px;color:var(--ink-soft);">'+esc(rateStr)+'</td>' +
       '<td class="num">'+money(e.amount)+'</td>' +
-      '<td>'+statusChip+'</td>' +
       '<td style="font-size:11.5px;color:var(--ink-soft);">'+esc(e.notes||'—')+'</td>' +
       '<td><span style="text-decoration:underline;font-size:12px;">'+(expandedEmployeeId===e.id?'close':'edit')+'</span></td>' +
       '</tr>' +
-      (expandedEmployeeId===e.id ? '<tr><td colspan="7"><div class="job-detail" id="roster-detail-'+e.id+'"></div></td></tr>' : '');
+      (expandedEmployeeId===e.id ? '<tr><td colspan="6"><div class="job-detail" id="roster-detail-'+e.id+'"></div></td></tr>' : '');
   }
 
   function renderPayrollRoster(){
@@ -6206,15 +6216,14 @@
 
     stats.innerHTML =
       '<div class="stat"><span class="label">Active employees</span><span class="value num">'+payrollData.headcount+'</span></div>' +
-      '<div class="stat"><span class="label">Monthly cost (base)</span><span class="value num">'+money(payrollData.totalMonthlyCost)+'</span></div>' +
-      '<div class="stat total"><span class="label">Finalized this month</span><span class="value num">'+payrollData.processedCount+' / '+payrollData.headcount+'</span></div>';
+      '<div class="stat"><span class="label">Monthly cost (base)</span><span class="value num">'+money(payrollData.totalMonthlyCost)+'</span></div>';
 
     var byName = function(a,b){ return (a.name||'').localeCompare(b.name||''); };
     var active = payrollData.employees.filter(function(e){ return e.active; }).sort(byName);
     var discharged = payrollData.employees.filter(function(e){ return !e.active; }).sort(byName);
     var activeRowsHtml = active.map(employeeRowHtml_).join('');
     var dischargedRowsHtml = discharged.map(employeeRowHtml_).join('');
-    var rosterCols = '<th>Name</th><th>Department</th><th>Rate</th><th class="num">Monthly amount</th><th>Status</th><th>Notes</th><th></th>';
+    var rosterCols = '<th>Name</th><th>Department</th><th>Rate</th><th class="num">Monthly amount</th><th>Notes</th><th></th>';
 
     body.innerHTML =
       '<div class="panel">' +
@@ -6224,7 +6233,7 @@
         '</div>' +
         '<div id="add-employee-panel" hidden></div>' +
         '<div class="table-wrap"><table><thead><tr>'+rosterCols+'</tr></thead>' +
-        '<tbody>' + (activeRowsHtml || '<tr><td colspan="7" class="empty">No active employees — add one above.</td></tr>') + '</tbody></table></div>' +
+        '<tbody>' + (activeRowsHtml || '<tr><td colspan="6" class="empty">No active employees — add one above.</td></tr>') + '</tbody></table></div>' +
       '</div>' +
       (discharged.length ? (
         '<div class="panel">' +
@@ -6280,6 +6289,81 @@
       if(container && e) renderEmployeeDetail_(container, e);
       else expandedEmployeeId = null;
     }
+  }
+
+  // -------- Payroll > Pay status (25 Nov 2026, Daily Fruit handover) --------
+  // Who is finalized for the month, built from the payroll data the page already loads
+  // (each employee's month status, set by Save / Finalize in Pay Adjustments, plus who is in
+  // this month's payroll run). Statuses, counts and names only — no rand amounts.
+  var payStatusFilter_ = 'todo', payStatusDept_ = '', payAdjScrollTo_ = null;
+  function loadPayStatus_(){
+    apiRead('getPayroll', { month: payrollMonth }).then(function(res){
+      payrollData = (res && res.payroll) || null;
+      if(payrollTab==='status') renderPayStatus_();
+    }).catch(function(e){ document.getElementById('payroll-body').innerHTML = '<div class="status-msg error">'+esc(backendErrorMsg(e))+'</div>'; });
+  }
+  function renderPayStatus_(){
+    var body=document.getElementById('payroll-body'), stats=document.getElementById('payroll-stats');
+    if(!payrollData){ body.innerHTML=''; stats.innerHTML=''; return; }
+    stats.innerHTML='';
+    var run={}; (payrollData.runEmployeeIds||[]).forEach(function(id){ run[id]=1; });
+    var rerun={}; (payrollData.rerunEmployeeIds||[]).forEach(function(id){ rerun[id]=1; });
+    var people=payrollData.employees.filter(function(e){ return e.active; }).map(function(e){ return { e:e, st:e.status==='finalized'?'finalized':(e.status==='in_progress'?'in_progress':'not_started') }; });
+    var total=people.length, fin=people.filter(function(x){ return x.st==='finalized'; }).length;
+    var monthLabel=(function(){ var p=String(payrollMonth).split('-'); return C2P_MON_[+p[1]-1]+' '+p[0]; })();
+    var q=((document.getElementById('ps-q')||{}).value||'').toLowerCase();
+    var depts={}; people.forEach(function(x){ var d=x.e.department||'—'; var o=depts[d]||(depts[d]={n:0,f:0}); o.n++; if(x.st==='finalized') o.f++; });
+    var deptNames=Object.keys(depts).sort();
+    if(payStatusDept_ && !depts[payStatusDept_]) payStatusDept_='';
+    var inFilter=function(x){ return payStatusFilter_==='all' ? true : payStatusFilter_==='todo' ? x.st!=='finalized' : x.st===payStatusFilter_; };
+    var base=people.filter(function(x){ return (!payStatusDept_ || (x.e.department||'—')===payStatusDept_) && (!q || String(x.e.name).toLowerCase().indexOf(q)!==-1); });
+    var cnt=function(f){ return base.filter(f).length; };
+    var tiles=[
+      ['todo','Still to do', cnt(function(x){ return x.st!=='finalized'; }), 'Not started or in progress'],
+      ['not_started','Not started', cnt(function(x){ return x.st==='not_started'; }), 'Nothing saved yet'],
+      ['in_progress','In progress', cnt(function(x){ return x.st==='in_progress'; }), 'Saved, not finalized'],
+      ['finalized','Finalized', cnt(function(x){ return x.st==='finalized'; }), fin===total && total ? 'Everyone is finalized' : 'Ready for the payroll run'],
+      ['all','Everyone', base.length, 'On payroll this month']
+    ];
+    var shown=base.filter(inFilter).sort(function(a,b){ return String(a.e.department||'').localeCompare(String(b.e.department||'')) || String(a.e.name).localeCompare(String(b.e.name)); });
+    var anyRun=(payrollData.runEmployeeIds||[]).length>0, rerunNames=people.filter(function(x){ return rerun[x.e.id]; }).map(function(x){ return x.e.name; });
+    var pct=total ? Math.round(fin/total*100) : 0;
+    var html='<div class="panel">'+
+      '<div style="font-size:16px;font-weight:600;">'+esc(monthLabel)+': '+fin+' of '+total+' finalized.</div>'+
+      '<div class="sub" style="margin:4px 0 10px;">Work through each person in Pay Adjustments (Save in progress / Finalize); payroll can be run once everyone is finalized.</div>'+
+      '<div style="height:10px;background:var(--line);border-radius:5px;overflow:hidden;"><div id="ps-bar" style="height:100%;width:'+pct+'%;background:var(--good);"></div></div>'+
+      (anyRun ? '<div style="margin-top:10px;"><span class="chip good">Payroll run for '+esc(monthLabel)+'</span>'+(rerunNames.length?' <span class="chip warn">Re-run needed: '+esc(rerunNames.join(', '))+'</span>':'')+'</div>' : '')+
+      '<div class="stats" id="ps-tiles" style="margin-top:14px;">'+tiles.map(function(t){ return '<div class="stat'+(payStatusFilter_===t[0]?' total':'')+'" data-f="'+t[0]+'" style="cursor:pointer;"><span class="label">'+esc(t[1])+'</span><span class="value num">'+t[2]+'</span><div style="font-size:11px;color:var(--ink-soft);">'+esc(t[3])+'</div></div>'; }).join('')+'</div>'+
+      '<div id="ps-depts" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;">'+deptNames.map(function(d){ var o=depts[d], done=o.f===o.n; return '<button type="button" class="btn small c2p-btn ps-dept'+(payStatusDept_===d?' primary':'')+'" data-d="'+esc(d)+'" style="'+(done&&payStatusDept_!==d?'border-color:var(--good);color:var(--good);':'')+'">'+(done?'✓ ':'')+esc(d)+' '+o.f+'/'+o.n+'</button>'; }).join('')+'</div>'+
+      '<div class="field-row" style="align-items:flex-end;margin-top:10px;">'+
+        '<div class="field" style="min-width:180px;"><span class="label">Department</span><select id="ps-dept"><option value="">All departments</option>'+deptNames.map(function(d){ return '<option'+(d===payStatusDept_?' selected':'')+'>'+esc(d)+'</option>'; }).join('')+'</select></div>'+
+        '<div class="field" style="min-width:180px;"><span class="label">Search</span><input type="text" id="ps-q" placeholder="Name" value="'+esc(q)+'"></div>'+
+      '</div>'+
+      (shown.length ? '<div class="table-wrap" style="margin-top:10px;"><table><thead><tr><th>Name</th><th>Department</th><th>Department done</th><th>Status</th><th>Payroll run</th><th></th></tr></thead><tbody>'+
+        shown.map(function(x){ var d=depts[x.e.department||'—'], done=d.f===d.n;
+          return '<tr data-id="'+esc(x.e.id)+'"><td>'+esc(x.e.name)+'</td><td>'+esc(x.e.department||'—')+'</td>'+
+            '<td style="'+(done?'color:var(--good);font-weight:600;':'')+'">'+d.f+' of '+d.n+'</td><td>'+payStatusChip_(x.st)+'</td>'+
+            '<td>'+(run[x.e.id] ? '<span style="color:var(--good);">✓ run</span>'+(rerun[x.e.id]?' <span class="chip warn">re-run</span>':'') : '<span style="color:var(--ink-soft);">not yet</span>')+'</td>'+
+            '<td style="white-space:nowrap;"><button type="button" class="btn small c2p-btn ps-open">'+(x.st==='finalized'?'View in Pay Adjustments':'Open in Pay Adjustments')+'</button>'+
+              (run[x.e.id] ? ' <button type="button" class="btn small c2p-btn ps-slip">Payslip</button>' : '')+'</td></tr>'; }).join('')+
+        '</tbody></table></div>' : '<div class="empty" style="margin-top:10px;">'+(payStatusFilter_==='todo' && base.length ? '✓ Everyone shown is finalized.' : 'Nobody here.')+'</div>')+
+    '</div>';
+    body.innerHTML=html;
+    body.querySelectorAll('#ps-tiles .stat').forEach(function(t){ t.addEventListener('click', function(){ payStatusFilter_=t.dataset.f; renderPayStatus_(); }); });
+    body.querySelectorAll('.ps-dept').forEach(function(b){ b.addEventListener('click', function(){ payStatusDept_ = payStatusDept_===b.dataset.d ? '' : b.dataset.d; renderPayStatus_(); }); });
+    body.querySelector('#ps-dept').addEventListener('change', function(){ payStatusDept_=this.value; renderPayStatus_(); });
+    var qi=body.querySelector('#ps-q'); qi.addEventListener('input', function(){ var pos=qi.selectionStart; renderPayStatus_(); var n=document.getElementById('ps-q'); n.focus(); n.setSelectionRange(pos,pos); });
+    body.querySelectorAll('.ps-open').forEach(function(b){ b.addEventListener('click', function(){ payStatusOpen_(b.closest('tr').dataset.id); }); });
+    body.querySelectorAll('.ps-slip').forEach(function(b){ b.addEventListener('click', function(){
+      payrollTab='run'; lastPayrollTab_='run'; expandedPayslipEmployeeId=b.closest('tr').dataset.id; showView('payroll');
+    }); });
+  }
+  // Pay Adjustments with that person opened (their panel), scrolled to.
+  function payStatusOpen_(id){
+    payrollTab='adjustments'; lastPayrollTab_='adjustments';
+    expandedAdjEmployeeId=id; payAdjScrollTo_=id;
+    TAB_STATE_.payadj='adjust';
+    showView('payroll');
   }
 
   // Next Employee # to suggest when adding someone new: one more than the highest
@@ -6533,7 +6617,15 @@
       var items = itemsByEmployee[e.id]||[];
       var summary = items.length ? items.map(function(it){
         var sign = (ADJ_NET_SUBTRACT_TYPES.indexOf(it.type)!==-1) ? '-' : '+';
-        return sign+money(it.amount)+' '+it.type;
+        // quantity behind the amount: overtime hours, absent days, late minutes
+        var q = Number(it.hours)||0, qty = '';
+        if(q){
+          var qn = String(Math.round(q*100)/100);
+          if(it.type==='Overtime') qty = ' ('+qn+' h)';
+          else if(it.type==='Absent') qty = ' ('+qn+(q===1?' day':' days')+')';
+          else if(it.type==='Late') qty = ' ('+qn+' min)';
+        }
+        return sign+money(it.amount)+' '+it.type+qty;
       }).join(', ') : '—';
       var statusChip = e.status==='finalized' ? '<span class="chip good">Finalized</span>' : (e.status==='in_progress' ? '<span class="chip">Saved</span>' : '<span class="chip warn">Not started</span>');
       return '<tr class="adj-emp-row'+(expandedAdjEmployeeId===e.id?' active-row':'')+'" data-id="'+e.id+'">' +
@@ -6564,6 +6656,7 @@
         '</tbody></table></div>' +
       '</div>';
     applyTabs_('payadj', 'clockins');
+    if(payAdjScrollTo_){ var sid=payAdjScrollTo_; payAdjScrollTo_=null; setTimeout(function(){ var tr=document.querySelector('.adj-emp-row[data-id="'+sid+'"]'); if(tr) tr.scrollIntoView({ block:'start', behavior:'smooth' }); }, 60); }
     renderC2pPanel_();
 
     Array.prototype.forEach.call(document.querySelectorAll('.adj-emp-row'), function(tr){
@@ -7186,6 +7279,7 @@
 
     if(expandedPayslipEmployeeId){
       var container = document.getElementById('payslip-detail-'+expandedPayslipEmployeeId);
+      if(container) setTimeout(function(){ container.scrollIntoView({ block:'center', behavior:'smooth' }); }, 60);
       if(container) loadPayslipDetail_(container, expandedPayslipEmployeeId);
       else expandedPayslipEmployeeId = null;
     }
