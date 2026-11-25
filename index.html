@@ -1226,7 +1226,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-25.3';
+  var BATTEN_VERSION = '2026-11-25.4';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -5081,7 +5081,7 @@
       if(!res || !res.ok){ attErr_('att-person-body', res); return; }
       var t = { late:0, early:0, ot:0, absent:0 };
       res.days.forEach(function(x){ t.late+=x.lateMin||0; t.early+=x.earlyMin||0; t.ot+=x.overtimeHrs||0; if(x.status==='Absent') t.absent++; });
-      body.innerHTML = '<div class="sheet-head" style="margin-bottom:10px;"><h1 style="font-size:18px;">'+esc(res.name)+' · #'+esc(res.empCode)+'</h1><div class="sub">'+esc(res.department)+' — last 14 days to '+esc(attNiceDate_(res.to))+'. Absent '+t.absent+' · late '+t.late+' min · left early '+t.early+' min · overtime '+t.ot.toFixed(1)+' h</div></div>' +
+      body.innerHTML = '<div class="sheet-head" style="margin-bottom:10px;"><h1 style="font-size:18px;">'+esc(res.name)+' · #'+esc(res.empCode)+'</h1><div class="sub">'+esc(res.department)+' — last '+((res.days||[]).length||45)+' days to '+esc(attNiceDate_(res.to))+'. Absent '+t.absent+' · late '+t.late+' min · left early '+t.early+' min · overtime '+t.ot.toFixed(1)+' h</div></div>' +
         '<div class="table-wrap"><table><thead><tr><th>Day</th><th>Shift</th><th>In</th><th>Out</th><th class="num">Hours</th><th class="num">Late</th><th class="num">Early</th><th class="num">OT</th><th>Status</th><th>All clock-ins</th></tr></thead><tbody>' +
         res.days.map(function(x){
           var p=x.date.split('-'); var dow = ATT_DOW[(new Date(Date.UTC(+p[0],+p[1]-1,+p[2])).getUTCDay()||7)];
