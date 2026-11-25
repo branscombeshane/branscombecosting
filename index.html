@@ -1226,7 +1226,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-25.9';
+  var BATTEN_VERSION = '2026-11-25.10';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -6730,8 +6730,10 @@
     var scheduledAdvanceEmployeeIds = {};
     accounts.forEach(function(a){ if(a.kind==='advance' && a.status==='active') scheduledAdvanceEmployeeIds[a.employeeId]=true; });
     var unscheduled = (payrollAdjustmentsData.advanceBalances||[]).filter(function(b){ return !scheduledAdvanceEmployeeIds[b.employeeId]; }).map(function(b){
+      var given = (b.history||[]).filter(function(h){ return h.type==='given'; });
+      var last = given[given.length-1];
       return { id:'unscheduled:'+b.employeeId, kind:'advance', employeeId:b.employeeId, name:b.name, employeeActive:true,
-        description:'Advance (not on a repayment schedule)', total:b.balance, monthly:0, startMonth:'', status:'unscheduled',
+        description:'Advance'+(last ? ' given '+advDate_(last)+(given.length>1 ? ' (latest of '+given.length+')' : '') : '')+' — not on a repayment schedule', total:b.balance, monthly:0, startMonth:'', status:'unscheduled',
         skipMonths:[], note:'', paid:0, balance:b.balance, instalmentsLeft:null, history:[] };
     });
 
@@ -6800,9 +6802,21 @@
     }
   }
 
+  // "12 Nov 2026" from an advance history entry (date given; else its payroll month)
+  function advDate_(h){
+    var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var d=String(h.date||''), m=String(h.month||'');
+    if(/^\d{4}-\d{2}-\d{2}$/.test(d)) return (+d.slice(8,10))+' '+M[+d.slice(5,7)-1]+' '+d.slice(0,4);
+    if(/^\d{4}-\d{2}$/.test(m)) return M[+m.slice(5,7)-1]+' '+m.slice(0,4);
+    return '';
+  }
   function renderUnscheduledAdvanceDetail_(container, bal){
+    var hist = bal.history||[];
+    var histHtml = hist.length ? '<table style="margin-bottom:12px;max-width:640px;"><thead><tr><th>Date</th><th></th><th class="num">Amount</th><th>Note</th></tr></thead><tbody>' +
+      hist.map(function(h){ return '<tr><td>'+esc(advDate_(h))+'</td><td>'+(h.type==='given'?'Advance given':'Repaid')+'</td><td class="num">'+(h.type==='given'?'':'−')+money(h.amount)+'</td><td>'+esc(h.note||'')+'</td></tr>'; }).join('') +
+      '</tbody></table>' : '';
     container.innerHTML =
-      '<div class="label" style="margin-bottom:8px;">'+esc(bal.name)+' — outstanding advance: '+money(bal.balance)+'</div>' +
+      '<div class="label" style="margin-bottom:8px;">'+esc(bal.name)+' — outstanding advance: '+money(bal.balance)+'</div>' + histHtml +
       '<div class="sub" style="margin-bottom:12px;">This advance has no repayment schedule yet, so it just sits as a running balance. Put it on a monthly schedule to have it deducted from Net pay automatically.</div>' +
       '<div class="field-row" style="align-items:flex-end;">' +
         '<div class="field"><span class="label">Monthly repayment</span><div class="input-affix"><span class="affix">R</span><input type="number" class="num ded-sched-monthly" step="0.01" min="0"></div></div>' +
@@ -6840,6 +6854,12 @@
     });
   }
 
+  // when a scheduled advance / deduction account was created, as "12 Nov 2026" (local day)
+  function dedCreated_(acct){
+    var d=new Date(acct.createdAt||''); if(!acct.createdAt || isNaN(d)) return '';
+    var p=function(n){ return (n<10?'0':'')+n; };
+    return advDate_({ date: d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate()) });
+  }
   function renderDedAccountDetail_(container, acct){
     var historyHtml = acct.history.length ? (
       '<table><thead><tr><th>Month</th><th class="num">Amount</th></tr></thead><tbody>' +
@@ -6868,6 +6888,7 @@
     container.innerHTML =
       '<div class="label" style="margin-bottom:8px;">'+esc(acct.name)+' — '+esc(acct.description||(acct.kind==='advance'?'Advance':'Deduction'))+'</div>' +
       '<div class="field-row" style="flex-wrap:wrap;gap:16px;">' +
+        (dedCreated_(acct) ? '<div class="sub">'+(acct.kind==='advance'?'Given':'Set up')+': <strong>'+esc(dedCreated_(acct))+'</strong></div>' : '') +
         '<div class="sub">Total: <strong>'+money(acct.total)+'</strong></div>' +
         '<div class="sub">Paid so far: <strong>'+money(acct.paid)+'</strong></div>' +
         '<div class="sub">Balance: <strong>'+money(acct.balance)+'</strong></div>' +
