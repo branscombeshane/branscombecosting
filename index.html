@@ -1226,7 +1226,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-25.5';
+  var BATTEN_VERSION = '2026-11-25.6';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -5930,7 +5930,7 @@
       var block = !r.hasRates ? 'no salary / days per week on the Roster' : (r.finalized && !r.payrollRun ? 'Finalized: click Save on them below first' : '');
       s.push({ kind:'accept', html:'Accept: '+parts.join(' · ')+(block?' <span class="chip warn">'+esc(block)+'</span>':''), raw:true, btns: block ? [] : [['accept','Accept','']] });
     }
-    if(r.dayOffOpen) s.push({ kind:'dayoff', html:'Worked on a day off: '+c2pNum_(r.dayOffHours)+' h ('+r.dayOff.map(function(x){ return c2pShort_(x.date); }).join(', ')+')', btns: r.hasRates ? [['payDayOff','Pay as overtime',''],['dayoff','Don\'t pay','']] : [['dayoff','Don\'t pay','']] });
+    if(r.dayOffOpen) s.push({ kind:'dayoff', html:'Worked on a day off: '+c2pNum_(r.dayOffHours)+' h ('+r.dayOff.map(function(x){ return c2pShort_(x.date)+(x.sunday?' Sun 2×':''); }).join(', ')+')', btns: r.hasRates ? [['payDayOff','Pay as overtime',''],['dayoff','Don\'t pay','']] : [['dayoff','Don\'t pay','']] });
     return s;
   }
   function c2pSettled_(r){
@@ -6010,7 +6010,7 @@
     var extra = '';
     if((res.notLinked||[]).length) extra += '<div class="sub" style="margin-top:10px;">Not linked to a payroll employee (left out): '+res.notLinked.map(function(x){ return esc(x.name); }).join(', ')+'. Link them under Attendance → BioTime link-up.</div>';
     if((res.notOnPayroll||[]).length) extra += '<div class="sub" style="margin-top:6px;">Not on Batten payroll (attendance only, left out): '+res.notOnPayroll.map(function(x){ return esc(x.name); }).join(', ')+'.</div>';
-    extra += '<div class="sub" style="margin-top:8px;">Absent at the day rate, Late in only when the period\'s total is over '+res.lateThreshold+' minutes, Overtime at '+res.overtimeMultiplier+'× the hourly rate (1× above the BCEA earnings threshold), public holidays worked count as overtime. Rates come from the standing salary on the Roster. Use this screen, not a hand-typed line, for absent, late and overtime.</div>';
+    extra += '<div class="sub" style="margin-top:8px;">Absent at the day rate, Late in only when the period\'s total is over '+res.lateThreshold+' minutes, Overtime at '+res.overtimeMultiplier+'× the hourly rate (1× above the BCEA earnings threshold), public holidays worked count as overtime, every Sunday hour at '+(res.sundayMultiplier||2)+'× for everyone. Rates come from the standing salary on the Roster. Use this screen, not a hand-typed line, for absent, late and overtime.</div>';
     el.innerHTML = title + head + table + extra;
     el.querySelectorAll('#c2p-tiles .stat').forEach(function(t){ t.addEventListener('click', function(){ c2pFilter_=t.dataset.f; renderC2pPanel_(); }); });
     var qi=el.querySelector('#c2p-q'); qi.addEventListener('input', function(){ var pos=qi.selectionStart; renderC2pPanel_(); var n=document.getElementById('c2p-q'); n.focus(); n.setSelectionRange(pos,pos); });
@@ -6146,7 +6146,8 @@
       if(x.absent) counts.push('<span class="chip warn">Absent '+(x.absent===0.5?'½ day':'1 day')+'</span>');
       if(x.lateMin) counts.push('<span class="chip amber">Late '+x.lateMin+' min</span>');
       if(x.overtimeHrs) counts.push('<span class="chip good">Overtime '+c2pNum_(x.overtimeHrs)+' h</span>');
-      if(x.dayOffHrs) counts.push('<span class="chip amber">Day off '+c2pNum_(x.dayOffHrs)+' h</span>');
+      if(x.dayOffHrs) counts.push('<span class="chip amber">Day off '+c2pNum_(x.dayOffHrs)+' h'+(x.sunday?' · Sunday 2×':'')+'</span>');
+      else if(x.sunday && x.overtimeHrs) counts.push('<span class="chip amber">Sunday 2×</span>');
       if(x.status==='No clock-in' || x.status==='No clock-out') counts.push('<span class="chip amber">Check: '+esc(x.status.toLowerCase())+'</span>');
       var hl = counts.length ? ' style="background:var(--paper);"' : '';
       var t = function(v, manual){ return v ? esc(v)+(manual?' <span style="font-size:11px;color:var(--ink-soft);">(manual)</span>':'') : ''; };
@@ -7610,7 +7611,7 @@
     earnings.push(['Basic Salary', money(c.baseAmount)]);
     if(adj.Commission) earnings.push([withNote_('Commission','Commission'), money(adj.Commission)]);
     if(adj.Bonus) earnings.push([withNote_('Bonus','Bonus'), money(adj.Bonus)]);
-    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs @ '+OVERTIME_RATE_MULTIPLIER+'x)':''),'Overtime'), money(adj.Overtime)]);
+    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''),'Overtime'), money(adj.Overtime)]);
     if(adj.Absent) earnings.push([withNote_('Absent'+(c.absentDays?' ('+c.absentDays+' days)':''),'Absent'), '-'+money(adj.Absent)]);
     if(adj.Late) earnings.push([withNote_('Late'+(c.lateMinutes?' ('+c.lateMinutes+' min)':''),'Late'), '-'+money(adj.Late)]);
     var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0) - (adj.Late||0);
@@ -7757,7 +7758,7 @@
     earnings.push(['Basic Salary', money(c.baseAmount)]);
     if(adj.Commission) earnings.push([withNote_('Commission','Commission'), money(adj.Commission)]);
     if(adj.Bonus) earnings.push([withNote_('Bonus','Bonus'), money(adj.Bonus)]);
-    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs @ '+OVERTIME_RATE_MULTIPLIER+'x)':''),'Overtime'), money(adj.Overtime)]);
+    if(adj.Overtime) earnings.push([withNote_('Overtime'+(c.overtimeHours?' ('+c.overtimeHours+' hrs)':''),'Overtime'), money(adj.Overtime)]);
     if(adj.Absent) earnings.push([withNote_('Absent'+(c.absentDays?' ('+c.absentDays+' days)':''),'Absent'), '-'+money(adj.Absent)]);
     if(adj.Late) earnings.push([withNote_('Late'+(c.lateMinutes?' ('+c.lateMinutes+' min)':''),'Late'), '-'+money(adj.Late)]);
     var earningsTotal = (c.baseAmount||0) + (adj.Commission||0) + (adj.Bonus||0) + (adj.Overtime||0) - (adj.Absent||0) - (adj.Late||0);
