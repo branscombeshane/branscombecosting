@@ -1226,7 +1226,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-25.8';
+  var BATTEN_VERSION = '2026-11-25.9';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -5980,16 +5980,12 @@
     var allDone = rows.length && rows.every(function(r){ return r._t.done; });
     var depts = []; rows.forEach(function(r){ if(r.department && depts.indexOf(r.department)===-1) depts.push(r.department); }); depts.sort();
     var stale = rows.filter(function(r){ return r._t.kinds.stale; }).map(function(r){ return r.name; });
-    // accepted before Sundays went to 2x: one click reprices them (Code.gs c2pRepriceSundays_)
-    var sunOld = rows.filter(function(r){ return r.sundayHours && (r.repriceNeeded||[]).some(function(t){ return t==='Overtime' || t==='Day off'; }); }).map(function(r){ return r.name; });
     var acceptable = shown.filter(function(r){ return r._t.steps.some(function(s){ return s.kind==='accept' && s.btns.length; }); });
     var head =
       (res.inProgress ? '<div class="status-msg" style="margin-bottom:10px;"><b>Figures so far</b>: the period runs to '+esc(c2pShort_(res.periodEnd))+', these are up to '+esc(c2pShort_(res.upTo))+'. Accept after the 19th.</div>' : '') +
       ((res.rerunNeeded||[]).length ? '<div class="status-msg error" style="margin-bottom:10px;">Payroll for '+esc(payrollMonth)+' was already run. Re-run it (Run Payroll) to include the changes for: '+esc(res.rerunNeeded.join(', '))+'.</div>' : '') +
-      (sunOld.length ? '<div class="status-msg error" style="margin-bottom:10px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;"><span>Sunday hours accepted at the old 1.5× for: '+esc(sunOld.join(', '))+'.</span><button type="button" class="btn small primary" id="c2p-reprice-sun">Reprice Sundays at 2×</button></div>' : '') +
       (stale.length ? '<div class="status-msg error" style="margin-bottom:10px;">Accepted lines no longer match the clock-ins for: '+esc(stale.join(', '))+'. Nothing changes pay by itself: delete the line under the employee below and accept again.</div>' : '') +
       (res.message ? '<div class="status-msg" style="margin-bottom:10px;">'+esc(res.message)+'</div>' : '') +
-      ((res.skipped||[]).length ? '<div class="status-msg error" style="margin-bottom:10px;">'+res.skipped.map(esc).join('<br>')+'</div>' : '') +
       (allDone ? '<div class="status-msg" style="margin-bottom:10px;background:var(--good-soft);color:var(--good);font-weight:600;">✓ All '+rows.length+' people are done for '+esc(payrollMonth)+' pay</div>' : '') +
       '<div class="stats" id="c2p-tiles" style="margin-top:0;">'+tiles.map(function(t){ return '<div class="stat'+(c2pFilter_===t[0]?' total':'')+'" data-f="'+t[0]+'" style="cursor:pointer;"><span class="label">'+esc(t[1])+'</span><span class="value num"'+(t[0]==='stale'?' style="color:var(--warn);"':'')+'>'+t[2]+'</span></div>'; }).join('')+'</div>' +
       '<div class="field-row" style="align-items:flex-end;margin-top:10px;">' +
@@ -6025,11 +6021,6 @@
       a.textContent='undoing…';
       c2pRun_(apiRead('setClockinCheck', { month:payrollMonth, employeeId:id, kind:a.dataset.kind, date:a.dataset.date, op:'clear' }), null);
     }); });
-    var rsun=el.querySelector('#c2p-reprice-sun');
-    if(rsun) rsun.addEventListener('click', function(){
-      if(!confirm('Reprice the accepted clock-in overtime that includes Sunday hours to 2×? Only lines still matching the clock-ins at the old 1.5× price are changed; anything else is listed for you to check.')) return;
-      c2pReprice_(rsun);
-    });
     var all=el.querySelector('#c2p-accept-all');
     if(all) all.addEventListener('click', function(){
       if(!confirm('Accept the clock-in figures for '+acceptable.length+' people? Day-off hours are never included: those stay a separate decision.')) return;
@@ -6052,11 +6043,6 @@
     params.month = payrollMonth;
     return c2pRun_(apiRead('acceptClockinsToPay', params), btn, true).then(function(x){
       if(x && x.needsUnlock) c2pUnlock_(x.error, function(){ c2pAccept_(params, null); });
-    });
-  }
-  function c2pReprice_(btn){
-    return c2pRun_(apiRead('repriceSundays', { month: payrollMonth }), btn, true).then(function(x){
-      if(x && x.needsUnlock) c2pUnlock_(x.error, function(){ c2pReprice_(null); });
     });
   }
   // Owner's password for a month payroll has already been run for. Sent by form POST (never in
