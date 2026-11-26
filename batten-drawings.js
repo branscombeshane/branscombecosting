@@ -682,6 +682,9 @@
     });
     return Object.keys(totals).sort().map(function (k) { return totals[k]; });
   }
+  // CNC rule (Shane, 26 Nov 2026): anything cut on the CNC needs 50 mm extra on its length and
+  // its width so it can be clamped down; the cutting list gives the blank, the note the finished size.
+  var CNC_MARGIN = 50;
   function pathOf(pts, close) { return 'M' + pts.map(function (p) { return n2(p[0]) + ',' + n2(p[1]); }).join(' L') + (close ? ' Z' : ''); }
   function poly2(pts, fill, sw, extra) { return '<path d="' + pathOf(pts, true) + '" fill="' + (fill || 'none') + '" stroke="#111" stroke-width="' + (sw || 0.3) + '" stroke-linejoin="round"' + (extra || '') + '/>'; }
   function hull(pts) {                   // convex hull (monotone chain), for drawing a prism in 3D
@@ -701,7 +704,8 @@
   function buildTable(s) {
     var D = s.diameter, H = s.height, tp = s.top, sb = s.subBase, lg = s.legs, fx = s.fixings || {};
     var T = tp.thickness, St = sb.thickness, Ds = sb.diameter, n = lg.count, t = lg.thickness, L = lg.length;
-    var r2 = Ds / 2 - lg.fromEdge, r1 = r2 - L, bladeH = H - T - St;
+    // the legs tuck into cut-outs in the sub-base (Shane, 26 Nov), so they run up to the top
+    var r2 = Ds / 2 - lg.fromEdge, r1 = r2 - L, bladeH = H - T, clr = sb.cutoutClearance == null ? 1 : sb.cutoutClearance;
     var edge = tp.edgeThickness == null ? T : tp.edgeThickness, ang = tp.bevelAngle || 45;
     var bevel = edge < T ? Math.round((T - edge) / Math.tan(ang * Math.PI / 180)) : 0;
     if (Ds > D) throw new Error('The sub-base (Ø' + Ds + ') is bigger than the top (Ø' + D + ')');
@@ -709,11 +713,11 @@
     if (n < 2) throw new Error('A table needs at least 2 blade legs');
     var minR1 = n === 2 ? 0 : (t / 2) / Math.sin(Math.PI / n) + 2;
     if (r1 < minR1) throw new Error('The legs touch in the middle: start them at least ' + Math.ceil(minR1) + ' mm from the centre (shorter legs or further in from the edge)');
-    if (bladeH <= 0) throw new Error('The height is less than the top and sub-base');
+    if (bladeH <= St) throw new Error('The height is less than the top and sub-base');
     var parts = [];
     function part(name, qty, l, w, th, mat, note) { parts.push({ name: name, qty: qty, length: l, width: w, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '' }); }
-    part('Top', 1, D, D, T, tp, 'cut Ø' + D + (bevel ? '; ' + ang + '° mitre under the edge, ' + edge + ' mm left at the edge' : ''));
-    part('Sub-base', 1, Ds, Ds, St, sb, 'cut Ø' + Ds + '; leg positions as the layout');
+    part('Top (CNC blank)', 1, D + CNC_MARGIN, D + CNC_MARGIN, T, tp, 'CNC to Ø' + D + ' (+' + CNC_MARGIN + ' to clamp)' + (bevel ? '; ' + ang + '° mitre under the edge, ' + edge + ' left' : ''));
+    part('Sub-base (CNC blank)', 1, Ds + CNC_MARGIN, Ds + CNC_MARGIN, St, sb, 'CNC to Ø' + Ds + ' (+' + CNC_MARGIN + ' to clamp); ' + n + ' leg cut-outs, leg + ' + clr + ' all round');
     part('Blade leg', n, bladeH, L, t, lg, 'both ends rounded R' + n2(t / 2) + ' (in plan)');
     var hw = [], hc = 1;
     if (fx.perLeg) hw.push({ code: 'H' + hc++, qty: fx.perLeg * n, name: fx.legItem || 'Leg fixing' });
@@ -721,13 +725,13 @@
     var angles = [];
     for (var i = 0; i < n; i++) angles.push(-Math.PI / 2 + i * 2 * Math.PI / n);   // first blade points to the back
     var den = pickScale(function (k) { return D * k <= 86 && H * k <= 78; });
-    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([tp, sb, lg]), D: D, H: H, T: T, St: St, Ds: Ds, n: n, t: t, L: L, r1: r1, r2: r2,
+    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([tp, sb, lg]), D: D, H: H, T: T, St: St, Ds: Ds, n: n, t: t, L: L, r1: r1, r2: r2, clr: clr,
       bladeH: bladeH, edge: edge, bevel: bevel, ang: ang, angles: angles, parts: parts, hardware: hw, totals: totalsOf(parts),
       overall: { width: D, depth: D, height: H } };
   }
   // stadium (blade with rounded ends) in plan, centred on (cx, cy), at angle a (radians)
-  function bladePlan(m, cx, cy, a, k, fill, extra) {
-    var r = m.t / 2 * k, c = Math.cos(a), s = Math.sin(a), nx = -s, ny = c, p1 = [cx + c * m.r1 * k, cy + s * m.r1 * k], p2 = [cx + c * m.r2 * k, cy + s * m.r2 * k], R = n2(r);
+  function bladePlan(m, cx, cy, a, k, fill, extra, grow) {
+    var r = (m.t / 2 + (grow || 0)) * k, c = Math.cos(a), s = Math.sin(a), nx = -s, ny = c, p1 = [cx + c * m.r1 * k, cy + s * m.r1 * k], p2 = [cx + c * m.r2 * k, cy + s * m.r2 * k], R = n2(r);
     return '<path d="M' + n2(p1[0] + nx * r) + ',' + n2(p1[1] + ny * r) + ' L' + n2(p2[0] + nx * r) + ',' + n2(p2[1] + ny * r) +
       ' A' + R + ' ' + R + ' 0 0 0 ' + n2(p2[0] - nx * r) + ',' + n2(p2[1] - ny * r) + ' L' + n2(p1[0] - nx * r) + ',' + n2(p1[1] - ny * r) +
       ' A' + R + ' ' + R + ' 0 0 0 ' + n2(p1[0] + nx * r) + ',' + n2(p1[1] + ny * r) + ' Z" fill="' + (fill || 'none') + '" stroke="#111" stroke-width="0.3"' + (extra || '') + '/>';
@@ -742,11 +746,10 @@
       var x0 = cx + (xs[0] - m.t / 2 * sn) * k, x1 = cx + (xs[1] + m.t / 2 * sn) * k;
       out += rect(x0, oy - bh, Math.max(x1 - x0, 0.4), bh, 0.3, Math.sin(a) > 0.01 ? FACE : OAK);
     });
-    out += rect(cx - sbw / 2, top + T, sbw, St, 0.3, '#d9d4c8');
+    out += rect(cx - sbw / 2, top + T, sbw, St, 0.3, '#d9d4c8', ' fill-opacity="0.85"');
     out += poly2([[ox, top], [ox + D, top], [ox + D, top + e], [ox + D - b, top + T], [ox + b, top + T], [ox, top + e]], OAK, 0.35);
     out += hChain([ox, ox + D], [m.D], top - 5, top);
-    if ((m.T + m.St) * k >= 9) out += vChain([top, top + T, top + T + St, oy], [m.T, m.St, m.bladeH], ox + D + 5, ox + D);
-    else out += vChain([top + T + St, oy], [m.bladeH], ox + D + 5, ox + D) + text(ox + D + 3, top - 1.2, 'top ' + m.T + ' + sub-base ' + m.St, 1.8, { fill: '#555' });
+    out += vChain([top + T, oy], [m.bladeH], ox + D + 5, ox + D) + text(ox + D + 3, top - 1.2, 'top ' + m.T + '; legs run up through the ' + m.St + ' sub-base', 1.8, { fill: '#555' });
     out += vChain([top, oy], [m.H], ox + D + 12, ox + D);
     return out;
   }
@@ -763,7 +766,8 @@
       return out;
     }
     out += circle(cx, cy, Rs, '#efebe3', 0.35);
-    m.angles.forEach(function (a) { out += bladePlan(m, cx, cy, a, k, OAK); });
+    m.angles.forEach(function (a) { out += bladePlan(m, cx, cy, a, k, '#fff', '', m.clr) + bladePlan(m, cx, cy, a, k, OAK, ' fill-opacity="0.55"'); });
+    out += text(cx + Rs + 6, cy + Rs - 6, 'leg cut-outs right through', 1.8, { fill: '#555' }) + text(cx + Rs + 6, cy + Rs - 3.6, 'the sub-base: leg + ' + m.clr + ' mm all round', 1.8, { fill: '#555' });
     out += circle(cx, cy, 0.5, '#111', 0.1);
     var a0 = m.angles[0];
     out += vChain([cy - Rs, cy - m.r2 * k, cy - m.r1 * k], [s.legs.fromEdge, m.L], cx + m.t / 2 * k + 6, cx);
@@ -798,7 +802,7 @@
   function tableEdge(s, m, ox, oy) {
     var k = 0.5, T = m.T * k, e = m.edge * k, b = m.bevel * k, w = Math.max(m.bevel + 40, 60) * k, St = m.St * k, gap = (m.D - m.Ds) / 2 * k, out = '';
     out += poly2([[ox, oy], [ox + w, oy], [ox + w, oy + T], [ox + b, oy + T], [ox, oy + e]], OAK, 0.35);
-    if (gap < w) out += rect(ox + gap, oy + T, w - gap, St, 0.3, '#d9d4c8');
+    if (gap < w) out += rect(ox + gap, oy + T, w - gap, St, 0.3, '#d9d4c8');  // (legs: see the layout)
     else out += text(ox, oy + T + 10, 'sub-base starts ' + n2((m.D - m.Ds) / 2) + ' in from the edge', 1.8, { fill: '#555' });
     out += vChain([oy, oy + e], [m.edge], ox - 4, ox) + vChain([oy, oy + T], [m.T], ox + w + 4, ox + w);
     if (b) out += hChain([ox, ox + b], [m.bevel], oy + T + 4, oy + T) + text(ox + b + 2, oy + T - 1, m.ang + '°', 2);
@@ -868,24 +872,23 @@
     }
     return pts;
   }
-  function perimeter(pts) { var p = 0; for (var i = 0; i < pts.length; i++) { var q = pts[(i + 1) % pts.length]; p += Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]); } return p; }
   function buildMirror(s) {
     var W = s.width, H = s.height, wv = s.waves || {}, fr = s.frame, bk = s.backing, mr = s.mirror, ft = s.fittings || {};
-    var a = wv.depth == null ? 30 : wv.depth, nx = wv.across || 4, ny = wv.along || 8, rc = wv.cornerRadius == null ? 50 : wv.cornerRadius;
+    var a = wv.depth == null ? 20 : wv.depth, nx = wv.across || 4, ny = wv.along || 8, rc = wv.cornerRadius == null ? 50 : wv.cornerRadius;
     var w = fr.width, Tf = fr.thickness, bi = bk.inset, mi = mr.inset, lip = Tf - bk.thickness - mr.thickness;
     if (!(bi > 0 && bi < mi && mi < w)) throw new Error('Back rebate steps must be: 0 < backing step (' + bi + ') < mirror step (' + mi + ') < frame width (' + w + ')');
     if (lip < 6) throw new Error('Backing + mirror (' + (bk.thickness + mr.thickness) + ' mm) leave only ' + lip + ' mm of frame at the front');
     if (W - 2 * w - 2 * a < 40 || H - 2 * w - 2 * a < 40) throw new Error('The frame and waves leave no opening: make it bigger, the frame narrower or the waves shallower');
     var shape = function (inset, steps) { return waveOutline(W - 2 * inset, H - 2 * inset, a, nx, ny, Math.max(rc - inset, 5), steps).map(function (p) { return [p[0] + inset, p[1] + inset]; }); };
     var outer = shape(0), inner = shape(w), backO = shape(bi), mirO = shape(mi);
-    var blank = w + a + 10;                                                          // frame blanks: frame width + wave depth + 10 mm to cut
+    var blank = w + a + CNC_MARGIN;                                                  // frame blanks: frame width + wave depth + CNC clamping
     var parts = [];
     function part(name, qty, l, wd, th, mat, note) { parts.push({ name: name, qty: qty, length: l, width: wd, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '' }); }
-    part('Frame side (blank)', 2, H, blank, Tf, fr, 'join + glue up, then CNC wave profile and back rebate');
-    part('Frame top/bottom (blank)', 2, W - 2 * blank + 2 * 20, blank, Tf, fr, 'as the sides (20 mm overlap each end)');
-    part('Backing', 1, W - 2 * bi, H - 2 * bi, bk.thickness, bk, 'cut to the wave shape (backing outline)');
+    part('Frame side (CNC blank)', 2, H + CNC_MARGIN, blank, Tf, fr, 'join + glue up, then CNC wave profile + back rebate (+' + CNC_MARGIN + ' to clamp)');
+    part('Frame top/bottom (CNC blank)', 2, W + CNC_MARGIN - 2 * blank + 2 * 20, blank, Tf, fr, 'between the sides, 20 mm overlap each end');
+    part('Backing (CNC blank)', 1, W - 2 * bi + CNC_MARGIN, H - 2 * bi + CNC_MARGIN, bk.thickness, bk, 'CNC to the backing outline, ' + (W - 2 * bi) + ' x ' + (H - 2 * bi) + ' (+' + CNC_MARGIN + ' to clamp)');
     part('Mirror', 1, W - 2 * mi, H - 2 * mi, mr.thickness, mr, 'shaped to the mirror outline, polished edge');
-    var hw = [], hc = 1, cl = ft.clips == null ? Math.max(6, 2 * Math.round(perimeter(backO) / 500)) : ft.clips;
+    var hw = [], hc = 1, cl = ft.clips || 0;
     if (cl) hw.push({ code: 'H' + hc++, qty: cl, name: ft.clipItem || 'Glass clip' });
     if (ft.inserts) hw.push({ code: 'H' + hc++, qty: ft.inserts, name: ft.insertItem || 'Wood insert (threaded)' });
     if (ft.hangingQty) hw.push({ code: 'H' + hc++, qty: ft.hangingQty, name: ft.hanging || 'Hanging bracket' });
@@ -950,7 +953,7 @@
         text(110, 150, 'Outlines: outer edge = frame outside; inner = frame opening (dashed);', 2, { fill: '#444' }) +
         text(110, 154, 'shaded = backing; dashed inside it = mirror. Same wave on each.', 2, { fill: '#444' }) +
         text(110, 160, 'Waves: ' + (s.waves.across || 4) + ' across, ' + (s.waves.along || 8) + ' down each side, ' + m.a + ' mm deep.', 2, { fill: '#444' }) +
-        text(110, 164, 'Frame blanks ' + m.blank + ' mm wide (frame ' + m.w + ' + wave ' + m.a + ' + 10 to cut).', 2, { fill: '#444' });
+        text(110, 164, 'Frame blanks ' + m.blank + ' mm wide (frame ' + m.w + ' + wave ' + m.a + ' + ' + CNC_MARGIN + ' to clamp on the CNC).', 2, { fill: '#444' });
     }
   };
   function sheets(spec, opts) {
