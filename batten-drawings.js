@@ -1048,7 +1048,7 @@
     var outer = archOutline(W, H, Rc, Rs, 0), mirO = archOutline(W, H, Rc, Rs, mr.inset), backO = archOutline(W, H, Rc, Rs, bk.inset), tubeO = archOutline(W, H, Rc, Rs, tb.inset);
     var t = tb.size, inner = archOutline(W, H, Rc, Rs, tb.inset + t);
     var depth = rim.width, stack = (sec.frontLip || 0) + mr.thickness + (sec.gap || 0) + t + bk.thickness + (sec.backLip || 0);
-    if (Math.abs(stack - depth) > 0.5) throw new Error('Front lip + mirror + gap + tube + back + back lip = ' + stack + ', but the rim is ' + depth + ' deep');
+    if (Math.abs(stack - depth) > 0.5) throw new Error('Front lip + mirror + glue + tube + back + back lip = ' + stack + ', but the rim is ' + depth + ' deep');
     var rows = tb.rows || 4, cols = tb.cols || 2;
     var fw = W - 2 * tb.inset, archTop = archGeom(W, H, Rc, Rs);
     var Hin = H - 2 * (tb.inset + t), colW = (fw - 2 * t - (cols - 1) * t) / cols;
@@ -1066,7 +1066,7 @@
     bar('Upright (middle)', cols - 1, H - tb.inset - t - crownY, tb, t + ' x ' + t, 'bottom tube to the crown');
     bar('Cross bar', rows - 1, colW * cols + (cols - 1) * t, tb, t + ' x ' + t, 'between the frame sides');
     var M = CNC_MARGIN;
-    part('Mirror', 1, H - 2 * mr.inset, W - 2 * mr.inset, mr.thickness, mr, 'cut to the arch (R' + (Rc - mr.inset) + ' / R' + (Rs + mr.inset) + '), polished edge');
+    part('Mirror', 1, H - 2 * mr.inset, W - 2 * mr.inset, mr.thickness, mr, 'cut to the arch (R' + (Rc - mr.inset) + ' / R' + (Rs + mr.inset) + '), polished edge; glued onto the tube frame');
     part('Back (CNC blank)', 1, H - 2 * bk.inset + M, W - 2 * bk.inset + M, bk.thickness, bk, 'CNC to the arch, ' + (W - 2 * bk.inset) + ' x ' + (H - 2 * bk.inset) + ' (+' + M + ' to clamp)');
     var hw = (s.fittings && s.fittings.items || []).filter(function (x) { return x && x.name && x.qty; }).map(function (x, i) { return { code: 'H' + (i + 1), qty: x.qty, name: x.name }; });
     var totals = totalsOf(parts);
@@ -1124,13 +1124,16 @@
     out += rect(ox, oy, D, rt, 0.3, GOLD);                                                      // rim (seen in section along the edge)
     var y0 = oy + rt;
     x += (sec.frontLip || 0);
-    out += rect(x, y0, s.mirror.thickness, h, 0.25, GLASS); var xm = x; x += s.mirror.thickness + (sec.gap || 0);
+    out += rect(x, y0, s.mirror.thickness, h, 0.25, GLASS); var xm = x; x += s.mirror.thickness;
+    if (sec.gap) out += rect(x, y0 + 2, sec.gap, m.t, 0.15, '#f2e2a0');                         // mirror glue between the glass and the tube
+    x += (sec.gap || 0);
     out += rect(x, y0 + 2, m.t, m.t, 0.3, '#555'); var xt = x; x += m.t;
     out += rect(x, y0, s.backing.thickness, h, 0.25, '#e9dcc7'); var xb = x;
     out += hChain([ox, ox + (sec.frontLip || 0), xm + s.mirror.thickness, xt, xt + m.t, xb + s.backing.thickness, ox + D], [sec.frontLip || 0, s.mirror.thickness, sec.gap || 0, m.t, s.backing.thickness, sec.backLip || 0].map(n2), oy - 4, oy);
     out += hChain([ox, ox + D], [m.depth], oy - 9, oy) + vChain([oy, oy + rt], [rt], ox - 4, ox);
     out += text(xm + 1, y0 + h + 3.5, 'mirror', 1.7, { fill: '#444' }) + text(xt, y0 + m.t + 6, 'tube', 1.7, { fill: '#444' }) + text(xb, y0 + h + 6.5, 'back', 1.7, { fill: '#444' });
     out += text(ox, y0 + h + 10, 'front on the left; rim ' + rt + ' x ' + D + ' flat bar', 1.7, { fill: '#555' });
+    out += text(ox, y0 + h + 13, 'mirror glued onto the tube frame' + (sec.gap ? ' (' + sec.gap + ' glue)' : ''), 1.7, { fill: '#555' });
     return out;
   }
   function archIso(s, m, bx, by, bw, bh) {
