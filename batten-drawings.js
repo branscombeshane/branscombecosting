@@ -996,12 +996,13 @@
   // box; the sides and back are aprons mitred 45° at the corners, the front is the drawer faces
   // (mitred at the outer ends, a gap between them, a gap under the top). Every apron and face can
   // have a smooth wavy bottom edge (rounded up and down), cut on the CNC, with a flat at each
-  // corner. A frame (rails.thickness thick) sits inside the aprons at the bottom, just above the
-  // waves: front, back and side rails ta + d in from the outside, so each leg drops into a d x d
-  // pocket closed by the two aprons and the frame, and runs up to the underside of the top.
-  // Runner rails (inside the side frame rails) and dividers stand on the frame up to the top:
-  // height = apron - wave - frame. One drawer box per bay on undermount runners, the bay less the
-  // runner clearance each side, sitting against the back apron.
+  // corner. The carcass frame (from the AOC1675 carcass top view, Shane 27 Nov): a side rail along
+  // each end, full inside depth, ta + d in from the outside; a divider between drawers, full depth;
+  // and a block at the front and back of each end between the side apron and the side rail. Each
+  // leg sits in the d x d opening closed by the two aprons, the side rail and the block, and runs
+  // up to the top of the frame (under the desk top). Rails, divider and blocks are the full frame
+  // height: apron - wave. One drawer box per bay on undermount runners, the bay less the runner
+  // clearance each side, against the back apron, `raise` above the bottom of the rails.
   function arches(len, pitch) { return Math.max(1, Math.round(len / pitch)); }
   // bottom edge from x0 to x1 (paper), base line y (paper, the lowest point), arch depth d (paper)
   function wavePath(x0, x1, y, flat0, flat1, n, d) {
@@ -1014,14 +1015,14 @@
     var W = s.width, D = s.depth, H = s.height, tp = s.top, ap = s.apron, fc = s.faces, lg = s.legs, rl = s.rails, wv = s.wave || {}, dr = s.drawers, rn = s.runners;
     var T = tp.thickness, A = ap.height, ta = ap.thickness, n = dr.count, g = fc.gap, tg = fc.topGap, d = lg.diameter, rt = rl.thickness;
     var faceH = A - tg, fw = (W - (n - 1) * g) / n, legH = H - T, inner = W - 2 * (ta + d + rt), bay = (inner - (n - 1) * rt) / n;
-    var depth0 = (s.wave || {}).depth || 0, rh = A - depth0 - rt, frameIn = D - 2 * (ta + d + rt);
+    var depth0 = (s.wave || {}).depth || 0, rh = A - depth0, frameIn = D - 2 * ta;
     var depthIn = D - 2 * ta, railLen = frameIn, clr = rn.sideClearance, bt = dr.box.thickness, boxW = bay - 2 * clr, boxIn = boxW - 2 * bt, boxLen = rn.boxLength;
     var depth = wv.depth || 0, pitch = wv.pitch || 90, flat = wv.cornerFlat == null ? ta : wv.cornerFlat;
     if (n < 1) throw new Error('A desk needs at least 1 drawer');
     if (boxW < 100) throw new Error('The drawer bays are only ' + Math.round(bay) + ' wide: fewer drawers or a wider desk');
     if (boxLen > depthIn - rt) throw new Error('Drawer boxes ' + boxLen + ' long do not fit the ' + depthIn + ' inside depth');
-    if (dr.box.height + (dr.box.raise || 0) > rh) throw new Error('Drawer boxes ' + dr.box.height + ' high (+' + (dr.box.raise || 0) + ' above the frame) do not fit: ' + rh + ' between the frame and the top');
-    if (frameIn < 50) throw new Error('The desk is too shallow for the frame and legs');
+    if (dr.box.height + (dr.box.raise || 0) > rh) throw new Error('Drawer boxes ' + dr.box.height + ' high (+' + (dr.box.raise || 0) + ' above the rail bottom) do not fit the ' + rh + ' high frame');
+    if (D - 2 * (ta + d + rt) < 50) throw new Error('The desk is too shallow for the legs and blocks');
     if (legH <= A) throw new Error('The height is less than the top and the aprons');
     var parts = [], cnc = depth > 0;
     function part(name, qty, l, w, th, mat, note, unit) { parts.push({ name: name, qty: qty, length: l, width: w, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '', unit: unit }); }
@@ -1031,11 +1032,9 @@
     part('Side apron' + (cnc ? ' (CNC blank)' : ''), 2, D + M, A + M, ta, ap, wnote + 'finished ' + D + ' x ' + A + '; 45° mitre both ends');
     part('Back apron' + (cnc ? ' (CNC blank)' : ''), 1, W + M, A + M, ta, ap, (wv.back === false ? '' : wnote) + 'finished ' + W + ' x ' + A + '; 45° mitre both ends');
     part('Leg', 4, legH, d, d, lg, 'turned Ø' + d + ', round', 'm');
-    part('Frame rail, front/back', 2, W - 2 * ta, rt, rt, rl, 'inside the aprons, ' + (ta + d) + ' in from the outside; closes the leg pockets');
-    part('Frame rail, side', 2, frameIn, rt, rt, rl, 'between the front and back frame rails');
-    if (n > 1) part('Frame rail, under divider', n - 1, frameIn, rt, rt, rl, 'between the front and back frame rails');
-    part('Runner rail', 2, frameIn, rh, rt, rl, 'stands on the side frame rail, up to the top');
-    if (n > 1) part('Divider', n - 1, frameIn, rh, rt, rl, 'stands on the frame between drawers, up to the top');
+    part('Side rail', 2, frameIn, rh, rt, rl, 'full inside depth, ' + (ta + d) + ' in from the end; runners fix to it');
+    if (n > 1) part('Divider', n - 1, frameIn, rh, rt, rl, 'full inside depth between drawers');
+    part('Leg block', 4, d, rh, rt, rl, 'between side apron and side rail, closes the leg opening');
     var bb = dr.bottom || dr.box;
     part('Drawer box side', 2 * n, boxLen, dr.box.height, bt, dr.box);
     part('Drawer box front/back', 2 * n, n2(boxIn), dr.box.height, bt, dr.box);
@@ -1070,9 +1069,8 @@
     var back = m.wave && m.waveBack ? wavePath(ox, ox + W, ab, m.flat * k, m.flat * k, arches(m.W - 2 * m.flat, m.pitch), wd) : [[ox, ab], [ox + W, ab]];
     out += poly2([[ox, top + T]].concat(back).concat([[ox + W, top + T]]), '#efe6d6', 0.25);
     var rx0 = ox + ta + d, rh = m.rh * k, fy = top + T + rh;
-    out += rect(ox + ta, fy, W - 2 * ta, m.rt * k, 0.3, '#c8aa80') + text(ox + W / 2, fy + m.rt * k - 0.5, 'frame', 1.5, { anchor: 'middle', fill: '#333' });
     out += rect(rx0, top + T, m.rt * k, rh, 0.3, VENEER) + rect(ox + W - ta - d - m.rt * k, top + T, m.rt * k, rh, 0.3, VENEER);
-    out += rect(ox + ta, top + T, d, A - m.wave * k, 0.2, OAK, ' fill-opacity="0.6"') + rect(ox + W - ta - d, top + T, d, A - m.wave * k, 0.2, OAK, ' fill-opacity="0.6"');
+    out += rect(ox + ta, top + T, d, oy - top - T, 0.3, OAK) + rect(ox + W - ta - d, top + T, d, oy - top - T, 0.3, OAK);   // legs, up to the top of the frame
     var bx = rx0 + m.rt * k;
     for (var b = 0; b < m.n; b++) {
       var by = top + T + rh - (s.drawers.box.raise || 0) * k - s.drawers.box.height * k;
@@ -1088,7 +1086,7 @@
     out += hChain(cx, cv, top - 4, top);
     var bt0 = top + T + rh - (s.drawers.box.raise || 0) * k - s.drawers.box.height * k;
     out += vChain([top + T, bt0, bt0 + s.drawers.box.height * k, top + T + rh], [n2(m.rh - s.drawers.box.height - (s.drawers.box.raise || 0)), s.drawers.box.height, s.drawers.box.raise || 0], ox - 5, ox);
-    out += vChain([top, top + T, fy, fy + m.rt * k, ab, oy], [m.T, n2(m.rh), m.rt, m.wave, n2(m.legH - m.A)], ox + W + 5, ox + W);
+    out += vChain([top, top + T, fy, ab, oy], [m.T, n2(m.rh), m.wave, n2(m.legH - m.A)], ox + W + 5, ox + W);
     out += text(ox + W / 2, ab + 4, 'back apron, seen from the front', 1.7, { anchor: 'middle', fill: '#555' });
     return out;
   }
@@ -1124,9 +1122,8 @@
       out += poly2([[x, oy + D], [x + w, oy + D], [x + w - r0, oy + D - ta], [x + l0, oy + D - ta]], '#d2b48b', 0.3);
       x += w + m.g * k;
     }
-    var fz = oy + ta + d, fl = W - 2 * ta;                                                                  // frame
-    out += rect(ox + ta, fz, fl, rt, 0.25, '#c8aa80') + rect(ox + ta, oy + D - ta - d - rt, fl, rt, 0.25, '#c8aa80');
-    out += rect(ox + ta + d, fz + rt, rt, m.frameIn * k, 0.25, '#c8aa80') + rect(ox + W - ta - d - rt, fz + rt, rt, m.frameIn * k, 0.25, '#c8aa80');
+    out += rect(ox + ta + d, oy + ta, rt, m.frameIn * k, 0.25, VENEER) + rect(ox + W - ta - d - rt, oy + ta, rt, m.frameIn * k, 0.25, VENEER);     // side rails
+    [[ox + ta, oy + ta + d], [ox + ta, oy + D - ta - d - rt], [ox + W - ta - d, oy + ta + d], [ox + W - ta - d, oy + D - ta - d - rt]].forEach(function (b) { out += rect(b[0], b[1], d, rt, 0.25, '#c8aa80'); });   // leg blocks
     legs.forEach(function (p) { out += circle(ox + p[0], oy + p[1], d / 2, OAK, 0.3); });
     var bx = ox + ta + d + rt;
     for (var b = 0; b < m.n; b++) {
@@ -1135,10 +1132,10 @@
       if (b < m.n - 1) out += rect(bx + m.bay * k, oy + ta, rt, m.depthIn * k, 0.25, VENEER);
       bx += (m.bay + m.rt) * k;
     }
-    out += text(ox + W - 1, oy - 1.5, '45° mitred corners; legs drop into ' + m.d + ' x ' + m.d + ' pockets (aprons + frame)', 1.8, { anchor: 'end', fill: '#555' });
+    out += text(ox + W - 1, oy - 1.5, '45° mitred corners; each leg in a ' + m.d + ' x ' + m.d + ' opening: aprons, side rail and block', 1.8, { anchor: 'end', fill: '#555' });
     out += hChain([ox, ox + W], [m.W], oy - 9, oy);
     out += hChain([ox, ox + ta, ox + ta + d, ox + ta + d + rt, ox + W - ta - d - rt, ox + W - ta - d, ox + W - ta, ox + W], [m.ta, m.d, m.rt, n2(m.W - 2 * (m.ta + m.d + m.rt)), m.rt, m.d, m.ta], oy - 4, oy);
-    out += vChain([oy, oy + ta, oy + ta + d, oy + ta + d + rt, oy + D - ta - d - rt, oy + D - ta - d, oy + D - ta, oy + D], [m.ta, m.d, m.rt, n2(m.frameIn), m.rt, m.d, m.ta], ox + W + 5, ox + W);
+    out += vChain([oy, oy + ta, oy + ta + d, oy + ta + d + rt, oy + D - ta - d - rt, oy + D - ta - d, oy + D - ta, oy + D], [m.ta, m.d, m.rt, n2(m.D - 2 * (m.ta + m.d + m.rt)), m.rt, m.d, m.ta], ox + W + 5, ox + W);
     out += vChain([oy + ta, oy + ta + m.boxLen * k], [m.boxLen], ox - 5, ox);
     out += hChain([ox + ta + d + rt + m.clr * k, ox + ta + d + rt + m.clr * k + m.boxW * k], [n2(m.boxW)], oy + D + 5, oy + D);
     return out;
