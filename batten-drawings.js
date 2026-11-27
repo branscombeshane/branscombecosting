@@ -701,31 +701,45 @@
   // mitre (bevel) under its edge, screwed to a round MDF sub-base; flat blade legs, rounded at
   // both ends, radiate from the centre at equal angles and are fixed to the sub-base. In plan
   // each blade ends `fromEdge` in from the sub-base edge and runs `length` towards the centre.
+  // Option legs.type 'round' (from AOC1690 Contour side table): turned round legs, centres on a
+  // circle of radius legs.placeRadius, fixed straight to the top. subBase.diameter 0 = no sub-base.
   function buildTable(s) {
-    var D = s.diameter, H = s.height, tp = s.top, sb = s.subBase, lg = s.legs, fx = s.fixings || {};
-    var T = tp.thickness, St = sb.thickness, Ds = sb.diameter, n = lg.count, t = lg.thickness, L = lg.length;
-    // the legs tuck into cut-outs in the sub-base (Shane, 26 Nov), so they run up to the top
-    var r2 = Ds / 2 - lg.fromEdge, r1 = r2 - L, bladeH = H - T, clr = sb.cutoutClearance == null ? 1 : sb.cutoutClearance;
+    var D = s.diameter, H = s.height, tp = s.top, sb = s.subBase || {}, lg = s.legs, fx = s.fixings || {};
+    var round = lg.type === 'round', hasSub = Number(sb.diameter) > 0;
+    var T = tp.thickness, St = hasSub ? sb.thickness : 0, Ds = hasSub ? sb.diameter : 0, n = lg.count;
+    var t = round ? lg.diameter : lg.thickness, L = round ? lg.diameter : lg.length, base = hasSub ? Ds : D, baseName = hasSub ? 'sub-base' : 'top';
+    var clr = sb.cutoutClearance == null ? 1 : sb.cutoutClearance, r1, r2, bladeH;
     var edge = tp.edgeThickness == null ? T : tp.edgeThickness, ang = tp.bevelAngle || 45;
     var bevel = edge < T ? Math.round((T - edge) / Math.tan(ang * Math.PI / 180)) : 0;
-    if (Ds > D) throw new Error('The sub-base (Ø' + Ds + ') is bigger than the top (Ø' + D + ')');
-    if (r1 < 0) throw new Error('The legs (' + L + ' long, ' + lg.fromEdge + ' in from the edge) run past the centre of the sub-base');
-    if (n < 2) throw new Error('A table needs at least 2 blade legs');
-    var minR1 = n === 2 ? 0 : (t / 2) / Math.sin(Math.PI / n) + 2;
-    if (r1 < minR1) throw new Error('The legs touch in the middle: start them at least ' + Math.ceil(minR1) + ' mm from the centre (shorter legs or further in from the edge)');
+    if (hasSub && Ds > D) throw new Error('The sub-base (Ø' + Ds + ') is bigger than the top (Ø' + D + ')');
+    if (!(n >= 1)) throw new Error('A table needs at least 1 leg');
+    if (round) {
+      r1 = r2 = n === 1 ? 0 : lg.placeRadius;
+      bladeH = H - T - St;                                                         // round legs sit under the sub-base, if there is one
+      if (n > 1 && 2 * r1 * Math.sin(Math.PI / n) < t + 1) throw new Error('The legs overlap: put their centres at least ' + Math.ceil((t + 1) / (2 * Math.sin(Math.PI / n))) + ' mm from the middle');
+      if (r1 + t / 2 > base / 2) throw new Error('The legs stick out past the ' + baseName + ': centres at most ' + Math.floor(base / 2 - t / 2) + ' mm from the middle');
+    } else {
+      r2 = base / 2 - lg.fromEdge; r1 = r2 - L; bladeH = H - T;                    // blades tuck into sub-base cut-outs (Shane, 26 Nov) and run up to the top
+      if (r1 < 0) throw new Error('The legs (' + L + ' long, ' + lg.fromEdge + ' in from the edge) run past the centre of the ' + baseName);
+      if (n < 2) throw new Error('A table needs at least 2 blade legs');
+      var minR1 = n === 2 ? 0 : (t / 2) / Math.sin(Math.PI / n) + 2;
+      if (r1 < minR1) throw new Error('The legs touch in the middle: start them at least ' + Math.ceil(minR1) + ' mm from the centre (shorter legs or further in from the edge)');
+    }
     if (bladeH <= St) throw new Error('The height is less than the top and sub-base');
     var parts = [];
-    function part(name, qty, l, w, th, mat, note) { parts.push({ name: name, qty: qty, length: l, width: w, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '' }); }
+    function part(name, qty, l, w, th, mat, note, unit) { parts.push({ name: name, qty: qty, length: l, width: w, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '', unit: unit }); }
     part('Top (CNC blank)', 1, D + CNC_MARGIN, D + CNC_MARGIN, T, tp, 'CNC to Ø' + D + ' (+' + CNC_MARGIN + ' to clamp)' + (bevel ? '; ' + ang + '° mitre under the edge, ' + edge + ' left' : ''));
-    part('Sub-base (CNC blank)', 1, Ds + CNC_MARGIN, Ds + CNC_MARGIN, St, sb, 'CNC to Ø' + Ds + ' (+' + CNC_MARGIN + ' to clamp); ' + n + ' leg cut-outs, leg + ' + clr + ' all round');
-    part('Blade leg', n, bladeH, L, t, lg, 'both ends rounded R' + n2(t / 2) + ' (in plan)');
+    if (hasSub) part('Sub-base (CNC blank)', 1, Ds + CNC_MARGIN, Ds + CNC_MARGIN, St, sb, 'CNC to Ø' + Ds + ' (+' + CNC_MARGIN + ' to clamp)' + (round ? '' : '; ' + n + ' leg cut-outs, leg + ' + clr + ' all round'));
+    if (round) part('Leg', n, bladeH, t, t, lg, 'turned Ø' + t + ', round', 'm');
+    else part('Blade leg', n, bladeH, L, t, lg, 'both ends rounded R' + n2(t / 2) + ' (in plan)');
     var hw = [], hc = 1;
     if (fx.perLeg) hw.push({ code: 'H' + hc++, qty: fx.perLeg * n, name: fx.legItem || 'Leg fixing' });
     if (fx.topQty) hw.push({ code: 'H' + hc++, qty: fx.topQty, name: fx.topItem || 'Top fixing' });
     var angles = [];
     for (var i = 0; i < n; i++) angles.push(-Math.PI / 2 + i * 2 * Math.PI / n);   // first blade points to the back
     var den = pickScale(function (k) { return D * k <= 86 && H * k <= 78; });
-    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([tp, sb, lg]), D: D, H: H, T: T, St: St, Ds: Ds, n: n, t: t, L: L, r1: r1, r2: r2, clr: clr,
+    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([tp, hasSub ? sb : null, lg]), D: D, H: H, T: T, St: St, Ds: Ds, n: n, t: t, L: L, r1: r1, r2: r2, clr: clr,
+      round: round, hasSub: hasSub, base: base, baseName: baseName,
       bladeH: bladeH, edge: edge, bevel: bevel, ang: ang, angles: angles, parts: parts, hardware: hw, totals: totalsOf(parts),
       overall: { width: D, depth: D, height: H } };
   }
@@ -742,51 +756,64 @@
     var bh = m.bladeH * k, sbw = m.Ds * k, e = m.edge * k, b = m.bevel * k;
     var order = m.angles.slice().sort(function (a, c) { return Math.sin(a) - Math.sin(c); });  // back first
     order.forEach(function (a) {
-      var c = Math.cos(a), sn = Math.abs(Math.sin(a)), xs = [m.r1 * c, m.r2 * c].sort(function (p, q) { return p - q; });
+      var c = Math.cos(a), sn = m.round ? 1 : Math.abs(Math.sin(a)), xs = [m.r1 * c, m.r2 * c].sort(function (p, q) { return p - q; });
       var x0 = cx + (xs[0] - m.t / 2 * sn) * k, x1 = cx + (xs[1] + m.t / 2 * sn) * k;
       out += rect(x0, oy - bh, Math.max(x1 - x0, 0.4), bh, 0.3, Math.sin(a) > 0.01 ? FACE : OAK);
     });
-    out += rect(cx - sbw / 2, top + T, sbw, St, 0.3, '#d9d4c8', ' fill-opacity="0.85"');
+    if (m.hasSub) out += rect(cx - sbw / 2, top + T, sbw, St, 0.3, '#d9d4c8', ' fill-opacity="0.85"');
     out += poly2([[ox, top], [ox + D, top], [ox + D, top + e], [ox + D - b, top + T], [ox + b, top + T], [ox, top + e]], OAK, 0.35);
     out += hChain([ox, ox + D], [m.D], top - 5, top);
-    out += vChain([top + T, oy], [m.bladeH], ox + D + 5, ox + D) + text(ox + D + 3, top - 1.2, 'top ' + m.T + '; legs run up through the ' + m.St + ' sub-base', 1.8, { fill: '#555' });
+    out += vChain([oy - bh, oy], [m.bladeH], ox + D + 5, ox + D) + text(ox + D + 3, top - 1.2, 'top ' + m.T + (!m.hasSub ? '' : m.round ? '; sub-base ' + m.St : '; legs run up through the ' + m.St + ' sub-base'), 1.8, { fill: '#555' });
     out += vChain([top, oy], [m.H], ox + D + 12, ox + D);
     return out;
   }
   // plan; mode 'top' (client: top with the base dashed under it) or 'layout' (workshop: sub-base + legs)
   function tablePlan(s, m, cx, cy, mode) {
-    var k = m.k, R = m.D / 2 * k, Rs = m.Ds / 2 * k, out = '';
+    var k = m.k, R = m.D / 2 * k, Rs = m.base / 2 * k, out = '';
     if (mode === 'top') {
       out += circle(cx, cy, R, OAK, 0.35);
       if (m.bevel) out += circle(cx, cy, R - m.bevel * k, 'none', 0.15, DASH);
-      out += circle(cx, cy, Rs, 'none', 0.2, DASH);
+      if (m.hasSub) out += circle(cx, cy, Rs, 'none', 0.2, DASH);
       m.angles.forEach(function (a) { out += bladePlan(m, cx, cy, a, k, 'none', DASH); });
       out += hChain([cx - R, cx + R], [m.D], cy - R - 5, cy - R);
       out += text(cx, cy + R + 4.5, 'base shown dashed', 1.8, { anchor: 'middle', fill: '#666' });
       return out;
     }
-    out += circle(cx, cy, Rs, '#efebe3', 0.35);
-    m.angles.forEach(function (a) { out += bladePlan(m, cx, cy, a, k, '#fff', '', m.clr) + bladePlan(m, cx, cy, a, k, OAK, ' fill-opacity="0.55"'); });
-    out += text(cx + Rs + 6, cy + Rs - 6, 'leg cut-outs right through', 1.8, { fill: '#555' }) + text(cx + Rs + 6, cy + Rs - 3.6, 'the sub-base: leg + ' + m.clr + ' mm all round', 1.8, { fill: '#555' });
+    out += circle(cx, cy, Rs, m.hasSub ? '#efebe3' : '#e6d3b6', 0.35);
+    if (!m.hasSub && m.bevel) out += circle(cx, cy, Rs - m.bevel * k, 'none', 0.15, DASH);
+    if (m.round) {
+      if (m.n > 1) out += circle(cx, cy, m.r1 * k, 'none', 0.15, DASH);
+      m.angles.forEach(function (a) { out += circle(cx + Math.cos(a) * m.r1 * k, cy + Math.sin(a) * m.r1 * k, m.t / 2 * k, OAK, 0.3); });
+    } else if (m.hasSub) {
+      m.angles.forEach(function (a) { out += bladePlan(m, cx, cy, a, k, '#fff', '', m.clr) + bladePlan(m, cx, cy, a, k, OAK, ' fill-opacity="0.55"'); });
+      out += text(cx + Rs + 6, cy + Rs - 6, 'leg cut-outs right through', 1.8, { fill: '#555' }) + text(cx + Rs + 6, cy + Rs - 3.6, 'the sub-base: leg + ' + m.clr + ' mm all round', 1.8, { fill: '#555' });
+    } else m.angles.forEach(function (a) { out += bladePlan(m, cx, cy, a, k, OAK); });
     out += circle(cx, cy, 0.5, '#111', 0.1);
     var a0 = m.angles[0];
-    out += vChain([cy - Rs, cy - m.r2 * k, cy - m.r1 * k], [s.legs.fromEdge, m.L], cx + m.t / 2 * k + 6, cx);
-    out += hChain([cx - Rs, cx + Rs], [m.Ds], cy + Rs + 5, cy + Rs);
+    if (m.round) out += text(cx + Rs + 6, cy - 2, m.n + ' legs Ø' + m.t + (m.n > 1 ? ', centres on R' + m.r1 : ''), 1.9, { fill: '#333' }) + text(cx + Rs + 6, cy + 1, (m.hasSub ? 'under the sub-base' : 'fixed to the underside of the top'), 1.8, { fill: '#555' });
+    else out += vChain([cy - Rs, cy - m.r2 * k, cy - m.r1 * k], [s.legs.fromEdge, m.L], cx + m.t / 2 * k + 6, cx);
+    out += hChain([cx - Rs, cx + Rs], [m.base], cy + Rs + 5, cy + Rs);
     if (m.n > 2) {                                                                 // angle between blades
       var ra = (m.r1 + m.L * 0.25) * k, a1 = m.angles[1], p0 = [cx + Math.cos(a0) * ra, cy + Math.sin(a0) * ra], p1 = [cx + Math.cos(a1) * ra, cy + Math.sin(a1) * ra];
       out += '<path d="M' + n2(p0[0]) + ',' + n2(p0[1]) + ' A' + n2(ra) + ' ' + n2(ra) + ' 0 0 1 ' + n2(p1[0]) + ',' + n2(p1[1]) + '" fill="none" stroke="#111" stroke-width="0.18"/>';
       var am = (a0 + a1) / 2;
       out += text(cx + Math.cos(am) * (ra + 3), cy + Math.sin(am) * (ra + 3), n2(360 / m.n) + '°', 2, { anchor: 'middle' });
     }
-    var a1b = m.angles[1], mid = (m.r1 + m.r2) / 2 * k, off = m.t / 2 * k + 2.2;
-    out += text(cx + Math.cos(a1b) * mid - Math.sin(a1b) * off, cy + Math.sin(a1b) * mid + Math.cos(a1b) * off + 0.7, m.t + ' thick', 1.9, { anchor: 'middle', rotate: a1b * 180 / Math.PI });
+    var a1b = m.angles[1 % m.n], mid = (m.r1 + m.r2) / 2 * k, off = m.t / 2 * k + 2.2;
+    if (!m.round) out += text(cx + Math.cos(a1b) * mid - Math.sin(a1b) * off, cy + Math.sin(a1b) * mid + Math.cos(a1b) * off + 0.7, m.t + ' thick', 1.9, { anchor: 'middle', rotate: a1b * 180 / Math.PI });
     var aR = m.angles[m.n - 1] + Math.PI / m.n, ex = cx + Math.cos(aR) * Rs, ey = cy + Math.sin(aR) * Rs;
-    out += line(cx, cy, ex, ey, 0.18) + text(cx + Math.cos(aR) * Rs * 0.6, cy + Math.sin(aR) * Rs * 0.6 - 1.2, 'R' + n2(m.Ds / 2), 2, { anchor: 'middle' });
+    out += line(cx, cy, ex, ey, 0.18) + text(cx + Math.cos(aR) * Rs * 0.6, cy + Math.sin(aR) * Rs * 0.6 - 1.2, 'R' + n2(m.base / 2), 2, { anchor: 'middle' });
     return out;
   }
   // one blade, elevation (height x length), plus its plan below; (ox, oy) = bottom-left
   function tableBlade(s, m, ox, oy) {
     var k = m.k, L = m.L * k, h = m.bladeH * k, t = m.t * k, out = '';
+    if (m.round) {
+      out += rect(ox, oy - h, t, h, 0.35, OAK) + line(ox + t * 0.3, oy - h, ox + t * 0.3, oy, 0.12) + line(ox + t * 0.75, oy - h, ox + t * 0.75, oy, 0.12);
+      out += hChain([ox, ox + t], ['Ø' + m.t], oy - h - 5, oy - h) + vChain([oy - h, oy], [m.bladeH], ox + t + 5, ox + t);
+      out += circle(ox + t / 2, oy + 4 + t / 2, t / 2, OAK, 0.3) + text(ox + t + 3, oy + 4 + t / 2 + 0.7, 'turned, round', 1.8, { fill: '#555' });
+      return out;
+    }
     out += rect(ox, oy - h, L, h, 0.35, OAK);
     out += line(ox + t / 2, oy - h, ox + t / 2, oy, 0.15, DASH) + line(ox + L - t / 2, oy - h, ox + L - t / 2, oy, 0.15, DASH);
     out += text(ox + L / 2, oy - h / 2, 'end grain rounded', 1.7, { anchor: 'middle', fill: '#555' });
@@ -802,7 +829,8 @@
   function tableEdge(s, m, ox, oy) {
     var k = 0.5, T = m.T * k, e = m.edge * k, b = m.bevel * k, w = Math.max(m.bevel + 40, 60) * k, St = m.St * k, gap = (m.D - m.Ds) / 2 * k, out = '';
     out += poly2([[ox, oy], [ox + w, oy], [ox + w, oy + T], [ox + b, oy + T], [ox, oy + e]], OAK, 0.35);
-    if (gap < w) out += rect(ox + gap, oy + T, w - gap, St, 0.3, '#d9d4c8');  // (legs: see the layout)
+    if (!m.hasSub) out += '';
+    else if (gap < w) out += rect(ox + gap, oy + T, w - gap, St, 0.3, '#d9d4c8');  // (legs: see the layout)
     else out += text(ox, oy + T + 10, 'sub-base starts ' + n2((m.D - m.Ds) / 2) + ' in from the edge', 1.8, { fill: '#555' });
     out += vChain([oy, oy + e], [m.edge], ox - 4, ox) + vChain([oy, oy + T], [m.T], ox + w + 4, ox + w);
     if (b) out += hChain([ox, ox + b], [m.bevel], oy + T + 4, oy + T) + text(ox + b + 2, oy + T - 1, m.ang + '°', 2);
@@ -819,7 +847,14 @@
       [m.r1, m.r2].forEach(function (r) { [1, -1].forEach(function (sg) { [0, m.bladeH].forEach(function (y) { pts.push(P(ca * r + sg * nx, y, sa * r + sg * nz)); }); }); });
       return { depth: ca + sa, pts: pts };
     }).sort(function (p, q) { return p.depth - q.depth; });
-    blades.forEach(function (b) { out += poly2(hull(b.pts), '#c4a378', 0.3); });
+    if (m.round) {
+      var lr = m.t / 2, erx = lr * Math.SQRT2 * c * sc, ery = lr * Math.SQRT2 * sn * sc, top = H - m.T - m.St;
+      m.angles.map(function (a) { return { x: Math.cos(a) * m.r1, z: Math.sin(a) * m.r1 }; }).sort(function (p, q) { return (p.x + p.z) - (q.x + q.z); }).forEach(function (L) {
+        var b0 = P(L.x, 0, L.z), t0 = P(L.x, top, L.z);
+        out += '<path d="M' + n2(t0[0] - erx) + ',' + n2(t0[1]) + ' L' + n2(b0[0] - erx) + ',' + n2(b0[1]) + ' A' + n2(erx) + ' ' + n2(ery) + ' 0 0 0 ' + n2(b0[0] + erx) + ',' + n2(b0[1]) + ' L' + n2(t0[0] + erx) + ',' + n2(t0[1]) + ' Z" fill="#c4a378" stroke="#111" stroke-width="0.3"/>';
+      });
+      blades = [{ pts: [P(0, 0, m.r1 + lr)] }];
+    } else blades.forEach(function (b) { out += poly2(hull(b.pts), '#c4a378', 0.3); });
     var top = P(0, H, 0), bot = P(0, H - m.T, 0);
     out += '<path d="M' + n2(top[0] - rx) + ',' + n2(top[1]) + ' L' + n2(bot[0] - rx) + ',' + n2(bot[1]) + ' A' + n2(rx) + ' ' + n2(ry) + ' 0 0 0 ' + n2(bot[0] + rx) + ',' + n2(bot[1]) +
       ' L' + n2(top[0] + rx) + ',' + n2(top[1]) + ' Z" fill="#b8956a" stroke="#111" stroke-width="0.3"/>';
@@ -838,10 +873,10 @@
     },
     workshopViews: function (s, m) {
       var k = m.k;
-      return tablePlan(s, m, 24 + m.Ds * k / 2 + 4, 110 - m.Ds * k / 2, 'layout') + viewTitle(24, 124, 1, 'SUB-BASE & LEG LAYOUT', m.scale) +
-        tableBlade(s, m, 150, 96) + viewTitle(150, 124, 2, 'BLADE LEG (make ' + m.n + ')', m.scale) +
+      return tablePlan(s, m, 24 + m.base * k / 2 + 4, 110 - m.base * k / 2, 'layout') + viewTitle(24, 124, 1, (m.hasSub ? 'SUB-BASE' : 'UNDERSIDE') + ' & LEG LAYOUT', m.scale) +
+        tableBlade(s, m, 150, 96) + viewTitle(150, 124, 2, (m.round ? 'LEG' : 'BLADE LEG') + ' (make ' + m.n + ')', m.scale) +
         tableEdge(s, m, 236, 40) + viewTitle(232, 124, 3, 'EDGE DETAIL', '1:2') +
-        tableFront(s, m, 24, 196) + viewTitle(24 + m.D * k + 22, 196, 4, 'FRONT VIEW', m.scale);
+        tableFront(s, m, 150, 200) + viewTitle(150 + m.D * k + 22, 200, 4, 'FRONT VIEW', m.scale);
     }
   };
 
