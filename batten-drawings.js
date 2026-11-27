@@ -1002,7 +1002,7 @@
   // leg sits in the d x d opening closed by the two aprons, the side rail and the block, and runs
   // up to the top of the frame (under the desk top). Rails, divider and blocks are the full frame
   // height: apron - wave. One drawer box per bay on undermount runners, the bay less the runner
-  // clearance each side, against the back apron, `raise` above the bottom of the rails.
+  // clearance each side, directly behind its drawer face, `raise` above the bottom of the rails.
   function arches(len, pitch) { return Math.max(1, Math.round(len / pitch)); }
   // bottom edge from x0 to x1 (paper), base line y (paper, the lowest point), arch depth d (paper)
   function wavePath(x0, x1, y, flat0, flat1, n, d) {
@@ -1127,7 +1127,7 @@
     legs.forEach(function (p) { out += circle(ox + p[0], oy + p[1], d / 2, OAK, 0.3); });
     var bx = ox + ta + d + rt;
     for (var b = 0; b < m.n; b++) {
-      var bz = oy + ta;                                                                                    // against the back apron
+      var bz = oy + D - ta - m.boxLen * k;                                                                 // directly behind the drawer face
       out += rect(bx + m.clr * k, bz, m.boxW * k, m.boxLen * k, 0.25, 'none', DASH) + text(bx + m.bay * k / 2, bz + m.boxLen * k / 2, 'drawer ' + (b + 1), 1.8, { anchor: 'middle', fill: '#555' });
       if (b < m.n - 1) out += rect(bx + m.bay * k, oy + ta, rt, m.depthIn * k, 0.25, VENEER);
       bx += (m.bay + m.rt) * k;
@@ -1136,7 +1136,7 @@
     out += hChain([ox, ox + W], [m.W], oy - 9, oy);
     out += hChain([ox, ox + ta, ox + ta + d, ox + ta + d + rt, ox + W - ta - d - rt, ox + W - ta - d, ox + W - ta, ox + W], [m.ta, m.d, m.rt, n2(m.W - 2 * (m.ta + m.d + m.rt)), m.rt, m.d, m.ta], oy - 4, oy);
     out += vChain([oy, oy + ta, oy + ta + d, oy + ta + d + rt, oy + D - ta - d - rt, oy + D - ta - d, oy + D - ta, oy + D], [m.ta, m.d, m.rt, n2(m.D - 2 * (m.ta + m.d + m.rt)), m.rt, m.d, m.ta], ox + W + 5, ox + W);
-    out += vChain([oy + ta, oy + ta + m.boxLen * k], [m.boxLen], ox - 5, ox);
+    out += vChain([oy + D - ta - m.boxLen * k, oy + D - ta], [m.boxLen], ox - 5, ox);
     out += hChain([ox + ta + d + rt + m.clr * k, ox + ta + d + rt + m.clr * k + m.boxW * k], [n2(m.boxW)], oy + D + 5, oy + D);
     return out;
   }
