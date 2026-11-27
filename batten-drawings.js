@@ -1255,6 +1255,12 @@
       fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals, overall: { width: Math.max(W, st.frontWidth, bk.width), depth: Math.max(D, z1), height: overall } };
   }
   var FABRIC = '#b9c29a', FABRIC_D = '#a3ad84';
+  // seat cushion in elevation: rounded along the top edge, straight sides down to a flat bottom
+  function seatShape(x, y, w, h, r) {
+    r = Math.min(r, h, w / 2);
+    return '<path d="M' + n2(x) + ',' + n2(y + h) + ' L' + n2(x) + ',' + n2(y + r) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + r) + ',' + n2(y) +
+      ' L' + n2(x + w - r) + ',' + n2(y) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + w) + ',' + n2(y + r) + ' L' + n2(x + w) + ',' + n2(y + h) + ' Z" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+  }
   // front (client: with upholstery; workshop: frame only); (ox, oy) = left edge of the frame at floor level
   function chairFront(s, m, ox, oy, upholstery) {
     var k = m.k, W = m.W * k, cx = ox + W / 2, out = '', st = s.seat, bk = s.back;
@@ -1265,7 +1271,7 @@
     out += rect(ox + m.lw * k, oy - m.lh * k, m.railLen * k, m.rh * k, 0.3, FACE);
     if (upholstery) {
       var sw = st.frontWidth * k, sy = oy - m.seatTop * k;
-      out += '<rect x="' + n2(cx - sw / 2) + '" y="' + n2(sy) + '" width="' + n2(sw) + '" height="' + n2(st.thickness * k) + '" rx="' + n2(st.thickness * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+      out += seatShape(cx - sw / 2, sy, sw, st.thickness * k, st.thickness * k / 2);
       out += '<ellipse cx="' + n2(cx) + '" cy="' + n2(oy - (m.backBottom + bk.height / 2) * k) + '" rx="' + n2(bk.width * k / 2) + '" ry="' + n2(bk.height * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
       out += hChain([cx - bk.width * k / 2, cx + bk.width * k / 2], [bk.width], oy - m.oh * k - 5, oy - m.oh * k);
       out += hChain([cx - sw / 2, cx + sw / 2], [st.frontWidth], sy + st.thickness * k + 4, sy + st.thickness * k);
@@ -1291,7 +1297,7 @@
     out += rect(ox + D - m.ld * k, oy - m.lh * k, m.ld * k, m.lh * k, 0.3, OAK);
     out += rect(ox + m.railZ * k, oy - m.lh * k, m.rt * k, m.rh * k, 0.15, 'none', DASH);
     if (upholstery) {
-      out += '<rect x="' + n2(ox + m.pt * k) + '" y="' + n2(oy - m.seatTop * k) + '" width="' + n2(st.depth * k) + '" height="' + n2(st.thickness * k) + '" rx="' + n2(st.thickness * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+      out += seatShape(ox + m.pt * k, oy - m.seatTop * k, st.depth * k, st.thickness * k, st.thickness * k / 2);
       out += '<rect x="' + n2(ox + m.pt * k) + '" y="' + n2(oy - (m.backBottom + bk.height) * k) + '" width="' + n2(bk.thickness * k) + '" height="' + n2(bk.height * k) + '" rx="' + n2(bk.thickness * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
       out += hChain([ox + m.pt * k, ox + (m.pt + st.depth) * k], [st.depth], oy - m.seatTop * k - 4, oy - m.seatTop * k);
       out += hChain([ox + m.pt * k, ox + (m.pt + bk.thickness) * k], [bk.thickness], oy - m.oh * k - 4, oy - m.oh * k);
@@ -1362,7 +1368,7 @@
     }
     function cushion(pts2, y0, y1, r) {               // flat cushion in plan, edges rounded r
       var ym = (y0 + y1) / 2, all = [];
-      [[0, r], [0.2, r * 0.4], [0.5, 0], [0.8, r * 0.4], [1, r]].forEach(function (q) {
+      [[0, 0], [0.5, 0], [0.8, r * 0.4], [1, r]].forEach(function (q) {
         inset(pts2, q[1]).forEach(function (p) { all.push(P(p[0], y0 + (y1 - y0) * q[0], p[1])); });
       });
       var top = inset(pts2, r).map(function (p) { return P(p[0], y1, p[1]); });
