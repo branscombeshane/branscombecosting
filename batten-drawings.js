@@ -1265,7 +1265,7 @@
     out += rect(ox + m.lw * k, oy - m.lh * k, m.railLen * k, m.rh * k, 0.3, FACE);
     if (upholstery) {
       var sw = st.frontWidth * k, sy = oy - m.seatTop * k;
-      out += '<rect x="' + n2(cx - sw / 2) + '" y="' + n2(sy) + '" width="' + n2(sw) + '" height="' + n2(st.thickness * k) + '" rx="' + n2(Math.min(st.thickness * k / 2, 3)) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+      out += '<rect x="' + n2(cx - sw / 2) + '" y="' + n2(sy) + '" width="' + n2(sw) + '" height="' + n2(st.thickness * k) + '" rx="' + n2(st.thickness * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
       out += '<ellipse cx="' + n2(cx) + '" cy="' + n2(oy - (m.backBottom + bk.height / 2) * k) + '" rx="' + n2(bk.width * k / 2) + '" ry="' + n2(bk.height * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
       out += hChain([cx - bk.width * k / 2, cx + bk.width * k / 2], [bk.width], oy - m.oh * k - 5, oy - m.oh * k);
       out += hChain([cx - sw / 2, cx + sw / 2], [st.frontWidth], sy + st.thickness * k + 4, sy + st.thickness * k);
@@ -1356,17 +1356,33 @@
       var all = []; pts2.forEach(function (p) { all.push(P(p[0], y0, p[1])); all.push(P(p[0], y1, p[1])); });
       return poly2(hull(all), fill, 0.3) + poly2(pts2.map(function (p) { return P(p[0], y1, p[1]); }), top || fill, 0.3);
     }
+    function inset(pts, dd) {
+      var c0 = pts.reduce(function (a, p) { return [a[0] + p[0] / pts.length, a[1] + p[1] / pts.length]; }, [0, 0]);
+      return pts.map(function (p) { var dx = p[0] - c0[0], dy = p[1] - c0[1], L = Math.hypot(dx, dy) || 1; return [c0[0] + dx * (1 - dd / L), c0[1] + dy * (1 - dd / L)]; });
+    }
+    function cushion(pts2, y0, y1, r) {               // flat cushion in plan, edges rounded r
+      var ym = (y0 + y1) / 2, all = [];
+      [[0, r], [0.2, r * 0.4], [0.5, 0], [0.8, r * 0.4], [1, r]].forEach(function (q) {
+        inset(pts2, q[1]).forEach(function (p) { all.push(P(p[0], y0 + (y1 - y0) * q[0], p[1])); });
+      });
+      var top = inset(pts2, r).map(function (p) { return P(p[0], y1, p[1]); });
+      return poly2(hull(all), FABRIC_D, 0.3) + '<path d="M' + top.map(function (q) { return n2(q[0]) + ',' + n2(q[1]); }).join(' L') + ' Z" fill="' + FABRIC + '" stroke="none"/>';
+    }
     function box(x0b, x1b, y0, y1, z0, z1, fill) { return prism([[x0b, z0], [x1b, z0], [x1b, z1], [x0b, z1]], y0, y1, fill, '#d6b88f'); }
     var out = '', pl = m.W / 2 - m.postsW / 2, st = s.seat, bk = s.back;
     out += box(pl, pl + m.pw, 0, m.H, 0, m.pt, '#c4a378') + box(pl + m.pw + m.gap, pl + m.postsW, 0, m.H, 0, m.pt, '#c4a378');
     // back pad: oval in the x-y plane, in front of the posts
-    var bcx = m.W / 2, bcy = m.backBottom + bk.height / 2, ring0 = [], ring1 = [];
-    for (var i = 0; i < 40; i++) { var t = i / 40 * 2 * Math.PI, x = bcx + bk.width / 2 * Math.cos(t), y = bcy + bk.height / 2 * Math.sin(t); ring0.push(P(x, y, m.pt)); ring1.push(P(x, y, m.pt + bk.thickness)); }
-    out += poly2(hull(ring0.concat(ring1)), FABRIC_D, 0.3) + poly2(ring1, FABRIC, 0.3);
+    var bcx = m.W / 2, bcy = m.backBottom + bk.height / 2, rr = bk.thickness / 2, all = [], face = [];
+    for (var i = 0; i < 48; i++) {
+      var t = i / 48 * 2 * Math.PI, ct = Math.cos(t), stt = Math.sin(t);
+      [[0, rr], [0.2, rr * 0.4], [0.5, 0], [0.8, rr * 0.4], [1, rr]].forEach(function (q) { all.push(P(bcx + (bk.width / 2 - q[1]) * ct, bcy + (bk.height / 2 - q[1]) * stt, m.pt + bk.thickness * q[0])); });
+      face.push(P(bcx + (bk.width / 2 - rr) * ct, bcy + (bk.height / 2 - rr) * stt, m.pt + bk.thickness));
+    }
+    out += poly2(hull(all), FABRIC_D, 0.3) + '<path d="M' + face.map(function (q) { return n2(q[0]) + ',' + n2(q[1]); }).join(' L') + ' Z" fill="' + FABRIC + '" stroke="none"/>';
     out += box(m.W / 2 - m.rt / 2, m.W / 2 + m.rt / 2, m.lh - m.rh, m.lh, m.pt, m.railZ, '#c4a378');
     out += box(m.lw, m.W - m.lw, m.lh - m.rh, m.lh, m.railZ, m.railZ + m.rt, '#c4a378');
     out += box(0, m.lw, 0, m.lh, m.D - m.ld, m.D, '#c4a378') + box(m.W - m.lw, m.W, 0, m.lh, m.D - m.ld, m.D, '#c4a378');
-    out += prism(m.seatPts, m.lh, m.seatTop, FABRIC_D, FABRIC);
+    out += cushion(m.seatPts, m.lh, m.seatTop, st.thickness / 2);
     var tS = P(m.W / 2, m.seatTop, m.pt + st.depth * 0.5), tB = P(m.W / 2, bcy, m.pt + bk.thickness), tL = P(m.W - m.lw / 2, m.lh * 0.4, m.D);
     out += tag(tS[0], tS[1], s.upholstery.fabric.code) + tag(tB[0], tB[1], s.upholstery.fabric.code) + tag(tL[0] + 5, tL[1], s.frontLegs.code);
     return out;
