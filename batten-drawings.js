@@ -995,15 +995,18 @@
   // Desk / console on legs with drawers (from AOC1675 Quinn Wavey Desk): a solid top on an apron
   // box; the sides and back are aprons mitred 45° at the corners, the front is the drawer faces
   // (mitred at the outer ends, a gap between them, a gap under the top). Every apron and face can
-  // have an arched (wavy) bottom edge, cut on the CNC, with a flat at each corner. Round legs sit
-  // inside the corners against the aprons and run up to the top. Inside: a runner rail along each
-  // side between the legs and a divider between drawers, front to back; one drawer box per bay on
-  // undermount runners, the bay less the runner clearance each side.
+  // have a smooth wavy bottom edge (rounded up and down), cut on the CNC, with a flat at each
+  // corner. A frame (rails.thickness thick) sits inside the aprons at the bottom, just above the
+  // waves: front, back and side rails ta + d in from the outside, so each leg drops into a d x d
+  // pocket closed by the two aprons and the frame, and runs up to the underside of the top.
+  // Runner rails (inside the side frame rails) and dividers stand on the frame up to the top:
+  // height = apron - wave - frame. One drawer box per bay on undermount runners, the bay less the
+  // runner clearance each side, sitting against the back apron.
   function arches(len, pitch) { return Math.max(1, Math.round(len / pitch)); }
   // bottom edge from x0 to x1 (paper), base line y (paper, the lowest point), arch depth d (paper)
   function wavePath(x0, x1, y, flat0, flat1, n, d) {
     var a = x0 + flat0, b = x1 - flat1, w = (b - a) / n, pts = [[x0, y], [a, y]];
-    for (var i = 0; i < n; i++) for (var j = 1; j <= 16; j++) { var u = j / 16; pts.push([a + (i + u) * w, y - d * Math.sqrt(Math.max(0, 1 - Math.pow(2 * u - 1, 2)))]); }
+    for (var i = 0; i < n; i++) for (var j = 1; j <= 24; j++) { var u = j / 24; pts.push([a + (i + u) * w, y - d * (1 - Math.cos(2 * Math.PI * u)) / 2]); }   // smooth: rounded up and down
     pts.push([x1, y]);
     return pts;
   }
@@ -1011,12 +1014,14 @@
     var W = s.width, D = s.depth, H = s.height, tp = s.top, ap = s.apron, fc = s.faces, lg = s.legs, rl = s.rails, wv = s.wave || {}, dr = s.drawers, rn = s.runners;
     var T = tp.thickness, A = ap.height, ta = ap.thickness, n = dr.count, g = fc.gap, tg = fc.topGap, d = lg.diameter, rt = rl.thickness;
     var faceH = A - tg, fw = (W - (n - 1) * g) / n, legH = H - T, inner = W - 2 * (ta + d + rt), bay = (inner - (n - 1) * rt) / n;
-    var depthIn = D - 2 * ta, railLen = D - 2 * (ta + d), clr = rn.sideClearance, bt = dr.box.thickness, boxW = bay - 2 * clr, boxIn = boxW - 2 * bt, boxLen = rn.boxLength;
+    var depth0 = (s.wave || {}).depth || 0, rh = A - depth0 - rt, frameIn = D - 2 * (ta + d + rt);
+    var depthIn = D - 2 * ta, railLen = frameIn, clr = rn.sideClearance, bt = dr.box.thickness, boxW = bay - 2 * clr, boxIn = boxW - 2 * bt, boxLen = rn.boxLength;
     var depth = wv.depth || 0, pitch = wv.pitch || 90, flat = wv.cornerFlat == null ? ta : wv.cornerFlat;
     if (n < 1) throw new Error('A desk needs at least 1 drawer');
     if (boxW < 100) throw new Error('The drawer bays are only ' + Math.round(bay) + ' wide: fewer drawers or a wider desk');
     if (boxLen > depthIn - rt) throw new Error('Drawer boxes ' + boxLen + ' long do not fit the ' + depthIn + ' inside depth');
-    if (dr.box.height + 2 * (dr.box.raise || 0) > A - depth - tg) throw new Error('Drawer boxes ' + dr.box.height + ' high do not fit under the waves (apron ' + A + ' less wave ' + depth + ')');
+    if (dr.box.height + (dr.box.raise || 0) > rh) throw new Error('Drawer boxes ' + dr.box.height + ' high (+' + (dr.box.raise || 0) + ' above the frame) do not fit: ' + rh + ' between the frame and the top');
+    if (frameIn < 50) throw new Error('The desk is too shallow for the frame and legs');
     if (legH <= A) throw new Error('The height is less than the top and the aprons');
     var parts = [], cnc = depth > 0;
     function part(name, qty, l, w, th, mat, note, unit) { parts.push({ name: name, qty: qty, length: l, width: w, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '', unit: unit }); }
@@ -1026,8 +1031,11 @@
     part('Side apron' + (cnc ? ' (CNC blank)' : ''), 2, D + M, A + M, ta, ap, wnote + 'finished ' + D + ' x ' + A + '; 45° mitre both ends');
     part('Back apron' + (cnc ? ' (CNC blank)' : ''), 1, W + M, A + M, ta, ap, (wv.back === false ? '' : wnote) + 'finished ' + W + ' x ' + A + '; 45° mitre both ends');
     part('Leg', 4, legH, d, d, lg, 'turned Ø' + d + ', round', 'm');
-    part('Runner rail', 2, railLen, rl.height, rt, rl, 'between the legs, inside the side aprons');
-    if (n > 1) part('Divider', n - 1, depthIn, rl.height, rt, rl, 'front to back between drawers');
+    part('Frame rail, front/back', 2, W - 2 * ta, rt, rt, rl, 'inside the aprons, ' + (ta + d) + ' in from the outside; closes the leg pockets');
+    part('Frame rail, side', 2, frameIn, rt, rt, rl, 'between the front and back frame rails');
+    if (n > 1) part('Frame rail, under divider', n - 1, frameIn, rt, rt, rl, 'between the front and back frame rails');
+    part('Runner rail', 2, frameIn, rh, rt, rl, 'stands on the side frame rail, up to the top');
+    if (n > 1) part('Divider', n - 1, frameIn, rh, rt, rl, 'stands on the frame between drawers, up to the top');
     var bb = dr.bottom || dr.box;
     part('Drawer box side', 2 * n, boxLen, dr.box.height, bt, dr.box);
     part('Drawer box front/back', 2 * n, n2(boxIn), dr.box.height, bt, dr.box);
@@ -1036,7 +1044,7 @@
     if (s.handles && s.handles.item && s.handles.qty) hw.push({ code: 'H2', qty: s.handles.qty * n, name: s.handles.item });
     var den = pickScale(function (k) { return W * k <= 132 && H * k <= 78 && D * k <= 62; });
     return { scale: '1:' + den, k: 1 / den, materials: materialsOf([tp, fc, ap, lg, rl, dr.box, bb]), W: W, D: D, H: H, T: T, A: A, ta: ta, n: n, g: g, tg: tg, d: d, rt: rt,
-      faceH: faceH, fw: fw, legH: legH, inner: inner, bay: bay, depthIn: depthIn, railLen: railLen, clr: clr, bt: bt, boxW: boxW, boxIn: boxIn, boxLen: boxLen,
+      faceH: faceH, fw: fw, legH: legH, inner: inner, bay: bay, depthIn: depthIn, railLen: railLen, clr: clr, rh: rh, frameIn: frameIn, bt: bt, boxW: boxW, boxIn: boxIn, boxLen: boxLen,
       wave: depth, pitch: pitch, flat: flat, waveBack: wv.back !== false, parts: parts, hardware: hw, totals: totalsOf(parts), overall: { width: W, depth: D, height: H } };
   }
   // front elevation; (ox, oy) = left end at floor level. section = faces off (carcass)
@@ -1061,8 +1069,10 @@
     // carcass: back apron seen from the front, rails/dividers in section, drawer boxes
     var back = m.wave && m.waveBack ? wavePath(ox, ox + W, ab, m.flat * k, m.flat * k, arches(m.W - 2 * m.flat, m.pitch), wd) : [[ox, ab], [ox + W, ab]];
     out += poly2([[ox, top + T]].concat(back).concat([[ox + W, top + T]]), '#efe6d6', 0.25);
-    var rx0 = ox + ta + d, rh = s.rails.height * k;
+    var rx0 = ox + ta + d, rh = m.rh * k, fy = top + T + rh;
+    out += rect(ox + ta, fy, W - 2 * ta, m.rt * k, 0.3, '#c8aa80') + text(ox + W / 2, fy + m.rt * k - 0.5, 'frame', 1.5, { anchor: 'middle', fill: '#333' });
     out += rect(rx0, top + T, m.rt * k, rh, 0.3, VENEER) + rect(ox + W - ta - d - m.rt * k, top + T, m.rt * k, rh, 0.3, VENEER);
+    out += rect(ox + ta, top + T, d, A - m.wave * k, 0.2, OAK, ' fill-opacity="0.6"') + rect(ox + W - ta - d, top + T, d, A - m.wave * k, 0.2, OAK, ' fill-opacity="0.6"');
     var bx = rx0 + m.rt * k;
     for (var b = 0; b < m.n; b++) {
       var by = top + T + rh - (s.drawers.box.raise || 0) * k - s.drawers.box.height * k;
@@ -1077,8 +1087,8 @@
     cx.push(p += m.rt * k); cv.push(m.rt); cx.push(p += m.d * k); cv.push(m.d); cx.push(ox + W); cv.push(m.ta);
     out += hChain(cx, cv, top - 4, top);
     var bt0 = top + T + rh - (s.drawers.box.raise || 0) * k - s.drawers.box.height * k;
-    out += vChain([top + T, bt0, bt0 + s.drawers.box.height * k, top + T + rh], [n2(s.rails.height - s.drawers.box.height - (s.drawers.box.raise || 0)), s.drawers.box.height, s.drawers.box.raise || 0], ox - 5, ox);
-    out += vChain([top, top + T, top + T + rh, ab, oy], [m.T, s.rails.height, m.A - s.rails.height, n2(m.legH - m.A)], ox + W + 5, ox + W);
+    out += vChain([top + T, bt0, bt0 + s.drawers.box.height * k, top + T + rh], [n2(m.rh - s.drawers.box.height - (s.drawers.box.raise || 0)), s.drawers.box.height, s.drawers.box.raise || 0], ox - 5, ox);
+    out += vChain([top, top + T, fy, fy + m.rt * k, ab, oy], [m.T, n2(m.rh), m.rt, m.wave, n2(m.legH - m.A)], ox + W + 5, ox + W);
     out += text(ox + W / 2, ab + 4, 'back apron, seen from the front', 1.7, { anchor: 'middle', fill: '#555' });
     return out;
   }
@@ -1114,18 +1124,22 @@
       out += poly2([[x, oy + D], [x + w, oy + D], [x + w - r0, oy + D - ta], [x + l0, oy + D - ta]], '#d2b48b', 0.3);
       x += w + m.g * k;
     }
+    var fz = oy + ta + d, fl = W - 2 * ta;                                                                  // frame
+    out += rect(ox + ta, fz, fl, rt, 0.25, '#c8aa80') + rect(ox + ta, oy + D - ta - d - rt, fl, rt, 0.25, '#c8aa80');
+    out += rect(ox + ta + d, fz + rt, rt, m.frameIn * k, 0.25, '#c8aa80') + rect(ox + W - ta - d - rt, fz + rt, rt, m.frameIn * k, 0.25, '#c8aa80');
     legs.forEach(function (p) { out += circle(ox + p[0], oy + p[1], d / 2, OAK, 0.3); });
-    out += rect(ox + ta + d, oy + ta + d, rt, m.railLen * k, 0.25, VENEER) + rect(ox + W - ta - d - rt, oy + ta + d, rt, m.railLen * k, 0.25, VENEER);
     var bx = ox + ta + d + rt;
     for (var b = 0; b < m.n; b++) {
-      var bz = oy + ta + (m.depthIn * k - m.boxLen * k) / 2;
+      var bz = oy + ta;                                                                                    // against the back apron
       out += rect(bx + m.clr * k, bz, m.boxW * k, m.boxLen * k, 0.25, 'none', DASH) + text(bx + m.bay * k / 2, bz + m.boxLen * k / 2, 'drawer ' + (b + 1), 1.8, { anchor: 'middle', fill: '#555' });
       if (b < m.n - 1) out += rect(bx + m.bay * k, oy + ta, rt, m.depthIn * k, 0.25, VENEER);
       bx += (m.bay + m.rt) * k;
     }
-    out += text(ox + W - 1, oy - 1.5, '45° mitred corners', 1.8, { anchor: 'end', fill: '#555' });
-    out += hChain([ox, ox + W], [m.W], oy - 5, oy);
-    out += vChain([oy, oy + ta, oy + ta + d, oy + D - ta - d, oy + D - ta, oy + D], [m.ta, m.d, n2(m.railLen), m.d, m.ta], ox + W + 5, ox + W);
+    out += text(ox + W - 1, oy - 1.5, '45° mitred corners; legs drop into ' + m.d + ' x ' + m.d + ' pockets (aprons + frame)', 1.8, { anchor: 'end', fill: '#555' });
+    out += hChain([ox, ox + W], [m.W], oy - 9, oy);
+    out += hChain([ox, ox + ta, ox + ta + d, ox + ta + d + rt, ox + W - ta - d - rt, ox + W - ta - d, ox + W - ta, ox + W], [m.ta, m.d, m.rt, n2(m.W - 2 * (m.ta + m.d + m.rt)), m.rt, m.d, m.ta], oy - 4, oy);
+    out += vChain([oy, oy + ta, oy + ta + d, oy + ta + d + rt, oy + D - ta - d - rt, oy + D - ta - d, oy + D - ta, oy + D], [m.ta, m.d, m.rt, n2(m.frameIn), m.rt, m.d, m.ta], ox + W + 5, ox + W);
+    out += vChain([oy + ta, oy + ta + m.boxLen * k], [m.boxLen], ox - 5, ox);
     out += hChain([ox + ta + d + rt + m.clr * k, ox + ta + d + rt + m.clr * k + m.boxW * k], [n2(m.boxW)], oy + D + 5, oy + D);
     return out;
   }
@@ -1135,7 +1149,8 @@
     var pts = [[ox - 6, oy]].concat(wavePath(ox, ox + w, oy, 0, 0, 1, dd)).concat([[ox + w + 6, oy], [ox + w + 6, oy - dd - 10], [ox - 6, oy - dd - 10]]);
     out += poly2(pts, FACE, 0.3);
     out += hChain([ox, ox + w], [n2(w / k)], oy + 5, oy) + vChain([oy - dd, oy], [m.wave], ox + w + 10, ox + w);
-    out += text(ox - 6, oy + 11, 'arches: ' + n + ' per face, ' + arches(m.D - 2 * m.flat, m.pitch) + ' per side; flat ' + m.flat + ' at each corner', 1.8, { fill: '#555' });
+    out += text(ox - 6, oy + 11, 'waves: ' + n + ' per face, ' + arches(m.D - 2 * m.flat, m.pitch) + ' per side; flat ' + m.flat + ' at each corner', 1.8, { fill: '#555' });
+    out += text(ox - 6, oy + 14, 'rounded up and down (no points)', 1.8, { fill: '#555' });
     return out;
   }
   function deskIso(s, m, bx, by, bw, bh) {
@@ -1152,7 +1167,7 @@
     function waveFace(len, n, map) {
       var pts = [], a = m.flat, b = len - m.flat, w = (b - a) / n;
       pts.push(map(0, H - m.T)); pts.push(map(0, y0)); pts.push(map(a, y0));
-      for (var i = 0; i < n; i++) for (var j = 1; j <= 10; j++) { var u = j / 10; pts.push(map(a + (i + u) * w, y0 + m.wave * Math.sqrt(Math.max(0, 1 - Math.pow(2 * u - 1, 2))))); }
+      for (var i = 0; i < n; i++) for (var j = 1; j <= 16; j++) { var u = j / 16; pts.push(map(a + (i + u) * w, y0 + m.wave * (1 - Math.cos(2 * Math.PI * u)) / 2)); }
       pts.push(map(len, y0)); pts.push(map(len, H - m.T));
       return pts;
     }
