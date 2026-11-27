@@ -991,6 +991,196 @@
         text(110, 164, 'Frame blanks ' + m.blank + ' mm wide (frame ' + m.w + ' + wave ' + m.a + ' + ' + CNC_MARGIN + ' to clamp on the CNC).', 2, { fill: '#444' });
     }
   };
+  // ================================================================ template: desk ==========
+  // Desk / console on legs with drawers (from AOC1675 Quinn Wavey Desk): a solid top on an apron
+  // box; the sides and back are aprons mitred 45° at the corners, the front is the drawer faces
+  // (mitred at the outer ends, a gap between them, a gap under the top). Every apron and face can
+  // have an arched (wavy) bottom edge, cut on the CNC, with a flat at each corner. Round legs sit
+  // inside the corners against the aprons and run up to the top. Inside: a runner rail along each
+  // side between the legs and a divider between drawers, front to back; one drawer box per bay on
+  // undermount runners, the bay less the runner clearance each side.
+  function arches(len, pitch) { return Math.max(1, Math.round(len / pitch)); }
+  // bottom edge from x0 to x1 (paper), base line y (paper, the lowest point), arch depth d (paper)
+  function wavePath(x0, x1, y, flat0, flat1, n, d) {
+    var a = x0 + flat0, b = x1 - flat1, w = (b - a) / n, pts = [[x0, y], [a, y]];
+    for (var i = 0; i < n; i++) for (var j = 1; j <= 16; j++) { var u = j / 16; pts.push([a + (i + u) * w, y - d * Math.sqrt(Math.max(0, 1 - Math.pow(2 * u - 1, 2)))]); }
+    pts.push([x1, y]);
+    return pts;
+  }
+  function buildDesk(s) {
+    var W = s.width, D = s.depth, H = s.height, tp = s.top, ap = s.apron, fc = s.faces, lg = s.legs, rl = s.rails, wv = s.wave || {}, dr = s.drawers, rn = s.runners;
+    var T = tp.thickness, A = ap.height, ta = ap.thickness, n = dr.count, g = fc.gap, tg = fc.topGap, d = lg.diameter, rt = rl.thickness;
+    var faceH = A - tg, fw = (W - (n - 1) * g) / n, legH = H - T, inner = W - 2 * (ta + d + rt), bay = (inner - (n - 1) * rt) / n;
+    var depthIn = D - 2 * ta, railLen = D - 2 * (ta + d), clr = rn.sideClearance, bt = dr.box.thickness, boxW = bay - 2 * clr, boxIn = boxW - 2 * bt, boxLen = rn.boxLength;
+    var depth = wv.depth || 0, pitch = wv.pitch || 90, flat = wv.cornerFlat == null ? ta : wv.cornerFlat;
+    if (n < 1) throw new Error('A desk needs at least 1 drawer');
+    if (boxW < 100) throw new Error('The drawer bays are only ' + Math.round(bay) + ' wide: fewer drawers or a wider desk');
+    if (boxLen > depthIn - rt) throw new Error('Drawer boxes ' + boxLen + ' long do not fit the ' + depthIn + ' inside depth');
+    if (dr.box.height + 2 * (dr.box.raise || 0) > A - depth - tg) throw new Error('Drawer boxes ' + dr.box.height + ' high do not fit under the waves (apron ' + A + ' less wave ' + depth + ')');
+    if (legH <= A) throw new Error('The height is less than the top and the aprons');
+    var parts = [], cnc = depth > 0;
+    function part(name, qty, l, w, th, mat, note, unit) { parts.push({ name: name, qty: qty, length: l, width: w, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '', unit: unit }); }
+    var M = cnc ? CNC_MARGIN : 0, wnote = cnc ? 'CNC wave bottom edge (+' + CNC_MARGIN + ' to clamp); ' : '';
+    part('Top', 1, W, D, T, tp, '');
+    part('Drawer face' + (cnc ? ' (CNC blank)' : ''), n, n2(fw) + M, faceH + M, fc.thickness, fc, wnote + 'finished ' + n2(fw) + ' x ' + faceH + '; 45° mitre on the outer end' + (n > 2 ? ' (end faces only)' : ''));
+    part('Side apron' + (cnc ? ' (CNC blank)' : ''), 2, D + M, A + M, ta, ap, wnote + 'finished ' + D + ' x ' + A + '; 45° mitre both ends');
+    part('Back apron' + (cnc ? ' (CNC blank)' : ''), 1, W + M, A + M, ta, ap, (wv.back === false ? '' : wnote) + 'finished ' + W + ' x ' + A + '; 45° mitre both ends');
+    part('Leg', 4, legH, d, d, lg, 'turned Ø' + d + ', round', 'm');
+    part('Runner rail', 2, railLen, rl.height, rt, rl, 'between the legs, inside the side aprons');
+    if (n > 1) part('Divider', n - 1, depthIn, rl.height, rt, rl, 'front to back between drawers');
+    var bb = dr.bottom || dr.box;
+    part('Drawer box side', 2 * n, boxLen, dr.box.height, bt, dr.box);
+    part('Drawer box front/back', 2 * n, n2(boxIn), dr.box.height, bt, dr.box);
+    part('Drawer bottom', n, n2(boxIn), boxLen - 2 * bt, bb.thickness, bb);
+    var hw = [{ code: 'H1', qty: n, name: rn.item + ' (pair)' }];
+    if (s.handles && s.handles.item && s.handles.qty) hw.push({ code: 'H2', qty: s.handles.qty * n, name: s.handles.item });
+    var den = pickScale(function (k) { return W * k <= 132 && H * k <= 78 && D * k <= 62; });
+    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([tp, fc, ap, lg, rl, dr.box, bb]), W: W, D: D, H: H, T: T, A: A, ta: ta, n: n, g: g, tg: tg, d: d, rt: rt,
+      faceH: faceH, fw: fw, legH: legH, inner: inner, bay: bay, depthIn: depthIn, railLen: railLen, clr: clr, bt: bt, boxW: boxW, boxIn: boxIn, boxLen: boxLen,
+      wave: depth, pitch: pitch, flat: flat, waveBack: wv.back !== false, parts: parts, hardware: hw, totals: totalsOf(parts), overall: { width: W, depth: D, height: H } };
+  }
+  // front elevation; (ox, oy) = left end at floor level. section = faces off (carcass)
+  function deskFront(s, m, ox, oy, section) {
+    var k = m.k, W = m.W * k, H = m.H * k, T = m.T * k, A = m.A * k, ta = m.ta * k, d = m.d * k, top = oy - H, ab = top + T + A, wd = m.wave * k, out = '';
+    out += rect(ox + ta, ab - 0.01, d, oy - ab, 0.3, OAK) + rect(ox + W - ta - d, ab - 0.01, d, oy - ab, 0.3, OAK);
+    if (!section) {
+      var x = ox;
+      for (var i = 0; i < m.n; i++) {
+        var w = m.fw * k, f0 = i === 0 ? m.flat * k : 0, f1 = i === m.n - 1 ? m.flat * k : 0, ft = top + T + m.tg * k;
+        var edge = m.wave ? wavePath(x, x + w, ab, f0, f1, arches(m.fw - (f0 + f1) / k, m.pitch), wd) : [[x, ab], [x + w, ab]];
+        out += poly2([[x, ft]].concat(edge.slice().reverse().reverse()).concat([[x + w, ft]]), FACE, 0.3);
+        x += w + m.g * k;
+      }
+      out += rect(ox, top, W, T, 0.35, OAK);
+      var xs = [ox], vals = [];
+      for (var j = 0; j < m.n; j++) { xs.push(ox + (j + 1) * m.fw * k + j * m.g * k); vals.push(n2(m.fw)); if (j < m.n - 1) { xs.push(xs[xs.length - 1] + m.g * k); vals.push(m.g); } }
+      out += hChain(xs, vals, top - 4, top) + hChain([ox, ox + W], [m.W], top - 9, top);
+      out += vChain([top, top + T, top + T + m.tg * k, ab, oy], [m.T, m.tg, m.faceH, n2(m.legH - m.A)], ox + W + 5, ox + W) + vChain([top, oy], [m.H], ox + W + 13, ox + W);
+      return out;
+    }
+    // carcass: back apron seen from the front, rails/dividers in section, drawer boxes
+    var back = m.wave && m.waveBack ? wavePath(ox, ox + W, ab, m.flat * k, m.flat * k, arches(m.W - 2 * m.flat, m.pitch), wd) : [[ox, ab], [ox + W, ab]];
+    out += poly2([[ox, top + T]].concat(back).concat([[ox + W, top + T]]), '#efe6d6', 0.25);
+    var rx0 = ox + ta + d, rh = s.rails.height * k;
+    out += rect(rx0, top + T, m.rt * k, rh, 0.3, VENEER) + rect(ox + W - ta - d - m.rt * k, top + T, m.rt * k, rh, 0.3, VENEER);
+    var bx = rx0 + m.rt * k;
+    for (var b = 0; b < m.n; b++) {
+      var by = top + T + rh - (s.drawers.box.raise || 0) * k - s.drawers.box.height * k;
+      out += rect(bx + m.clr * k, by, m.boxW * k, s.drawers.box.height * k, 0.3, VENEER);
+      if (b < m.n - 1) out += rect(bx + m.bay * k, top + T, m.rt * k, rh, 0.3, VENEER);
+      bx += (m.bay + m.rt) * k;
+    }
+    out += rect(ox, top, W, T, 0.2, 'none', DASH);
+    var cx = [ox, ox + ta, rx0, rx0 + m.rt * k], cv = [m.ta, m.d, m.rt];
+    var p = rx0 + m.rt * k;
+    for (var q = 0; q < m.n; q++) { cx.push(p += m.bay * k); cv.push(n2(m.bay)); if (q < m.n - 1) { cx.push(p += m.rt * k); cv.push(m.rt); } }
+    cx.push(p += m.rt * k); cv.push(m.rt); cx.push(p += m.d * k); cv.push(m.d); cx.push(ox + W); cv.push(m.ta);
+    out += hChain(cx, cv, top - 4, top);
+    var bt0 = top + T + rh - (s.drawers.box.raise || 0) * k - s.drawers.box.height * k;
+    out += vChain([top + T, bt0, bt0 + s.drawers.box.height * k, top + T + rh], [n2(s.rails.height - s.drawers.box.height - (s.drawers.box.raise || 0)), s.drawers.box.height, s.drawers.box.raise || 0], ox - 5, ox);
+    out += vChain([top, top + T, top + T + rh, ab, oy], [m.T, s.rails.height, m.A - s.rails.height, n2(m.legH - m.A)], ox + W + 5, ox + W);
+    out += text(ox + W / 2, ab + 4, 'back apron, seen from the front', 1.7, { anchor: 'middle', fill: '#555' });
+    return out;
+  }
+  // side elevation; (ox, oy) = back end at floor level
+  function deskSide(s, m, ox, oy) {
+    var k = m.k, D = m.D * k, H = m.H * k, T = m.T * k, A = m.A * k, ta = m.ta * k, d = m.d * k, top = oy - H, ab = top + T + A, wd = m.wave * k, out = '';
+    out += rect(ox + ta, ab, d, oy - ab, 0.3, OAK) + rect(ox + D - ta - d, ab, d, oy - ab, 0.3, OAK);
+    var edge = m.wave ? wavePath(ox, ox + D, ab, m.flat * k, m.flat * k, arches(m.D - 2 * m.flat, m.pitch), wd) : [[ox, ab], [ox + D, ab]];
+    out += poly2([[ox, top + T]].concat(edge).concat([[ox + D, top + T]]), FACE, 0.3);
+    out += rect(ox, top, D, T, 0.35, OAK);
+    out += hChain([ox, ox + D], [m.D], top - 5, top);
+    out += hChain([ox, ox + m.flat * k, ox + D - m.flat * k, ox + D], [m.flat, n2(m.D - 2 * m.flat), m.flat], ab + 4, ab);
+    out += vChain([top, top + T, ab, oy], [m.T, m.A, n2(m.legH - m.A)], ox + D + 5, ox + D);
+    return out;
+  }
+  // plan; mode 'top' (client) or 'carcass' (workshop: top off). (ox, oy) = back-left corner
+  function deskPlan(s, m, ox, oy, mode) {
+    var k = m.k, W = m.W * k, D = m.D * k, ta = m.ta * k, d = m.d * k, rt = m.rt * k, out = '';
+    var legs = [[ta + d / 2, ta + d / 2], [W - ta - d / 2, ta + d / 2], [ta + d / 2, D - ta - d / 2], [W - ta - d / 2, D - ta - d / 2]];
+    if (mode === 'top') {
+      out += rect(ox, oy, W, D, 0.35, OAK);
+      legs.forEach(function (p) { out += circle(ox + p[0], oy + p[1], d / 2, 'none', 0.18, DASH); });
+      out += hChain([ox, ox + W], [m.W], oy - 5, oy) + vChain([oy, oy + D], [m.D], ox + W + 5, ox + W);
+      return out;
+    }
+    // aprons with mitred corners
+    out += poly2([[ox, oy], [ox + W, oy], [ox + W - ta, oy + ta], [ox + ta, oy + ta]], FACE, 0.3);                 // back
+    out += poly2([[ox, oy], [ox + ta, oy + ta], [ox + ta, oy + D - ta], [ox, oy + D]], FACE, 0.3);                 // left
+    out += poly2([[ox + W, oy], [ox + W, oy + D], [ox + W - ta, oy + D - ta], [ox + W - ta, oy + ta]], FACE, 0.3); // right
+    var x = ox;
+    for (var i = 0; i < m.n; i++) {                                                                             // faces
+      var w = m.fw * k, l0 = i === 0 ? ta : 0, r0 = i === m.n - 1 ? ta : 0;
+      out += poly2([[x, oy + D], [x + w, oy + D], [x + w - r0, oy + D - ta], [x + l0, oy + D - ta]], '#d2b48b', 0.3);
+      x += w + m.g * k;
+    }
+    legs.forEach(function (p) { out += circle(ox + p[0], oy + p[1], d / 2, OAK, 0.3); });
+    out += rect(ox + ta + d, oy + ta + d, rt, m.railLen * k, 0.25, VENEER) + rect(ox + W - ta - d - rt, oy + ta + d, rt, m.railLen * k, 0.25, VENEER);
+    var bx = ox + ta + d + rt;
+    for (var b = 0; b < m.n; b++) {
+      var bz = oy + ta + (m.depthIn * k - m.boxLen * k) / 2;
+      out += rect(bx + m.clr * k, bz, m.boxW * k, m.boxLen * k, 0.25, 'none', DASH) + text(bx + m.bay * k / 2, bz + m.boxLen * k / 2, 'drawer ' + (b + 1), 1.8, { anchor: 'middle', fill: '#555' });
+      if (b < m.n - 1) out += rect(bx + m.bay * k, oy + ta, rt, m.depthIn * k, 0.25, VENEER);
+      bx += (m.bay + m.rt) * k;
+    }
+    out += text(ox + W - 1, oy - 1.5, '45° mitred corners', 1.8, { anchor: 'end', fill: '#555' });
+    out += hChain([ox, ox + W], [m.W], oy - 5, oy);
+    out += vChain([oy, oy + ta, oy + ta + d, oy + D - ta - d, oy + D - ta, oy + D], [m.ta, m.d, n2(m.railLen), m.d, m.ta], ox + W + 5, ox + W);
+    out += hChain([ox + ta + d + rt + m.clr * k, ox + ta + d + rt + m.clr * k + m.boxW * k], [n2(m.boxW)], oy + D + 5, oy + D);
+    return out;
+  }
+  // one arch of the wave, 1:2; (ox, oy) = start of the arch on the bottom edge
+  function deskWave(s, m, ox, oy) {
+    var k = 0.5, n = arches(m.fw - m.flat, m.pitch), w = (m.fw - m.flat) / n * k, dd = m.wave * k, out = '';
+    var pts = [[ox - 6, oy]].concat(wavePath(ox, ox + w, oy, 0, 0, 1, dd)).concat([[ox + w + 6, oy], [ox + w + 6, oy - dd - 10], [ox - 6, oy - dd - 10]]);
+    out += poly2(pts, FACE, 0.3);
+    out += hChain([ox, ox + w], [n2(w / k)], oy + 5, oy) + vChain([oy - dd, oy], [m.wave], ox + w + 10, ox + w);
+    out += text(ox - 6, oy + 11, 'arches: ' + n + ' per face, ' + arches(m.D - 2 * m.flat, m.pitch) + ' per side; flat ' + m.flat + ' at each corner', 1.8, { fill: '#555' });
+    return out;
+  }
+  function deskIso(s, m, bx, by, bw, bh) {
+    var c = Math.cos(Math.PI / 6), sn = 0.5, W = m.W, D = m.D, H = m.H;
+    var spanX = (W + D) * c, spanY = H + (W + D) * sn, sc = Math.min(bw / spanX, bh / spanY);
+    var cx = bx + (bw - spanX * sc) / 2 + D * c * sc, cy = by + (bh - spanY * sc) / 2 + H * sc;
+    function P(x, y, z) { return [cx + (x * c - z * c) * sc, cy - y * sc + (x * sn + z * sn) * sc]; }
+    function poly(pts, fill) { return poly2(pts, fill, 0.3); }
+    var out = '', r = m.d / 2, rx = r * Math.SQRT2 * c * sc, ry = r * Math.SQRT2 * sn * sc, y0 = H - m.T - m.A;
+    function leg(x, z) { var b = P(x, 0, z), t = P(x, y0, z); return '<path d="M' + n2(t[0] - rx) + ',' + n2(t[1]) + ' L' + n2(b[0] - rx) + ',' + n2(b[1]) + ' A' + n2(rx) + ' ' + n2(ry) + ' 0 0 0 ' + n2(b[0] + rx) + ',' + n2(b[1]) + ' L' + n2(t[0] + rx) + ',' + n2(t[1]) + ' Z" fill="#c4a378" stroke="#111" stroke-width="0.25"/>'; }
+    var i0 = m.ta + r;
+    out += leg(i0, i0);
+    // apron box: front (z = D) and right side (x = W) faces, with the wave
+    function waveFace(len, n, map) {
+      var pts = [], a = m.flat, b = len - m.flat, w = (b - a) / n;
+      pts.push(map(0, H - m.T)); pts.push(map(0, y0)); pts.push(map(a, y0));
+      for (var i = 0; i < n; i++) for (var j = 1; j <= 10; j++) { var u = j / 10; pts.push(map(a + (i + u) * w, y0 + m.wave * Math.sqrt(Math.max(0, 1 - Math.pow(2 * u - 1, 2))))); }
+      pts.push(map(len, y0)); pts.push(map(len, H - m.T));
+      return pts;
+    }
+    out += leg(W - i0, i0) + leg(i0, D - i0) + leg(W - i0, D - i0);
+    out += poly(waveFace(D, arches(D - 2 * m.flat, m.pitch), function (z, y) { return P(W, y, D - z); }), '#b8956a');
+    out += poly(waveFace(W, Math.max(1, m.n * arches(m.fw - m.flat, m.pitch)), function (x, y) { return P(x, y, D); }), '#d2b48b');
+    for (var f = 1; f < m.n; f++) { var gx = f * (m.fw + m.g) - m.g / 2; out += line(P(gx, H - m.T, D)[0], P(gx, H - m.T, D)[1], P(gx, y0, D)[0], P(gx, y0, D)[1], 0.3); }
+    out += poly([P(0, H, 0), P(W, H, 0), P(W, H, D), P(0, H, D)], '#d6b88f') + poly([P(0, H - m.T, D), P(W, H - m.T, D), P(W, H, D), P(0, H, D)], '#c4a378') + poly([P(W, H - m.T, D), P(W, H - m.T, 0), P(W, H, 0), P(W, H, D)], '#b8956a');
+    var tT = P(W * 0.4, H, D * 0.4), tF = P(W * 0.25, y0 + m.A * 0.6, D), tL = P(i0, (H - m.T - m.A) * 0.4, D - i0);
+    out += tag(tT[0], tT[1], s.top.code) + tag(tF[0], tF[1], s.faces.code) + tag(tL[0] - 5, tL[1], s.legs.code);
+    return out;
+  }
+  TEMPLATES.desk = {
+    build: buildDesk,
+    clientViews: function (s, m) {
+      var k = m.k, W = m.W * k, D = m.D * k, sx = 24 + W + 26;
+      return deskFront(s, m, 24, 104, false) + viewTitle(24, 118, 1, 'FRONT VIEW', m.scale) +
+        deskSide(s, m, sx, 104) + viewTitle(sx, 118, 2, 'SIDE VIEW', m.scale) +
+        deskPlan(s, m, 24, 136, 'top') + viewTitle(24, 212, 3, 'TOP VIEW', m.scale) +
+        deskIso(s, m, Math.max(sx - 10, 24 + W + 14), 128, 316 - Math.max(sx - 10, 24 + W + 14), 76) + viewTitle(Math.max(sx - 10, 24 + W + 14), 212, 4, '3D VIEW', 'not to scale');
+    },
+    workshopViews: function (s, m) {
+      var k = m.k, W = m.W * k;
+      return deskFront(s, m, 24, 104, true) + viewTitle(24, 118, 1, 'CARCASS FRONT (faces off)', m.scale) +
+        deskPlan(s, m, 24, 134, 'carcass') + viewTitle(24 + W + 16, 196, 2, 'CARCASS PLAN (top off)', m.scale) +
+        deskWave(s, m, 24 + W + 30, 60) + viewTitle(24 + W + 24, 118, 3, 'WAVE DETAIL', '1:2');
+    }
+  };
   function sheets(spec, opts) {
     LOGO = (opts && opts.logo) || '';
     var tpl = TEMPLATES[spec.template];
@@ -1000,6 +1190,6 @@
     return { model: m, svgs: [sheetClient(spec, m, tpl), sheetWorkshop(spec, m, tpl)] };
   }
 
-  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
+  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BattenDrawings = api;
 })(this);
