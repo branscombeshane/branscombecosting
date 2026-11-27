@@ -70,7 +70,8 @@
       shelfRows[k] = shelfRows[k] || { qty: 0, l: n2(bays[i] - 1), w: Din - 1 };
       shelfRows[k].qty += count;
     });
-    Object.keys(shelfRows).forEach(function (k) { part('Shelf', shelfRows[k].qty, shelfRows[k].l, shelfRows[k].w, T, s.board, 'front', shelfRows[k].l); });
+    var fixedShelves = s.shelvesFixed === true || s.shelvesFixed === 'yes', shelfAt = typeof s.shelfAt === 'string' ? s.shelfAt.split(/[,\s]+/).filter(Boolean).map(Number) : (s.shelfAt || []);
+    Object.keys(shelfRows).forEach(function (k) { part('Shelf', shelfRows[k].qty, shelfRows[k].l, shelfRows[k].w, T, s.board, 'front', shelfRows[k].l, (fixedShelves ? 'fixed' : 'on pins') + (shelfAt.length ? ', ' + shelfAt.join(' / ') + ' clear from the bottom' : '')); });
     var doorRows = {}, slatRows = {};
     doors.forEach(function (w, i) {
       var slatted = slatDoors.indexOf(i + 1) !== -1;
@@ -110,7 +111,7 @@
     else if (op.type === 'knob' && knobDoors.length) item('H' + hc++, knobDoors.length * (op.perDoor || 1), op.item || 'Knob');
     if (op.type === 'knob' && slatDoors.length && !op.slatted && op.slattedItem) item('H' + hc++, slatDoors.length, op.slattedItem);
     var shelfCount = (s.shelves || []).reduce(function (a, b) { return a + b; }, 0);
-    if (shelfCount && !s.shelvesFixed) item('H' + hc++, 4 * shelfCount, 'Shelf support pin (if not fixed)');
+    if (shelfCount && !fixedShelves) item('H' + hc++, 4 * shelfCount, 'Shelf support pin (if not fixed)');
     // material totals (what costing needs), plus edging in metres per edging material
     var totals = {}, edging = {};
     parts.forEach(function (p) {
@@ -126,7 +127,7 @@
     var den = pickScale(function (k) { return (W + D) * k <= 255 && (H + base.height) * k <= 80 && D * k <= 62; });
     return { scale: '1:' + den, k: 1 / den, materials: materialsOf([s.board, db, s.slats && slatDoors.length ? sl.doorBoard : null, slatDoors.length ? sl : null, s.back, s.base]),
       T: T, Td: Td, B: B, R: R, W: W, D: D, H: H, n: n, Dc: Dc, Din: Din, sideH: sideH, divH: divH, bays: bays, doors: doors, cuts: cuts, hinge: hinge, slatDoors: slatDoors, slatInfo: slatInfo,
-      frameL: frameL, frameW: frameW, legH: legH, parts: parts, steel: steel, hardware: hw, totals: list, overall: { width: W, depth: D, height: H + base.height } };
+      frameL: frameL, frameW: frameW, legH: legH, parts: parts, steel: steel, hardware: hw, totals: list, shelfAt: shelfAt, overall: { width: W, depth: D, height: H + base.height } };
   }
 
   // ---------------------------------------------------------------- SVG helpers -----------
@@ -203,7 +204,7 @@
       m.bays.forEach(function (bay, i) {
         var shelves = (s.shelves || [])[i] || 0;        // bays come from the model (dividers centred on the door gaps)
         for (var j = 1; j <= shelves; j++) {
-          var sy = top + T + (H - 2 * T) * j / (shelves + 1) - T / 2;      // (shelf height: set on site / as drawn)
+          var at = m.shelfAt[j - 1], sy = at ? top + H - T - (at + T) * k : top + T + (H - 2 * T) * j / (shelves + 1) - T / 2;   // shelf: given clear height from the bottom, else evenly
           out += rect(cx + 0.1, sy, bay * k - 0.2, T, 0.25, 'none', DASH);
           out += text(cx + bay * k / 2, sy - 1, 'shelf', 1.8, { anchor: 'middle' });
         }
