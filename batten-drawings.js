@@ -1255,6 +1255,12 @@
       fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals, overall: { width: Math.max(W, st.frontWidth, bk.width), depth: Math.max(D, z1), height: overall } };
   }
   var FABRIC = '#b9c29a', FABRIC_D = '#a3ad84';
+  // back cushion seen from the side: flat against the posts (x), rounded on the front face (x + w)
+  function backShape(x, y, w, h, r) {
+    r = Math.min(r, w, h / 2);
+    return '<path d="M' + n2(x) + ',' + n2(y) + ' L' + n2(x + w - r) + ',' + n2(y) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + w) + ',' + n2(y + r) +
+      ' L' + n2(x + w) + ',' + n2(y + h - r) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + w - r) + ',' + n2(y + h) + ' L' + n2(x) + ',' + n2(y + h) + ' Z" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+  }
   // seat cushion in elevation: rounded along the top edge, straight sides down to a flat bottom
   function seatShape(x, y, w, h, r) {
     r = Math.min(r, h, w / 2);
@@ -1298,7 +1304,7 @@
     out += rect(ox + m.railZ * k, oy - m.lh * k, m.rt * k, m.rh * k, 0.15, 'none', DASH);
     if (upholstery) {
       out += seatShape(ox + m.pt * k, oy - m.seatTop * k, st.depth * k, st.thickness * k, st.thickness * k / 2);
-      out += '<rect x="' + n2(ox + m.pt * k) + '" y="' + n2(oy - (m.backBottom + bk.height) * k) + '" width="' + n2(bk.thickness * k) + '" height="' + n2(bk.height * k) + '" rx="' + n2(bk.thickness * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+      out += backShape(ox + m.pt * k, oy - (m.backBottom + bk.height) * k, bk.thickness * k, bk.height * k, bk.thickness * k / 2);
       out += hChain([ox + m.pt * k, ox + (m.pt + st.depth) * k], [st.depth], oy - m.seatTop * k - 4, oy - m.seatTop * k);
       out += hChain([ox + m.pt * k, ox + (m.pt + bk.thickness) * k], [bk.thickness], oy - m.oh * k - 4, oy - m.oh * k);
       out += vChain([oy - m.seatTop * k, oy], [m.seatTop], ox + Math.max(D, (m.pt + st.depth) * k) + 6, ox + D);
@@ -1381,7 +1387,7 @@
     var bcx = m.W / 2, bcy = m.backBottom + bk.height / 2, rr = bk.thickness / 2, all = [], face = [];
     for (var i = 0; i < 48; i++) {
       var t = i / 48 * 2 * Math.PI, ct = Math.cos(t), stt = Math.sin(t);
-      [[0, rr], [0.2, rr * 0.4], [0.5, 0], [0.8, rr * 0.4], [1, rr]].forEach(function (q) { all.push(P(bcx + (bk.width / 2 - q[1]) * ct, bcy + (bk.height / 2 - q[1]) * stt, m.pt + bk.thickness * q[0])); });
+      [[0, 0], [0.5, 0], [0.8, rr * 0.4], [1, rr]].forEach(function (q) { all.push(P(bcx + (bk.width / 2 - q[1]) * ct, bcy + (bk.height / 2 - q[1]) * stt, m.pt + bk.thickness * q[0])); });
       face.push(P(bcx + (bk.width / 2 - rr) * ct, bcy + (bk.height / 2 - rr) * stt, m.pt + bk.thickness));
     }
     out += poly2(hull(all), FABRIC_D, 0.3) + '<path d="M' + face.map(function (q) { return n2(q[0]) + ',' + n2(q[1]); }).join(' L') + ' Z" fill="' + FABRIC + '" stroke="none"/>';
