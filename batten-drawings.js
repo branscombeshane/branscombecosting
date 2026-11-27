@@ -31,73 +31,102 @@
   //  - shelves are 1 mm smaller than the opening, in width and in depth (some are fixed,
   //    some sit on brackets);
   //  - edging goes on every edge that is visible on the finished piece.
+  //  - (26 Nov, from AOC1825 Slab Oak sideboard) doors can be their own board (s.doorBoard, e.g.
+  //    17 veneer on a 23 solid carcass); dividers are centred behind the gaps between doors, so
+  //    each door covers its own compartment; a door can be faced with solid slats on a thinner
+  //    veneer door (s.slats); openers can be knobs; edging only on parts whose material has it.
   function buildCarcass(s) {
-    var T = s.board.thickness, B = s.back.thickness, R = s.back.rebate || 8, W = s.width, D = s.depth, H = s.carcassHeight, n = s.columns;
-    var Dc = D - T;                        // carcass depth (sides, top, bottom), the back sits inside it
+    var T = s.board.thickness, db = (s.doorBoard && s.doorBoard.material) ? s.doorBoard : s.board, Td = db.thickness, B = s.back.thickness, R = s.back.rebate || 8, W = s.width, D = s.depth, H = s.carcassHeight, n = s.columns;
+    var Dc = D - Td;                       // carcass depth (sides, top, bottom), the back sits inside it
     var Din = Dc - B;                      // usable depth in front of the back
     var sideH = H - T;                     // sides: from under the top down to the floor
     var divH = H - 2 * T;                  // dividers: between top and bottom
-    var bays = split(W - 2 * T - (n - 1) * T, n);
-    var doors = split(W - (n - 1) * s.doorGap, n);
+    var g = s.doorGap, doors = split(W - (n - 1) * g, n);
+    // odd millimetres go to the middle doors (as drawn on AOC1825: 623 / 624 / 624 / 623)
+    (function () { var tot = W - (n - 1) * g, base = Math.floor(tot / n), rem = tot - base * n; doors = doors.map(function () { return base; });
+      var mid = (n - 1) / 2, order = doors.map(function (d, i) { return i; }).sort(function (a, b) { return Math.abs(a - mid) - Math.abs(b - mid) || a - b; });
+      for (var q = 0; q < rem; q++) doors[order[q]] += 1; })();
+    var cuts = [], acc = 0;                // divider centres: behind the gaps between doors
+    for (var c = 0; c < n - 1; c++) { acc += doors[c]; cuts.push(acc + g / 2); acc += g; }
+    var bays = [], left = T;
+    cuts.forEach(function (cx) { bays.push(n2(cx - T / 2 - left)); left = cx + T / 2; });
+    bays.push(n2(W - T - left));
+    bays.forEach(function (b) { if (b < 50) throw new Error('A compartment is only ' + b + ' wide: fewer doors or a wider cabinet'); });
+    var hs = typeof s.hingeSides === 'string' ? s.hingeSides.split(/[,\s]+/).filter(Boolean) : (s.hingeSides || []);
+    var hinge = (hs.length === n) ? hs.map(function (x) { return String(x).toUpperCase().charAt(0) === 'R' ? 'R' : 'L'; })
+      : doors.map(function (d, i) { return i < n / 2 ? 'L' : 'R'; });
+    var sl = s.slats || {}, slatDoors = (sl.doors || []).map(Number).filter(function (x) { return x >= 1 && x <= n; });
     var parts = [];
-    // edges: [label, total edging length per part in mm]
-    function part(name, qty, l, w, t, mat, edge, edgeLen) { parts.push({ name: name, qty: qty, length: l, width: w, thickness: t, code: mat.code, material: mat.material, edge: edge || '', edgeLen: edgeLen || 0 }); }
+    function edgeOf(mat, edge, len) { return mat && mat.edging ? [edge, len] : ['', 0]; }
+    function part(name, qty, l, w, t, mat, edge, edgeLen, note) { var e = edgeOf(mat, edge, edgeLen); parts.push({ name: name, qty: qty, length: l, width: w, thickness: t, code: mat.code, material: mat.material, edge: e[0], edgeLen: e[1], edgeCode: mat.edgingCode, edgeName: mat.edging, note: note || '' }); }
     part('Top', 1, W, Dc, T, s.board, 'all round', 2 * (W + Dc));
     part('Side', 2, sideH, Dc, T, s.board, 'front, back, bottom', 2 * sideH + Dc);
     part('Bottom', 1, W - 2 * T, Dc, T, s.board, 'front', W - 2 * T);
-    if (n > 1) part('Divider', n - 1, divH, Din, T, s.board, 'front', divH);
+    if (n > 1) part('Divider', n - 1, divH, Din, T, s.board, 'front', divH, 'centred behind the door gap');
     var shelfRows = {};
     (s.shelves || []).forEach(function (count, i) {
-      if (!count) return;
+      if (!count || !bays[i]) return;
       var k = (bays[i] - 1) + 'x' + (Din - 1);
-      shelfRows[k] = shelfRows[k] || { qty: 0, l: bays[i] - 1, w: Din - 1 };
+      shelfRows[k] = shelfRows[k] || { qty: 0, l: n2(bays[i] - 1), w: Din - 1 };
       shelfRows[k].qty += count;
     });
     Object.keys(shelfRows).forEach(function (k) { part('Shelf', shelfRows[k].qty, shelfRows[k].l, shelfRows[k].w, T, s.board, 'front', shelfRows[k].l); });
-    var doorRows = {};
-    doors.forEach(function (w) { doorRows[w] = (doorRows[w] || 0) + 1; });
-    Object.keys(doorRows).sort().reverse().forEach(function (w) { part('Door', doorRows[w], H, +w, T, s.board, 'all round', 2 * (H + +w)); });
+    var doorRows = {}, slatRows = {};
+    doors.forEach(function (w, i) {
+      var slatted = slatDoors.indexOf(i + 1) !== -1;
+      var key = w + (slatted ? 's' : '');
+      doorRows[key] = doorRows[key] || { qty: 0, w: w, slatted: slatted };
+      doorRows[key].qty++;
+    });
+    var slatInfo = null;
+    Object.keys(doorRows).sort().reverse().forEach(function (k) {
+      var r = doorRows[k];
+      if (!r.slatted) { part('Door', r.qty, H, r.w, Td, db, 'all round', 2 * (H + r.w)); return; }
+      var sb = sl.doorBoard || db, sw = sl.width || 45, sg = sl.gap || 31, m0 = sl.margin == null ? 20 : sl.margin;
+      var cnt = Math.max(1, Math.floor((r.w - 2 * m0 + sg) / (sw + sg))), marg = n2((r.w - cnt * sw - (cnt - 1) * sg) / 2);
+      slatInfo = { count: cnt, width: sw, gap: sg, margin: marg, thickness: sl.thickness };
+      part('Door (slatted)', r.qty, H, r.w, sb.thickness, sb, 'all round', 2 * (H + r.w), cnt + ' slats ' + sw + ' wide, ' + sg + ' apart, ' + marg + ' in from each edge');
+      part('Slat', r.qty * cnt, H, sw, sl.thickness, sl, '', 0, 'glued to the slatted door face');
+    });
     part('Back (rebated ' + R + ' mm)', 1, W - 2 * T + 2 * R, H - 2 * T + 2 * R, B, s.back, '', 0);
     var base = s.base, frameL = W - 2 * base.insetX, frameW = D - 2 * base.insetY, legH = base.height - base.tube;
-    var steel = [];
+    var steel = [], mid = base.middleRails || 0;
     function bar(name, qty, len) { steel.push({ name: name, qty: qty, length: len, code: base.code, material: base.material }); }
     bar('Long rail', 2, frameL);
-    bar('Cross rail', 2 + (base.middleRails || 0), frameW - 2 * base.tube);
-    bar('Leg', 4, legH);
-    // hardware: 2 hinges per door; doors left of centre hinge on their left, right of centre
-    // on their right. A door hinged on an end side is full overlay; on a divider, half overlay.
+    bar('Cross rail', 2 + mid, frameW - 2 * base.tube);
+    var midLegs = base.middleLegs === true || base.middleLegs === 'yes';
+    bar('Leg', 4 + (midLegs ? 2 * mid : 0), legH);
+    // hardware: 2 hinges per door; a door hinged on an end side is full overlay; on a divider, half overlay
     var full = 0, half = 0;
-    for (var i = 0; i < n; i++) {
-      var hingeOnLeft = i < n / 2, onOuterSide = hingeOnLeft ? i === 0 : i === n - 1;
-      if (onOuterSide) full += 2; else half += 2;
-    }
+    hinge.forEach(function (side, i) { var outer = side === 'L' ? i === 0 : i === n - 1; if (outer) full += 2; else half += 2; });
     var hw = [];
     function item(code, qty, name) { hw.push({ code: code, qty: qty, name: name }); }
-    var hc = 1;
+    var hc = 1, op = s.openers || {};
     if (full) item('H' + hc++, full, 'Hinge, full overlay');
     if (half) item('H' + hc++, half, 'Hinge, half overlay');
     item('H' + hc++, full + half, 'Hinge plate');
-    if (s.openers && s.openers.type === 'pushToOpen') {
-      item('H' + hc++, n, s.openers.item);
-      item('H' + hc++, n, s.openers.housing);
-    }
+    var knobDoors = doors.map(function (d, i) { return i; }).filter(function (i) { return slatDoors.indexOf(i + 1) === -1 || op.slatted; });
+    if (op.type === 'pushToOpen') { item('H' + hc++, n, op.item); if (op.housing) item('H' + hc++, n, op.housing); }
+    else if (op.type === 'knob' && knobDoors.length) item('H' + hc++, knobDoors.length * (op.perDoor || 1), op.item || 'Knob');
+    if (op.type === 'knob' && slatDoors.length && !op.slatted && op.slattedItem) item('H' + hc++, slatDoors.length, op.slattedItem);
     var shelfCount = (s.shelves || []).reduce(function (a, b) { return a + b; }, 0);
-    if (shelfCount) item('H' + hc++, 4 * shelfCount, 'Shelf support pin (if not fixed)');
-    // material totals (what costing needs), plus edging in metres
-    var totals = {}, edging = 0;
+    if (shelfCount && !s.shelvesFixed) item('H' + hc++, 4 * shelfCount, 'Shelf support pin (if not fixed)');
+    // material totals (what costing needs), plus edging in metres per edging material
+    var totals = {}, edging = {};
     parts.forEach(function (p) {
       totals[p.code] = totals[p.code] || { code: p.code, material: p.material, unit: 'm²', amount: 0 };
       totals[p.code].amount += p.qty * p.length * p.width / 1e6;
-      edging += p.qty * p.edgeLen;
+      if (p.edgeLen) { var ek = p.edgeCode || 'E1'; edging[ek] = edging[ek] || { code: ek, material: p.edgeName || 'Edging', unit: 'm', amount: 0 }; edging[ek].amount += p.qty * p.edgeLen / 1000; }
     });
     steel.forEach(function (b) {
       totals[b.code] = totals[b.code] || { code: b.code, material: b.material, unit: 'm', amount: 0 };
       totals[b.code].amount += b.qty * b.length / 1000;
     });
-    var list = Object.keys(totals).sort().map(function (k) { return totals[k]; });
-    if (edging) list.push({ code: s.board.edgingCode || 'E1', material: s.board.edging || 'Edging', unit: 'm', amount: edging / 1000 });
-    return { scale: '1:10', materials: [s.board, s.back, s.base], T: T, B: B, R: R, W: W, D: D, H: H, n: n, Dc: Dc, Din: Din, sideH: sideH, divH: divH, bays: bays, doors: doors,
-      frameL: frameL, frameW: frameW, legH: legH, parts: parts, steel: steel, hardware: hw, totals: list };
+    var list = Object.keys(totals).sort().map(function (k) { return totals[k]; }).concat(Object.keys(edging).sort().map(function (k) { return edging[k]; }));
+    var den = pickScale(function (k) { return (W + D) * k <= 255 && (H + base.height) * k <= 80 && D * k <= 62; });
+    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([s.board, db, s.slats && slatDoors.length ? sl.doorBoard : null, slatDoors.length ? sl : null, s.back, s.base]),
+      T: T, Td: Td, B: B, R: R, W: W, D: D, H: H, n: n, Dc: Dc, Din: Din, sideH: sideH, divH: divH, bays: bays, doors: doors, cuts: cuts, hinge: hinge, slatDoors: slatDoors, slatInfo: slatInfo,
+      frameL: frameL, frameW: frameW, legH: legH, parts: parts, steel: steel, hardware: hw, totals: list, overall: { width: W, depth: D, height: H + base.height } };
   }
 
   // ---------------------------------------------------------------- SVG helpers -----------
@@ -148,16 +177,23 @@
   // ---------------------------------------------------------------- views ------------------
   // All views at 1:10 (k = 0.1 drawing-mm per real mm). (ox, oy) = left end at floor level.
   function frontView(s, m, ox, oy, withDoors) {
-    var k = 0.1, W = m.W * k, H = m.H * k, b = s.base.height * k, T = m.T * k, out = '';
+    var k = m.k, W = m.W * k, H = m.H * k, b = s.base.height * k, T = m.T * k, out = '';
     var top = oy - b - H;
     // steel base: legs at each end, rail along the front
     var lx = s.base.insetX * k, tb = s.base.tube * k;
     out += rect(ox + lx, oy - b, tb, b, 0.3, '#222') + rect(ox + W - lx - tb, oy - b, tb, b, 0.3, '#222');
     out += rect(ox + lx, oy - b, W - 2 * lx, tb, 0.3, '#222');
+    if (s.base.middleLegs === true || s.base.middleLegs === 'yes') for (var ml = 1; ml <= (s.base.middleRails || 0); ml++) { var mx = ox + lx + (W - 2 * lx - tb) * ml / ((s.base.middleRails || 0) + 1); out += rect(mx, oy - b, tb, b, 0.3, '#222'); }
     if (withDoors) {
-      var x = ox;
+      var x = ox, op = s.openers || {};
       out += rect(ox, top, W, H, 0.4, '#efe4d2');
-      m.doors.forEach(function (d, i) { out += rect(x, top, d * k, H, 0.3, '#e8d9c0'); x += d * k + s.doorGap * k; });
+      m.doors.forEach(function (d, i) {
+        out += rect(x, top, d * k, H, 0.3, '#e8d9c0');
+        var slatted = m.slatDoors.indexOf(i + 1) !== -1;
+        if (slatted && m.slatInfo) { for (var q = 0; q < m.slatInfo.count; q++) { var sx = x + (m.slatInfo.margin + q * (m.slatInfo.width + m.slatInfo.gap)) * k; out += rect(sx, top, m.slatInfo.width * k, H, 0.2, '#d6be98'); } }
+        if (op.type === 'knob' && (!slatted || op.slatted)) { var kx = m.hinge[i] === 'L' ? x + d * k - (op.fromEdge || 50) * k : x + (op.fromEdge || 50) * k; out += circle(kx, top + (op.fromTop || 110) * k, Math.max(0.8, 15 * k), '#333', 0.2); }
+        x += d * k + s.doorGap * k;
+      });
     } else {
       out += rect(ox, top, W, H, 0.35, '#f7f1e6');
       out += rect(ox, top, W, T, 0.3, '#d9c4a0');                                   // top, full width
@@ -165,9 +201,9 @@
       out += rect(ox + T, top + H - T, W - 2 * T, T, 0.3, '#d9c4a0');               // bottom, between the sides
       var cx = ox + T;
       m.bays.forEach(function (bay, i) {
-        var shelves = (s.shelves || [])[i] || 0;
+        var shelves = (s.shelves || [])[i] || 0;        // bays come from the model (dividers centred on the door gaps)
         for (var j = 1; j <= shelves; j++) {
-          var sy = top + T + (H - 2 * T) * j / (shelves + 1) - T / 2;
+          var sy = top + T + (H - 2 * T) * j / (shelves + 1) - T / 2;      // (shelf height: set on site / as drawn)
           out += rect(cx + 0.1, sy, bay * k - 0.2, T, 0.25, 'none', DASH);
           out += text(cx + bay * k / 2, sy - 1, 'shelf', 1.8, { anchor: 'middle' });
         }
@@ -196,7 +232,7 @@
     return out;
   }
   function sideView(s, m, ox, oy, section) {
-    var k = 0.1, D = m.D * k, H = m.H * k, b = s.base.height * k, T = m.T * k, B = m.B * k, R = m.R * k, Dc = m.Dc * k, out = '';
+    var k = m.k, D = m.D * k, H = m.H * k, b = s.base.height * k, T = m.T * k, B = m.B * k, R = m.R * k, Dc = m.Dc * k, out = '';
     var top = oy - b - H;
     out += rect(ox, top, Dc, H, 0.35, section ? '#f7f1e6' : '#efe4d2');          // side panel / carcass
     if (section) {
@@ -206,30 +242,30 @@
       out += text(ox + B + 2, top + H / 2 - T / 2 - 1, 'shelf', 1.8);
       out += text(ox + B + 1.2, top + T + 3, 'back in rebate', 1.6, { fill: '#555' });
     }
-    out += rect(ox + Dc, top, T, H, 0.3, '#e8d9c0');                              // door
+    out += rect(ox + Dc, top, m.Td * k, H, 0.3, '#e8d9c0');                       // door
     var by = s.base.insetY * k, tb = s.base.tube * k;
     out += rect(ox + by, oy - b, tb, b, 0.3, '#222') + rect(ox + D - by - tb, oy - b, tb, b, 0.3, '#222');
     out += rect(ox + by, oy - b, D - 2 * by, tb, 0.3, '#222');
     out += hChain([ox, ox + D], [m.D], top - 9, top);
-    out += section ? hChain([ox, ox + B, ox + Dc, ox + D], [m.B, m.Din, m.T], top - 4, top) : hChain([ox, ox + Dc, ox + D], [m.Dc, m.T], top - 4, top);
+    out += section ? hChain([ox, ox + B, ox + Dc, ox + D], [m.B, m.Din, m.Td], top - 4, top) : hChain([ox, ox + Dc, ox + D], [m.Dc, m.Td], top - 4, top);
     out += vChain([top, oy - b, oy], [m.H, s.base.height], ox + D + 5, ox + D);
     out += hChain([ox, ox + by, ox + by + tb, ox + D - by - tb, ox + D - by, ox + D], [s.base.insetY, s.base.tube, m.frameW - 2 * s.base.tube, s.base.tube, s.base.insetY], oy + 5, oy);
     return out;
   }
   function topView(s, m, ox, oy) {        // (ox, oy) = back-left corner
-    var k = 0.1, W = m.W * k, D = m.D * k, T = m.T * k, B = m.B * k, Dc = m.Dc * k, out = '';
+    var k = m.k, W = m.W * k, D = m.D * k, T = m.T * k, B = m.B * k, Dc = m.Dc * k, out = '';
     out += rect(ox, oy, W, Dc, 0.35, '#efe4d2');
     var x = ox;
-    m.doors.forEach(function (d) { out += rect(x, oy + Dc, d * k, T, 0.25, '#e8d9c0'); x += d * k + s.doorGap * k; });
+    m.doors.forEach(function (d) { out += rect(x, oy + Dc, d * k, m.Td * k, 0.25, '#e8d9c0'); x += d * k + s.doorGap * k; });
     var cx = ox + T;
     m.bays.forEach(function (bay, i) { cx += bay * k; if (i < m.bays.length - 1) out += line(cx, oy + B, cx, oy + Dc, 0.2, DASH) + line(cx + T, oy + B, cx + T, oy + Dc, 0.2, DASH); cx += T; });
     out += line(ox + T, oy + B, ox + W - T, oy + B, 0.2, DASH);                  // back, hidden in its rebate
     out += hChain([ox, ox + W], [m.W], oy - 4, oy);
-    out += vChain([oy, oy + Dc, oy + D], [m.Dc, m.T], ox + W + 5, ox + W);
+    out += vChain([oy, oy + Dc, oy + D], [m.Dc, m.Td], ox + W + 5, ox + W);
     return out;
   }
   function baseTopView(s, m, ox, oy) {
-    var k = 0.1, L = m.frameL * k, Wd = m.frameW * k, tb = s.base.tube * k, out = '';
+    var k = m.k, L = m.frameL * k, Wd = m.frameW * k, tb = s.base.tube * k, out = '';
     out += rect(ox - s.base.insetX * k, oy - s.base.insetY * k, m.W * k, m.D * k, 0.2, 'none', DASH);
     out += text(ox - s.base.insetX * k + 1, oy + m.D * k - s.base.insetY * k + 3, 'dashed: carcass outline above', 1.8, { fill: '#666' });
     out += rect(ox, oy, L, tb, 0.3, '#333') + rect(ox, oy + Wd - tb, L, tb, 0.3, '#333');
@@ -258,9 +294,13 @@
     out += poly([P(W, y0, D), P(W, y0, 0), P(W, y1, 0), P(W, y1, D)], '#d8c4a2');             // right side
     out += poly([P(0, y0, D), P(W, y0, D), P(W, y1, D), P(0, y1, D)], '#e3d2b4');             // front
     var x = 0;
-    m.doors.forEach(function (d, i) { if (i) out += '<line x1="' + n2(P(x, y0, D)[0]) + '" y1="' + n2(P(x, y0, D)[1]) + '" x2="' + n2(P(x, y1, D)[0]) + '" y2="' + n2(P(x, y1, D)[1]) + '" stroke="#111" stroke-width="0.3"/>'; x += d + s.doorGap; });
-    var tM1 = P(W * 0.3, y1 - H * 0.4, D), tM3 = P(s.base.insetX + 10, b * 0.5, D - s.base.insetY), tTop = P(W * 0.55, y1, D * 0.5);
-    out += tag(tM1[0], tM1[1], s.board.code) + tag(tM3[0] - 4, tM3[1] + 4, s.base.code) + tag(tTop[0], tTop[1], s.board.code);
+    m.doors.forEach(function (d, i) {
+      if (i) out += '<line x1="' + n2(P(x, y0, D)[0]) + '" y1="' + n2(P(x, y0, D)[1]) + '" x2="' + n2(P(x, y1, D)[0]) + '" y2="' + n2(P(x, y1, D)[1]) + '" stroke="#111" stroke-width="0.3"/>';
+      if (m.slatDoors.indexOf(i + 1) !== -1 && m.slatInfo) for (var q = 0; q < m.slatInfo.count; q++) { var sx = x + m.slatInfo.margin + q * (m.slatInfo.width + m.slatInfo.gap); [sx, sx + m.slatInfo.width].forEach(function (lx2) { out += line(P(lx2, y0, D)[0], P(lx2, y0, D)[1], P(lx2, y1, D)[0], P(lx2, y1, D)[1], 0.15); }); }
+      x += d + s.doorGap;
+    });
+    var tM1 = P(W * 0.3, y1 - H * 0.4, D), dbc = ((s.doorBoard && s.doorBoard.material) ? s.doorBoard : s.board).code, tM3 = P(s.base.insetX + 10, b * 0.5, D - s.base.insetY), tTop = P(W * 0.55, y1, D * 0.5);
+    out += tag(tM1[0], tM1[1], dbc) + tag(tM3[0] - 4, tM3[1] + 4, s.base.code) + tag(tTop[0], tTop[1], s.board.code);
     return out;
   }
 
@@ -353,7 +393,7 @@
     out += text(14, BAND_Y - 16.5, 'CUTTING LIST', 2.8, { weight: 'bold' });
     out += text(48, BAND_Y - 16.5, 'per unit · ' + s.quantity + ' unit(s) · L = along the grain', 2.1, { fill: '#666' });
     var rows = m.parts.map(function (p) { return [p.code, p.name, p.qty, p.length, p.width, p.thickness, p.material, p.edge || p.note || '']; })
-      .concat((m.steel || []).map(function (b) { return [b.code, b.name, b.qty, b.length, '25', '25', b.material, 'weld, grind'];}));
+      .concat((m.steel || []).map(function (b) { return [b.code, b.name, b.qty, b.length, String(b.w || 25), String(b.t || 25), b.material, b.note || 'weld, grind'];}));
     out += table(14, BAND_Y - 11, [{ title: 'REF', w: 9 }, { title: 'PART', w: 30 }, { title: 'QTY', w: 9, align: 'end' }, { title: 'L', w: 13, align: 'end' }, { title: 'W', w: 13, align: 'end' }, { title: 'T', w: 9, align: 'end' }, { title: '', w: 4 }, { title: 'MATERIAL', w: 52 }, { title: 'EDGING / NOTE', w: 50 }],
       rows.map(function (r) { return [r[0], r[1], r[2], r[3], r[4], r[5], '', r[6], r[7]]; }), { zebra: true, rowH: 3.75, size: 2.2, boldFirst: true });
     return svgDoc(out);
@@ -374,15 +414,17 @@
     carcass: {
       build: buildCarcass,
       clientViews: function (s, m) {
-        return frontView(s, m, 24, 104, true) + viewTitle(24, 118, 1, 'FRONT VIEW', '1:10') +
-          sideView(s, m, 258, 104, false) + viewTitle(258, 118, 2, 'SIDE VIEW', '1:10') +
-          topView(s, m, 24, 142) + viewTitle(24, 212, 3, 'TOP VIEW', '1:10') +
-          iso(s, m, 266, 150, 74) + viewTitle(240, 212, 4, '3D VIEW', 'not to scale');
+        var k = m.k, sx = 24 + m.W * k + 34, ix = 24 + m.W * k + 14, size = Math.min(80, 318 - ix);
+        return frontView(s, m, 24, 104, true) + viewTitle(24, 118, 1, 'FRONT VIEW', m.scale) +
+          sideView(s, m, sx, 104, false) + viewTitle(sx, 118, 2, 'SIDE VIEW', m.scale) +
+          topView(s, m, 24, 142) + viewTitle(24, 212, 3, 'TOP VIEW', m.scale) +
+          iso(s, m, ix + size * m.D / (m.W + m.D), 150, size) + viewTitle(ix, 212, 4, '3D VIEW', 'not to scale');
       },
       workshopViews: function (s, m) {
-        return frontView(s, m, 24, 104, false) + viewTitle(24, 118, 1, 'CARCASS FRONT (doors off)', '1:10') +
-          sideView(s, m, 258, 104, true) + viewTitle(258, 118, 2, 'CARCASS SIDE SECTION', '1:10') +
-          baseTopView(s, m, 24 + s.base.insetX * 0.1, 146) + viewTitle(24, 204, 3, 'STEEL BASE, PLAN', '1:10');
+        var k = m.k, sx = 24 + m.W * k + 34;
+        return frontView(s, m, 24, 104, false) + viewTitle(24, 118, 1, 'CARCASS FRONT (doors off)', m.scale) +
+          sideView(s, m, sx, 104, true) + viewTitle(sx, 118, 2, 'CARCASS SIDE SECTION', m.scale) +
+          baseTopView(s, m, 24 + s.base.insetX * k, 146) + viewTitle(24, 204, 3, 'STEEL BASE, PLAN', m.scale);
       }
     }
   };
@@ -908,6 +950,7 @@
     return pts;
   }
   function buildMirror(s) {
+    if (s.style === 'arch') return buildArchMirror(s);
     var W = s.width, H = s.height, wv = s.waves || {}, fr = s.frame, bk = s.backing, mr = s.mirror, ft = s.fittings || {};
     var a = wv.depth == null ? 20 : wv.depth, nx = wv.across || 4, ny = wv.along || 8, rc = wv.cornerRadius == null ? 50 : wv.cornerRadius;
     var w = fr.width, Tf = fr.thickness, bi = bk.inset, mi = mr.inset, lip = Tf - bk.thickness - mr.thickness;
@@ -969,9 +1012,149 @@
     out += text(ox + w / 2, oy + T + 4, 'back of the frame up; outer edge on the left', 1.7, { anchor: 'middle', fill: '#555' });
     return out;
   }
+  // ---- mirror style 'arch' (from AOC1828 Emily Mirror): arched steel frame -------------------
+  // Outline: straight sides, a concave shoulder (radius Rs) at each top corner and a convex crown
+  // (radius Rc) centred on the middle line, touching the top; the shoulder circles sit on the side
+  // lines and just touch the crown circle. Every inner outline (tube frame, mirror, back) uses the
+  // same centres, stepped in by d (crown Rc - d, shoulders Rs + d), e.g. R612/R140 -> R604/R148.
+  // Build, front to back: a flat-bar rim all round (rolled to the outline, the full depth), the
+  // mirror behind a front lip, a square-tube frame (outline + a middle upright + cross bars), and
+  // an MDF back.
+  function archGeom(W, H, Rc, Rs) {
+    var dy = Math.sqrt(Math.pow(Rc + Rs, 2) - Math.pow(W / 2, 2));
+    if (!(dy > 0) || Rc - dy < -1e-6) throw new Error('These radii do not make an arch: the crown R' + Rc + ' and shoulders R' + Rs + ' do not meet on a ' + W + ' wide mirror');
+    return { cx: W / 2, cy: Rc, ny: Rc - dy };            // crown centre (cx, cy); shoulder centres (0, ny) and (W, ny)
+  }
+  function archOutline(W, H, Rc, Rs, d, steps) {
+    var g = archGeom(W, H, Rc, Rs), rc = Rc - d, rs = Rs + d, pts = [];
+    if (rc <= 0) throw new Error('The arch is too tight for the parts inside it');
+    var sideTop = g.ny + Math.sqrt(Math.max(0, rs * rs - d * d));          // where the side line meets the shoulder circle
+    var tl = [g.cx * rs / (Rc + Rs), g.ny + (g.cy - g.ny) * rs / (Rc + Rs)];                // shoulder/crown touch point (left)
+    var a0 = Math.atan2(sideTop - g.ny, d - 0), a1 = Math.atan2(tl[1] - g.ny, tl[0]);
+    var N = steps || 24;
+    pts.push([d, H - d]); pts.push([d, sideTop]);
+    for (var i = 1; i <= N; i++) { var a = a0 + (a1 - a0) * i / N; pts.push([rs * Math.cos(a), g.ny + rs * Math.sin(a)]); }   // left shoulder (concave)
+    var cl = Math.atan2(tl[1] - g.cy, tl[0] - g.cx), cr = Math.PI - cl;
+    if (cr > cl) cr -= 2 * Math.PI;
+    var left = pts.slice(), crown = [];
+    for (var j = 1; j < 2 * N; j++) { var b = cl + (cr - cl) * j / (2 * N); crown.push([g.cx + rc * Math.cos(b), g.cy + rc * Math.sin(b)]); }
+    var right = left.slice().reverse().map(function (p) { return [W - p[0], p[1]]; });   // right shoulder, side and bottom corner
+    return left.concat(crown).concat(right);
+  }
+  function buildArchMirror(s) {
+    var W = s.width, H = s.height, a = s.arch, rim = s.rim, tb = s.tube, mr = s.mirror, bk = s.backing, sec = s.section || {};
+    var Rc = a.crownRadius, Rs = a.shoulderRadius;
+    var outer = archOutline(W, H, Rc, Rs, 0), mirO = archOutline(W, H, Rc, Rs, mr.inset), backO = archOutline(W, H, Rc, Rs, bk.inset), tubeO = archOutline(W, H, Rc, Rs, tb.inset);
+    var t = tb.size, inner = archOutline(W, H, Rc, Rs, tb.inset + t);
+    var depth = rim.width, stack = (sec.frontLip || 0) + mr.thickness + (sec.gap || 0) + t + bk.thickness + (sec.backLip || 0);
+    if (Math.abs(stack - depth) > 0.5) throw new Error('Front lip + mirror + gap + tube + back + back lip = ' + stack + ', but the rim is ' + depth + ' deep');
+    var rows = tb.rows || 4, cols = tb.cols || 2;
+    var fw = W - 2 * tb.inset, archTop = archGeom(W, H, Rc, Rs);
+    var Hin = H - 2 * (tb.inset + t), colW = (fw - 2 * t - (cols - 1) * t) / cols;
+    var rowHs = (tb.rowHeights && tb.rowHeights.length === rows) ? tb.rowHeights.map(Number) : [];
+    var sumR = rowHs.reduce(function (x, y) { return x + y; }, 0) + (rows - 1) * t;
+    if (!rowHs.length || Math.abs(sumR - Hin) > 2) rowHs = []; for (var ri = 0; ri < rows && rowHs.length < rows; ri++) rowHs.push(n2((Hin - (rows - 1) * t) / rows));
+    // cross bars: evenly between the bottom tube and the top of the straight sides, as drawn
+    var parts = [];
+    function part(name, qty, l, w, th, mat, note, unit) { parts.push({ name: name, qty: qty, length: n2(l), width: w, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '', unit: unit }); }
+    var steel = [];
+    function bar(name, qty, len, mat, size, note) { var sz = String(size).split(' x ').map(Number); steel.push({ name: name, qty: qty, length: Math.round(len), code: mat.code, material: mat.material, w: sz[1] || sz[0], t: sz[0], note: note || '' }); }
+    bar('Rim (rolled to the outline)', 1, perimOf(outer), rim, rim.thickness + ' x ' + rim.width, 'flat bar, roll + weld to the arch');
+    bar('Tube frame outline', 1, perimOf(tubeO) - 4 * t, tb, t + ' x ' + t, 'bend to the arch, weld');
+    var crownY = archTop.cy - (Rc - tb.inset - t);                                         // underside of the tube at the crown
+    bar('Upright (middle)', cols - 1, H - tb.inset - t - crownY, tb, t + ' x ' + t, 'bottom tube to the crown');
+    bar('Cross bar', rows - 1, colW * cols + (cols - 1) * t, tb, t + ' x ' + t, 'between the frame sides');
+    var M = CNC_MARGIN;
+    part('Mirror', 1, H - 2 * mr.inset, W - 2 * mr.inset, mr.thickness, mr, 'cut to the arch (R' + (Rc - mr.inset) + ' / R' + (Rs + mr.inset) + '), polished edge');
+    part('Back (CNC blank)', 1, H - 2 * bk.inset + M, W - 2 * bk.inset + M, bk.thickness, bk, 'CNC to the arch, ' + (W - 2 * bk.inset) + ' x ' + (H - 2 * bk.inset) + ' (+' + M + ' to clamp)');
+    var hw = (s.fittings && s.fittings.items || []).filter(function (x) { return x && x.name && x.qty; }).map(function (x, i) { return { code: 'H' + (i + 1), qty: x.qty, name: x.name }; });
+    var totals = totalsOf(parts);
+    steel.forEach(function (b) { var tt = totals.filter(function (x) { return x.code === b.code; })[0]; if (!tt) totals.push(tt = { code: b.code, material: b.material, unit: 'm', amount: 0 }); tt.amount += b.qty * b.length / 1000; });
+    totals.sort(function (x, y) { return x.code < y.code ? -1 : 1; });
+    var den = pickScale(function (k) { return H * k <= 150 && W * k <= 80; });
+    return { arch: true, scale: '1:' + den, k: 1 / den, materials: materialsOf([rim, tb, mr, bk]), W: W, H: H, Rc: Rc, Rs: Rs, depth: depth, t: t, rows: rows, cols: cols, colW: colW, rowHs: rowHs, Hin: Hin,
+      outer: outer, mirO: mirO, backO: backO, tubeO: tubeO, inner: inner, crownY: crownY, geom: archTop, parts: parts, steel: steel, hardware: hw, totals: totals,
+      overall: { width: W, depth: depth, height: H } };
+  }
+  var GOLD = '#c9a54a', GOLD_D = '#a8862f', GLASS = '#dfe7ea';
+  // front (client) / tube frame (workshop) / mirror (workshop); (ox, oy) = top-left of the overall size
+  function archView(s, m, ox, oy, mode) {
+    var k = m.k, out = '', W = m.W * k, H = m.H * k;
+    function pl(pts, d) { return place(pts, k, ox + d * k, oy + d * k); }
+    if (mode === 'front') {
+      out += '<path d="' + pathOf(place(m.outer, k, ox, oy), true) + ' ' + pathOf(place(m.mirO, k, ox, oy).reverse(), true) + '" fill="' + GOLD + '" fill-rule="evenodd" stroke="#111" stroke-width="0.3"/>';
+      out += poly2(place(m.mirO, k, ox, oy), GLASS, 0.25);
+      out += line(ox + W * 0.3, oy + H * 0.35, ox + W * 0.6, oy + H * 0.25, 0.2, ' stroke-opacity="0.5"') + line(ox + W * 0.35, oy + H * 0.45, ox + W * 0.7, oy + H * 0.33, 0.2, ' stroke-opacity="0.5"');
+      out += hChain([ox, ox + W], [m.W], oy - 5, oy) + vChain([oy, oy + H], [m.H], ox + W + 6, ox + W);
+      out += archRadii(m, ox, oy, 0);
+      return out;
+    }
+    if (mode === 'tube') {
+      var d = s.tube.inset, t = m.t * k, fw = (m.W - 2 * d) * k, fx = ox + d * k, by = oy + (m.H - d) * k;
+      out += '<path d="' + pathOf(place(m.tubeO, k, ox, oy), true) + ' ' + pathOf(place(m.inner, k, ox, oy).reverse(), true) + '" fill="#555" fill-rule="evenodd" stroke="#111" stroke-width="0.25"/>';
+      var yTop = d + m.t, yy0 = yTop;
+      for (var r = 0; r < m.rows - 1; r++) { yy0 += m.rowHs[r]; out += rect(fx + t, oy + yy0 * k, fw - 2 * t, t, 0.2, '#555'); yy0 += m.t; }
+      for (var c = 1; c < m.cols; c++) { var xx = fx + t + (c * m.colW + (c - 1) * m.t) * k; out += rect(xx, oy + m.crownY * k, t, by - t - (oy + m.crownY * k), 0.2, '#555'); }
+      var hx = [fx, fx + t], hv = [m.t];
+      for (var cc = 0; cc < m.cols; cc++) { hx.push(hx[hx.length - 1] + m.colW * k); hv.push(n2(m.colW)); hx.push(hx[hx.length - 1] + t); hv.push(m.t); }
+      out += hChain(hx, hv, oy - 4, oy);
+      var ys = [oy + d * k, oy + yTop * k], vs = [m.t];
+      for (var q = 0; q < m.rows; q++) { ys.push(ys[ys.length - 1] + m.rowHs[q] * k); vs.push(m.rowHs[q]); ys.push(ys[ys.length - 1] + t); vs.push(m.t); }
+      out += vChain(ys, vs, ox + W + 6, ox + W) + hChain([fx, fx + fw], [m.W - 2 * d], oy - 9, oy);
+      out += text(fx + fw / 2, by + 4, m.t + ' mm square tube, ' + (m.rows - 1) + ' cross bars, ' + (m.cols - 1) + ' upright', 1.7, { anchor: 'middle', fill: '#444' });
+      return out;
+    }
+    var din = s.mirror.inset;
+    out += poly2(place(m.mirO, k, ox, oy), GLASS, 0.3);
+    out += hChain([ox + din * k, ox + (m.W - din) * k], [m.W - 2 * din], oy - 4, oy) + vChain([oy + din * k, oy + (m.H - din) * k], [m.H - 2 * din], ox + W + 6, ox + W);
+    out += archRadii(m, ox, oy, din);
+    return out;
+  }
+  function archRadii(m, ox, oy, d) {
+    var k = m.k, g = m.geom, cx = ox + g.cx * k, cy = oy + g.cy * k, rc = (m.Rc - d) * k, a = -Math.PI * 0.62, out = '';
+    out += line(cx, cy, cx + rc * Math.cos(a), cy + rc * Math.sin(a), 0.18) + text(cx + rc * 0.55 * Math.cos(a) - 2, cy + rc * 0.55 * Math.sin(a), 'R' + (m.Rc - d), 1.9, { anchor: 'end' });
+    var sx = ox + m.W * k, sy = oy + g.ny * k, rs = (m.Rs + d) * k, b = Math.PI * 0.8;
+    out += line(sx, sy, sx + rs * Math.cos(b), sy + rs * Math.sin(b), 0.18) + text(sx + 2, sy - 1, 'R' + (m.Rs + d), 1.9);
+    return out;
+  }
+  // section through the side, 1:1; (ox, oy) = front face, outer edge; depth runs right
+  function archSection(s, m, ox, oy) {
+    var k = 1, sec = s.section || {}, rt = s.rim.thickness, D = m.depth, out = '', x = ox, h = 34;
+    out += rect(ox, oy, D, rt, 0.3, GOLD);                                                      // rim (seen in section along the edge)
+    var y0 = oy + rt;
+    x += (sec.frontLip || 0);
+    out += rect(x, y0, s.mirror.thickness, h, 0.25, GLASS); var xm = x; x += s.mirror.thickness + (sec.gap || 0);
+    out += rect(x, y0 + 2, m.t, m.t, 0.3, '#555'); var xt = x; x += m.t;
+    out += rect(x, y0, s.backing.thickness, h, 0.25, '#e9dcc7'); var xb = x;
+    out += hChain([ox, ox + (sec.frontLip || 0), xm + s.mirror.thickness, xt, xt + m.t, xb + s.backing.thickness, ox + D], [sec.frontLip || 0, s.mirror.thickness, sec.gap || 0, m.t, s.backing.thickness, sec.backLip || 0].map(n2), oy - 4, oy);
+    out += hChain([ox, ox + D], [m.depth], oy - 9, oy) + vChain([oy, oy + rt], [rt], ox - 4, ox);
+    out += text(xm + 1, y0 + h + 3.5, 'mirror', 1.7, { fill: '#444' }) + text(xt, y0 + m.t + 6, 'tube', 1.7, { fill: '#444' }) + text(xb, y0 + h + 6.5, 'back', 1.7, { fill: '#444' });
+    out += text(ox, y0 + h + 10, 'front on the left; rim ' + rt + ' x ' + D + ' flat bar', 1.7, { fill: '#555' });
+    return out;
+  }
+  function archIso(s, m, bx, by, bw, bh) {
+    var c = Math.cos(Math.PI / 6), sn = 0.5, W = m.W, H = m.H, D = m.depth;
+    var spanX = (W + D) * c, spanY = H + (W + D) * sn, sc = Math.min(bw / spanX, bh / spanY);
+    var cx = bx + (bw - spanX * sc) / 2 + D * c * sc, cy = by + (bh - spanY * sc) / 2 + H * sc;
+    function P(x, y, z) { return [cx + (x * c - z * c) * sc, cy - y * sc + (x * sn + z * sn) * sc]; }
+    var front = m.outer.map(function (p) { return P(p[0], H - p[1], D); }), back = m.outer.map(function (p) { return P(p[0], H - p[1], 0); });
+    var out = poly2(hull(front.concat(back)), GOLD_D, 0.3) + poly2(front, GOLD, 0.3);
+    var din = s.mirror.inset;
+    out += poly2(m.mirO.map(function (p) { return P(p[0], H - p[1], D); }), GLASS, 0.25);
+    var tR = P(W, H * 0.5, D), tM = P(W * 0.5, H * 0.45, D);
+    out += tag(tR[0] + 3, tR[1], s.rim.code) + tag(tM[0], tM[1], s.mirror.code);
+    return out;
+  }
   TEMPLATES.mirror = {
     build: buildMirror,
     clientViews: function (s, m) {
+      if (m.arch) {
+        var ka = m.k, Wa = m.W * ka, Ha = m.H * ka, sx = 30 + Wa + 26;
+        return archView(s, m, 30, 30, 'front') + viewTitle(24, 30 + Ha + 14, 1, 'FRONT VIEW', m.scale) +
+          rect(sx, 30, Math.max(m.depth * ka, 1), Ha, 0.3, GOLD) + hChain([sx, sx + m.depth * ka], [m.depth], 25, 30) + vChain([30, 30 + Ha], [m.H], sx + m.depth * ka + 5, sx + m.depth * ka) + viewTitle(sx - 6, 30 + Ha + 14, 2, 'SIDE', m.scale) +
+          archSection(s, m, sx + 30, 50) + viewTitle(sx + 24, 120, 3, 'SECTION', '1:1') +
+          archIso(s, m, sx + 90, 26, 318 - sx - 90, 186) + viewTitle(sx + 90, 222, 4, '3D VIEW', 'not to scale');
+      }
       var k = m.k, W = m.W * k, H = m.H * k, top = 104 - H;
       return mirrorView(s, m, 30, top, 'front') + viewTitle(24, 118, 1, 'FRONT VIEW', m.scale) +
         rect(30 + W + 26, top, m.Tf * k, H, 0.3, FACE) + vChain([top, top + H], [m.H], 30 + W + 26 + m.Tf * k + 5, 30 + W + 26 + m.Tf * k) +
@@ -980,6 +1163,15 @@
         tag(30 + W * 0.5, top + 4, s.frame.code) + tag(30 + W * 0.5, top + H * 0.5, s.mirror.code);
     },
     workshopViews: function (s, m) {
+      if (m.arch) {
+        var kb = m.k, Wb = m.W * kb, Hb = m.H * kb, x2 = 30 + Wb + 30, x3 = x2 + Wb + 34;
+        return archView(s, m, 30, 30, 'tube') + viewTitle(24, 30 + Hb + 14, 1, 'STEEL TUBE FRAME', m.scale) +
+          archView(s, m, x2, 30, 'mirror') + viewTitle(x2 - 6, 30 + Hb + 14, 2, 'MIRROR', m.scale) +
+          archSection(s, m, x3, 50) + viewTitle(x3 - 6, 120, 3, 'SECTION', '1:1') +
+          text(x3 - 6, 140, 'Back: ' + s.backing.material + ' cut to the arch, ' + s.backing.inset + ' in from the outside.', 1.9, { fill: '#444' }) +
+          text(x3 - 6, 144, 'Rim: ' + s.rim.thickness + ' x ' + s.rim.width + ' flat bar rolled to the outline, ' + Math.round(perimOf(m.outer)) + ' long.', 1.9, { fill: '#444' }) +
+          text(x3 - 6, 148, 'All outlines share the same centres (crown R' + m.Rc + ', shoulders R' + m.Rs + ').', 1.9, { fill: '#444' });
+      }
       var k = m.k, H = m.H * k, top = 112 - H, x2 = 30 + m.W * k + 22, x3 = x2 + (m.W - 2 * m.bi) * k + 22;
       return mirrorView(s, m, 30, top, 'back') + viewTitle(24, 124, 1, 'BACK VIEW', m.scale) +
         mirrorPanel(m, m.backO, m.W - 2 * m.bi, m.H - 2 * m.bi, x2, top + m.bi * k, 'backing') + viewTitle(x2, 124, 2, 'BACKING', m.scale) +
