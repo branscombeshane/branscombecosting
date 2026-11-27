@@ -1049,7 +1049,7 @@
   // front elevation; (ox, oy) = left end at floor level. section = faces off (carcass)
   function deskFront(s, m, ox, oy, section) {
     var k = m.k, W = m.W * k, H = m.H * k, T = m.T * k, A = m.A * k, ta = m.ta * k, d = m.d * k, top = oy - H, ab = top + T + A, wd = m.wave * k, out = '';
-    out += rect(ox + ta, ab - 0.01, d, oy - ab, 0.3, OAK) + rect(ox + W - ta - d, ab - 0.01, d, oy - ab, 0.3, OAK);
+    out += rect(ox + ta, top + T, d, oy - top - T, 0.3, OAK) + rect(ox + W - ta - d, top + T, d, oy - top - T, 0.3, OAK);   // legs up to the top; the aprons are drawn over them
     if (!section) {
       var x = ox;
       for (var i = 0; i < m.n; i++) {
@@ -1093,7 +1093,7 @@
   // side elevation; (ox, oy) = back end at floor level
   function deskSide(s, m, ox, oy) {
     var k = m.k, D = m.D * k, H = m.H * k, T = m.T * k, A = m.A * k, ta = m.ta * k, d = m.d * k, top = oy - H, ab = top + T + A, wd = m.wave * k, out = '';
-    out += rect(ox + ta, ab, d, oy - ab, 0.3, OAK) + rect(ox + D - ta - d, ab, d, oy - ab, 0.3, OAK);
+    out += rect(ox + ta, top + T, d, oy - top - T, 0.3, OAK) + rect(ox + D - ta - d, top + T, d, oy - top - T, 0.3, OAK);
     var edge = m.wave ? wavePath(ox, ox + D, ab, m.flat * k, m.flat * k, arches(m.D - 2 * m.flat, m.pitch), wd) : [[ox, ab], [ox + D, ab]];
     out += poly2([[ox, top + T]].concat(edge).concat([[ox + D, top + T]]), FACE, 0.3);
     out += rect(ox, top, D, T, 0.35, OAK);
@@ -1157,7 +1157,7 @@
     function P(x, y, z) { return [cx + (x * c - z * c) * sc, cy - y * sc + (x * sn + z * sn) * sc]; }
     function poly(pts, fill) { return poly2(pts, fill, 0.3); }
     var out = '', r = m.d / 2, rx = r * Math.SQRT2 * c * sc, ry = r * Math.SQRT2 * sn * sc, y0 = H - m.T - m.A;
-    function leg(x, z) { var b = P(x, 0, z), t = P(x, y0, z); return '<path d="M' + n2(t[0] - rx) + ',' + n2(t[1]) + ' L' + n2(b[0] - rx) + ',' + n2(b[1]) + ' A' + n2(rx) + ' ' + n2(ry) + ' 0 0 0 ' + n2(b[0] + rx) + ',' + n2(b[1]) + ' L' + n2(t[0] + rx) + ',' + n2(t[1]) + ' Z" fill="#c4a378" stroke="#111" stroke-width="0.25"/>'; }
+    function leg(x, z) { var b = P(x, 0, z), t = P(x, H - m.T, z); return '<path d="M' + n2(t[0] - rx) + ',' + n2(t[1]) + ' L' + n2(b[0] - rx) + ',' + n2(b[1]) + ' A' + n2(rx) + ' ' + n2(ry) + ' 0 0 0 ' + n2(b[0] + rx) + ',' + n2(b[1]) + ' L' + n2(t[0] + rx) + ',' + n2(t[1]) + ' Z" fill="#c4a378" stroke="#111" stroke-width="0.25"/>'; }
     var i0 = m.ta + r;
     out += leg(i0, i0);
     // apron box: front (z = D) and right side (x = W) faces, with the wave
