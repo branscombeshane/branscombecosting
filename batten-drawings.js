@@ -315,6 +315,19 @@
       out += rect(ox + B + 0.1, top + H / 2 - T / 2, (m.Din - 1) * k, T, 0.25, 'none', DASH);
       out += text(ox + B + 2, top + H / 2 - T / 2 - 1, 'shelf', 1.8);
       out += text(ox + B + 1.2, top + T + 3, 'back in rebate', 1.6, { fill: '#555' });
+      // shelf pin holes on the inside face of the sides / dividers (Shane, 28 Nov), when the shelves are adjustable
+      var so = s.setout || {}, rowsIn = so.pinRowsFromEdge || 37, pitch = so.pinPitch || 32, shelfN = (s.shelves || []).reduce(function (a, b) { return a + b; }, 0);
+      if (shelfN && !(s.shelvesFixed === true || s.shelvesFixed === 'yes')) {
+        var ihm = m.H - 2 * m.T, first = 100, ys = [], xr = [ox + (m.B + rowsIn) * k, ox + Dc - rowsIn * k], rr = Math.max(0.3, 2.5 * k);
+        for (var py = first; py <= ihm - 100 + 0.01; py += pitch) ys.push(py);
+        ys.forEach(function (py) { xr.forEach(function (px) { out += circle(px, top + H - T - py * k, rr, '#fff', 0.12); }); });
+        if (ys.length) {
+          var yTop = ys[ys.length - 1], y0 = top + H - T;
+          out += vChain([top + T, y0 - yTop * k, y0 - first * k, y0], [Math.round(ihm - yTop), Math.round(yTop - first), first], ox + Dc - rowsIn * k - 4, ox + Dc - rowsIn * k);
+          out += hChain([ox + B, xr[0]], [rowsIn], y0 - 2.5, y0) + hChain([xr[1], ox + Dc], [rowsIn], y0 - 2.5, y0);
+          out += text(ox + Dc / 2, y0 - first * 0.45 * k, 'Ø5 shelf pin holes, ' + pitch + ' apart', 1.5, { anchor: 'middle', fill: '#555' });
+        }
+      }
     }
     if (m.topOver) out += rect(ox, top, D, T, 0.3, '#d9c4a0') + rect(ox + Dc, top + (m.T + m.dGap) * k, m.Td * k, m.doorH * k, 0.3, '#e8d9c0');   // top over the door
     else out += rect(ox + Dc, top, m.Td * k, H, 0.3, '#e8d9c0');                  // door
@@ -367,7 +380,7 @@
     if (op.type === 'knob') notes.push('Knob ' + (op.fromEdge || 50) + ' from the edge away from the hinge, ' + (op.fromTop || 110) + ' from the top.');
     if (op.type === 'pushToOpen') notes.push('Push to open: one per door at the top, on the edge away from the hinge.');
     var shelfN = (s.shelves || []).reduce(function (a, b) { return a + b; }, 0), fixed = s.shelvesFixed === true || s.shelvesFixed === 'yes';
-    if (shelfN && !fixed) notes.push('Shelf pins: Ø5 holes in the sides / dividers, 2 rows ' + rows + ' in from front and back, ' + pitch + ' apart, from 100 above the bottom to 100 below the top.');
+    if (shelfN && !fixed) notes.push('Shelf pins: Ø5 holes in the sides / dividers (both faces of a divider), 2 rows: ' + rows + ' from the front edge and ' + rows + ' from the back panel, ' + pitch + ' apart, from 100 above the bottom to 100 below the top (see the side section).');
     if (m.holeD) notes.push('Back: Ø' + m.holeD + ' hole in each compartment, ' + holeWords(m.holeV, m.holeH, m.H - 2 * m.T, m.holeD) + '.');
     var nx = x0 + dw + 14, nw = 318 - nx, ny = y0 + 2;
     if (nw < 40) { nx = x0; nw = pw; ny = y0 + dh + 8; }
