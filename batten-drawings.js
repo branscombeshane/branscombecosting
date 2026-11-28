@@ -46,6 +46,14 @@
     (function () { var tot = W - (n - 1) * g, base = Math.floor(tot / n), rem = tot - base * n; doors = doors.map(function () { return base; });
       var mid = (n - 1) / 2, order = doors.map(function (d, i) { return i; }).sort(function (a, b) { return Math.abs(a - mid) - Math.abs(b - mid) || a - b; });
       for (var q = 0; q < rem; q++) doors[order[q]] += 1; })();
+    var dws = (typeof s.doorWidths === 'string' ? s.doorWidths.split(/[,\s]+/).filter(Boolean).map(Number) : (s.doorWidths || []));           // door widths as drawn (e.g. 590,582,582,590)
+    if (dws.length === n) {
+      var dsum = dws.reduce(function (a, b) { return a + b; }, 0);
+      if (Math.abs(dsum - (W - (n - 1) * g)) > 0.5) throw new Error('Door widths add up to ' + dsum + ' + gaps ' + (n - 1) * g + ', but the cabinet is ' + W + ' wide');
+      doors = dws;
+    }
+    // (AOC1561 Plinth media unit) the top can run over the doors, the doors sitting a gap below it
+    var topOver = s.topOverDoors === true || s.topOverDoors === 'yes', dGap = s.doorTopGap == null ? 2 : s.doorTopGap, doorH = topOver ? H - T - dGap : H;
     var cuts = [], acc = 0;                // divider centres: behind the gaps between doors
     for (var c = 0; c < n - 1; c++) { acc += doors[c]; cuts.push(acc + g / 2); acc += g; }
     var bays = [], left = T;
@@ -59,7 +67,7 @@
     var parts = [];
     function edgeOf(mat, edge, len) { return mat && mat.edging ? [edge, len] : ['', 0]; }
     function part(name, qty, l, w, t, mat, edge, edgeLen, note) { var e = edgeOf(mat, edge, edgeLen); parts.push({ name: name, qty: qty, length: l, width: w, thickness: t, code: mat.code, material: mat.material, edge: e[0], edgeLen: e[1], edgeCode: mat.edgingCode, edgeName: mat.edging, note: note || '' }); }
-    part('Top', 1, W, Dc, T, s.board, 'all round', 2 * (W + Dc));
+    part('Top', 1, W, topOver ? D : Dc, T, s.board, 'all round', 2 * (W + (topOver ? D : Dc)), topOver ? 'runs over the doors' : '');
     part('Side', 2, sideH, Dc, T, s.board, 'front, back, bottom', 2 * sideH + Dc);
     part('Bottom', 1, W - 2 * T, Dc, T, s.board, 'front', W - 2 * T);
     if (n > 1) part('Divider', n - 1, divH, Din, T, s.board, 'front', divH, 'centred behind the door gap');
@@ -82,21 +90,28 @@
     var slatInfo = null;
     Object.keys(doorRows).sort().reverse().forEach(function (k) {
       var r = doorRows[k];
-      if (!r.slatted) { part('Door', r.qty, H, r.w, Td, db, 'all round', 2 * (H + r.w)); return; }
+      if (!r.slatted) { part('Door', r.qty, doorH, r.w, Td, db, 'all round', 2 * (doorH + r.w), topOver ? dGap + ' below the top' : ''); return; }
       var sb = sl.doorBoard || db, sw = sl.width || 45, sg = sl.gap || 31, m0 = sl.margin == null ? 20 : sl.margin;
       var cnt = Math.max(1, Math.floor((r.w - 2 * m0 + sg) / (sw + sg))), marg = n2((r.w - cnt * sw - (cnt - 1) * sg) / 2);
       slatInfo = { count: cnt, width: sw, gap: sg, margin: marg, thickness: sl.thickness };
-      part('Door (slatted)', r.qty, H, r.w, sb.thickness, sb, 'all round', 2 * (H + r.w), cnt + ' slats ' + sw + ' wide, ' + sg + ' apart, ' + marg + ' in from each edge');
-      part('Slat', r.qty * cnt, H, sw, sl.thickness, sl, '', 0, 'glued to the slatted door face');
+      part('Door (slatted)', r.qty, doorH, r.w, sb.thickness, sb, 'all round', 2 * (doorH + r.w), cnt + ' slats ' + sw + ' wide, ' + sg + ' apart, ' + marg + ' in from each edge');
+      part('Slat', r.qty * cnt, doorH, sw, sl.thickness, sl, '', 0, 'glued to the slatted door face');
     });
-    part('Back (rebated ' + R + ' mm)', 1, W - 2 * T + 2 * R, H - 2 * T + 2 * R, B, s.back, '', 0);
-    var base = s.base, frameL = W - 2 * base.insetX, frameW = D - 2 * base.insetY, legH = base.height - base.tube;
-    var steel = [], mid = base.middleRails || 0;
-    function bar(name, qty, len) { steel.push({ name: name, qty: qty, length: len, code: base.code, material: base.material }); }
-    bar('Long rail', 2, frameL);
-    bar('Cross rail', 2 + mid, frameW - 2 * base.tube);
-    var midLegs = base.middleLegs === true || base.middleLegs === 'yes';
-    bar('Leg', 4 + (midLegs ? 2 * mid : 0), legH);
+    var bh = s.backHoles || {}, holeD = Number(bh.diameter) || 0;      // cable holes through the back, centred in each compartment, in its upper quarter
+    part('Back (rebated ' + R + ' mm)', 1, W - 2 * T + 2 * R, H - 2 * T + 2 * R, B, s.back, '', 0, holeD ? n + ' x Ø' + holeD + ' holes, centred in each compartment, ' + Math.round((H - 2 * T) / 8) + ' below the top inside' : '');
+    var base = s.base, plinth = base.type === 'plinth', steel = [], mid = base.middleRails || 0, frameL, frameW, legH;
+    if (plinth) {                                  // a box of carcass board under the carcass, set in from the ends, front and back
+      frameL = W - 2 * base.insetX; frameW = D - (base.insetFront || 0) - (base.insetBack || 0); legH = base.height;
+      part('Plinth front/back', 2, frameL, base.height, T, s.board, '', 0, base.insetX + ' in from each end');
+      part('Plinth side', 2, frameW - 2 * T, base.height, T, s.board, '', 0, 'between the plinth front and back');
+    } else {
+      frameL = W - 2 * base.insetX; frameW = D - 2 * base.insetY; legH = base.height - base.tube;
+      var bar = function (name, qty, len) { steel.push({ name: name, qty: qty, length: len, code: base.code, material: base.material }); };
+      bar('Long rail', 2, frameL);
+      bar('Cross rail', 2 + mid, frameW - 2 * base.tube);
+      var midLegs = base.middleLegs === true || base.middleLegs === 'yes';
+      bar('Leg', 4 + (midLegs ? 2 * mid : 0), legH);
+    }
     // hardware: 2 hinges per door; a door hinged on an end side is full overlay; on a divider, half overlay
     var full = 0, half = 0;
     hinge.forEach(function (side, i) { var outer = side === 'L' ? i === 0 : i === n - 1; if (outer) full += 2; else half += 2; });
@@ -107,7 +122,10 @@
     if (half) item('H' + hc++, half, 'Hinge, half overlay');
     item('H' + hc++, full + half, 'Hinge plate');
     var knobDoors = doors.map(function (d, i) { return i; }).filter(function (i) { return slatDoors.indexOf(i + 1) === -1 || op.slatted; });
+    var handleDoors = (typeof op.doors === 'string' ? op.doors.split(/[,\s]+/).filter(Boolean).map(Number) : (op.doors || [])).filter(function (x) { return x >= 1 && x <= n; });
+    if (op.type === 'handle' && !handleDoors.length) handleDoors = knobDoors.map(function (i) { return i + 1; });
     if (op.type === 'pushToOpen') { item('H' + hc++, n, op.item); if (op.housing) item('H' + hc++, n, op.housing); }
+    else if (op.type === 'handle') { item('H' + hc++, handleDoors.length, op.item || 'Bar handle'); if (op.otherItem && handleDoors.length < n) item('H' + hc++, n - handleDoors.length, op.otherItem); }
     else if (op.type === 'knob' && knobDoors.length) item('H' + hc++, knobDoors.length * (op.perDoor || 1), op.item || 'Knob');
     if (op.type === 'knob' && slatDoors.length && !op.slatted && op.slattedItem) item('H' + hc++, slatDoors.length, op.slattedItem);
     var shelfCount = (s.shelves || []).reduce(function (a, b) { return a + b; }, 0);
@@ -125,7 +143,8 @@
     });
     var list = Object.keys(totals).sort().map(function (k) { return totals[k]; }).concat(Object.keys(edging).sort().map(function (k) { return edging[k]; }));
     var den = pickScale(function (k) { return (W + D) * k <= 255 && (H + base.height) * k <= 80 && D * k <= 62; });
-    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([s.board, db, s.slats && slatDoors.length ? sl.doorBoard : null, slatDoors.length ? sl : null, s.back, s.base]),
+    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([s.board, db, s.slats && slatDoors.length ? sl.doorBoard : null, slatDoors.length ? sl : null, s.back, plinth ? null : s.base]),
+      topOver: topOver, dGap: dGap, doorH: doorH, plinth: plinth, handleDoors: handleDoors, holeD: holeD,
       T: T, Td: Td, B: B, R: R, W: W, D: D, H: H, n: n, Dc: Dc, Din: Din, sideH: sideH, divH: divH, bays: bays, doors: doors, cuts: cuts, hinge: hinge, slatDoors: slatDoors, slatInfo: slatInfo,
       frameL: frameL, frameW: frameW, legH: legH, parts: parts, steel: steel, hardware: hw, totals: list, shelfAt: shelfAt, overall: { width: W, depth: D, height: H + base.height } };
   }
@@ -180,19 +199,21 @@
   function frontView(s, m, ox, oy, withDoors) {
     var k = m.k, W = m.W * k, H = m.H * k, b = s.base.height * k, T = m.T * k, out = '';
     var top = oy - b - H;
-    // steel base: legs at each end, rail along the front
-    var lx = s.base.insetX * k, tb = s.base.tube * k;
-    out += rect(ox + lx, oy - b, tb, b, 0.3, '#222') + rect(ox + W - lx - tb, oy - b, tb, b, 0.3, '#222');
-    out += rect(ox + lx, oy - b, W - 2 * lx, tb, 0.3, '#222');
-    if (s.base.middleLegs === true || s.base.middleLegs === 'yes') for (var ml = 1; ml <= (s.base.middleRails || 0); ml++) { var mx = ox + lx + (W - 2 * lx - tb) * ml / ((s.base.middleRails || 0) + 1); out += rect(mx, oy - b, tb, b, 0.3, '#222'); }
+    // base: a plinth box, or a steel frame (legs at each end, rail along the front)
+    var lx = s.base.insetX * k, tb = (s.base.tube || 0) * k;
+    if (m.plinth) out += rect(ox + lx, oy - b, W - 2 * lx, b, 0.3, '#c9ab7f');
+    else { out += rect(ox + lx, oy - b, tb, b, 0.3, '#222') + rect(ox + W - lx - tb, oy - b, tb, b, 0.3, '#222'); out += rect(ox + lx, oy - b, W - 2 * lx, tb, 0.3, '#222'); }
+    if (!m.plinth && (s.base.middleLegs === true || s.base.middleLegs === 'yes')) for (var ml = 1; ml <= (s.base.middleRails || 0); ml++) { var mx = ox + lx + (W - 2 * lx - tb) * ml / ((s.base.middleRails || 0) + 1); out += rect(mx, oy - b, tb, b, 0.3, '#222'); }
     if (withDoors) {
-      var x = ox, op = s.openers || {};
+      var x = ox, op = s.openers || {}, dTop = m.topOver ? top + (m.T + m.dGap) * k : top, dH = m.doorH * k;
       out += rect(ox, top, W, H, 0.4, '#efe4d2');
+      if (m.topOver) out += rect(ox, top, W, T, 0.3, '#d9c4a0');
       m.doors.forEach(function (d, i) {
-        out += rect(x, top, d * k, H, 0.3, '#e8d9c0');
+        out += rect(x, dTop, d * k, dH, 0.3, '#e8d9c0');
+        if (op.type === 'handle' && m.handleDoors.indexOf(i + 1) !== -1) { var hx = m.hinge[i] === 'L' ? x + d * k - (op.fromEdge || 30) * k : x + (op.fromEdge || 30) * k; out += rect(hx - Math.max(0.6, 8 * k), dTop + (op.fromTop || 150) * k, Math.max(1.2, 16 * k), (op.length || 160) * k, 0.2, '#333'); }
         var slatted = m.slatDoors.indexOf(i + 1) !== -1;
-        if (slatted && m.slatInfo) { for (var q = 0; q < m.slatInfo.count; q++) { var sx = x + (m.slatInfo.margin + q * (m.slatInfo.width + m.slatInfo.gap)) * k; out += rect(sx, top, m.slatInfo.width * k, H, 0.2, '#d6be98'); } }
-        if (op.type === 'knob' && (!slatted || op.slatted)) { var kx = m.hinge[i] === 'L' ? x + d * k - (op.fromEdge || 50) * k : x + (op.fromEdge || 50) * k; out += circle(kx, top + (op.fromTop || 110) * k, Math.max(0.8, 15 * k), '#333', 0.2); }
+        if (slatted && m.slatInfo) { for (var q = 0; q < m.slatInfo.count; q++) { var sx = x + (m.slatInfo.margin + q * (m.slatInfo.width + m.slatInfo.gap)) * k; out += rect(sx, dTop, m.slatInfo.width * k, dH, 0.2, '#d6be98'); } }
+        if (op.type === 'knob' && (!slatted || op.slatted)) { var kx = m.hinge[i] === 'L' ? x + d * k - (op.fromEdge || 50) * k : x + (op.fromEdge || 50) * k; out += circle(kx, dTop + (op.fromTop || 110) * k, Math.max(0.8, 15 * k), '#333', 0.2); }
         x += d * k + s.doorGap * k;
       });
     } else {
@@ -208,6 +229,7 @@
           out += rect(cx + 0.1, sy, bay * k - 0.2, T, 0.25, 'none', DASH);
           out += text(cx + bay * k / 2, sy - 1, 'shelf', 1.8, { anchor: 'middle' });
         }
+        if (m.holeD) { var hy = top + T + (H - 2 * T) / 8; out += circle(cx + bay * k / 2, hy, m.holeD * k / 2, '#fff', 0.25) + (i === 0 ? text(cx + bay * k / 2 + m.holeD * k / 2 + 1, hy + 0.7, 'Ø' + m.holeD + ' in the back', 1.6, { fill: '#555' }) : ''); }
         cx += bay * k;
         if (i < m.bays.length - 1) { out += rect(cx, top + T, T, H - 2 * T, 0.3, '#d9c4a0'); cx += T; }
       });
@@ -226,10 +248,11 @@
       out += hChain(xs2, vals2, top - 4, top);
     }
     if (!withDoors) out += vChain([top, top + T, top + H - T, top + H], [m.T, m.H - 2 * m.T, m.T], ox - 5, ox);
+    else if (m.topOver) out += vChain([top, top + T, top + T + m.dGap * k, top + H], [m.T, m.dGap, m.doorH], ox - 5, ox);
     out += vChain([top, oy - b, oy], [m.H, s.base.height], ox + W + 5, ox + W);
     out += vChain([top, oy], [m.H + s.base.height], ox + W + 11, ox + W);
-    var lxs = [ox, ox + lx, ox + lx + tb, ox + W - lx - tb, ox + W - lx, ox + W];
-    out += hChain(lxs, [s.base.insetX, s.base.tube, m.frameL - 2 * s.base.tube, s.base.tube, s.base.insetX], oy + 5, oy);
+    if (m.plinth) out += hChain([ox, ox + lx, ox + W - lx, ox + W], [s.base.insetX, m.frameL, s.base.insetX], oy + 5, oy);
+    else { var lxs = [ox, ox + lx, ox + lx + tb, ox + W - lx - tb, ox + W - lx, ox + W]; out += hChain(lxs, [s.base.insetX, s.base.tube, m.frameL - 2 * s.base.tube, s.base.tube, s.base.insetX], oy + 5, oy); }
     return out;
   }
   function sideView(s, m, ox, oy, section) {
@@ -243,30 +266,43 @@
       out += text(ox + B + 2, top + H / 2 - T / 2 - 1, 'shelf', 1.8);
       out += text(ox + B + 1.2, top + T + 3, 'back in rebate', 1.6, { fill: '#555' });
     }
-    out += rect(ox + Dc, top, m.Td * k, H, 0.3, '#e8d9c0');                       // door
-    var by = s.base.insetY * k, tb = s.base.tube * k;
-    out += rect(ox + by, oy - b, tb, b, 0.3, '#222') + rect(ox + D - by - tb, oy - b, tb, b, 0.3, '#222');
-    out += rect(ox + by, oy - b, D - 2 * by, tb, 0.3, '#222');
+    if (m.topOver) out += rect(ox, top, D, T, 0.3, '#d9c4a0') + rect(ox + Dc, top + (m.T + m.dGap) * k, m.Td * k, m.doorH * k, 0.3, '#e8d9c0');   // top over the door
+    else out += rect(ox + Dc, top, m.Td * k, H, 0.3, '#e8d9c0');                  // door
+    var by = (s.base.insetY || 0) * k, tb = (s.base.tube || 0) * k, pb = (s.base.insetBack || 0) * k, pf = (s.base.insetFront || 0) * k;
+    if (m.plinth) out += rect(ox + pb, oy - b, D - pb - pf, b, 0.3, '#c9ab7f');
+    else { out += rect(ox + by, oy - b, tb, b, 0.3, '#222') + rect(ox + D - by - tb, oy - b, tb, b, 0.3, '#222'); out += rect(ox + by, oy - b, D - 2 * by, tb, 0.3, '#222'); }
     out += hChain([ox, ox + D], [m.D], top - 9, top);
     out += section ? hChain([ox, ox + B, ox + Dc, ox + D], [m.B, m.Din, m.Td], top - 4, top) : hChain([ox, ox + Dc, ox + D], [m.Dc, m.Td], top - 4, top);
     out += vChain([top, oy - b, oy], [m.H, s.base.height], ox + D + 5, ox + D);
-    out += hChain([ox, ox + by, ox + by + tb, ox + D - by - tb, ox + D - by, ox + D], [s.base.insetY, s.base.tube, m.frameW - 2 * s.base.tube, s.base.tube, s.base.insetY], oy + 5, oy);
+    if (m.plinth) out += hChain([ox, ox + pb, ox + D - pf, ox + D], [s.base.insetBack || 0, m.frameW, s.base.insetFront || 0], oy + 5, oy);
+    else out += hChain([ox, ox + by, ox + by + tb, ox + D - by - tb, ox + D - by, ox + D], [s.base.insetY, s.base.tube, m.frameW - 2 * s.base.tube, s.base.tube, s.base.insetY], oy + 5, oy);
     return out;
   }
   function topView(s, m, ox, oy) {        // (ox, oy) = back-left corner
     var k = m.k, W = m.W * k, D = m.D * k, T = m.T * k, B = m.B * k, Dc = m.Dc * k, out = '';
-    out += rect(ox, oy, W, Dc, 0.35, '#efe4d2');
+    out += rect(ox, oy, W, m.topOver ? D : Dc, 0.35, '#efe4d2');
     var x = ox;
-    m.doors.forEach(function (d) { out += rect(x, oy + Dc, d * k, m.Td * k, 0.25, '#e8d9c0'); x += d * k + s.doorGap * k; });
+    if (!m.topOver) m.doors.forEach(function (d) { out += rect(x, oy + Dc, d * k, m.Td * k, 0.25, '#e8d9c0'); x += d * k + s.doorGap * k; });
+    else out += text(ox + W / 2, oy + D - 1.5, 'top runs over the doors', 1.7, { anchor: 'middle', fill: '#666' });
     var cx = ox + T;
     m.bays.forEach(function (bay, i) { cx += bay * k; if (i < m.bays.length - 1) out += line(cx, oy + B, cx, oy + Dc, 0.2, DASH) + line(cx + T, oy + B, cx + T, oy + Dc, 0.2, DASH); cx += T; });
     out += line(ox + T, oy + B, ox + W - T, oy + B, 0.2, DASH);                  // back, hidden in its rebate
     out += hChain([ox, ox + W], [m.W], oy - 4, oy);
-    out += vChain([oy, oy + Dc, oy + D], [m.Dc, m.Td], ox + W + 5, ox + W);
+    out += m.topOver ? vChain([oy, oy + D], [m.D], ox + W + 5, ox + W) : vChain([oy, oy + Dc, oy + D], [m.Dc, m.Td], ox + W + 5, ox + W);
     return out;
   }
   function baseTopView(s, m, ox, oy) {
-    var k = m.k, L = m.frameL * k, Wd = m.frameW * k, tb = s.base.tube * k, out = '';
+    var k = m.k, L = m.frameL * k, Wd = m.frameW * k, tb = (s.base.tube || 0) * k, out = '';
+    if (m.plinth) {
+      var T2 = m.T * k, ib = (s.base.insetBack || 0) * k;
+      out += rect(ox - s.base.insetX * k, oy - ib, m.W * k, m.D * k, 0.2, 'none', DASH);
+      out += text(ox - s.base.insetX * k + 1, oy - ib + m.D * k + 3, 'dashed: carcass outline above', 1.8, { fill: '#666' });
+      out += rect(ox, oy, L, Wd, 0.3, '#c9ab7f') + rect(ox + T2, oy + T2, L - 2 * T2, Wd - 2 * T2, 0.25, '#fff');
+      out += rect(ox, oy, L, T2, 0.2, '#b8956a') + rect(ox, oy + Wd - T2, L, T2, 0.2, '#b8956a');
+      out += hChain([ox, ox + L], [m.frameL], oy - 9, oy) + hChain([ox, ox + T2, ox + L - T2, ox + L], [m.T, m.frameL - 2 * m.T, m.T], oy - 4, oy);
+      out += vChain([oy, oy + T2, oy + Wd - T2, oy + Wd], [m.T, m.frameW - 2 * m.T, m.T], ox + L + 5, ox + L);
+      return out;
+    }
     out += rect(ox - s.base.insetX * k, oy - s.base.insetY * k, m.W * k, m.D * k, 0.2, 'none', DASH);
     out += text(ox - s.base.insetX * k + 1, oy + m.D * k - s.base.insetY * k + 3, 'dashed: carcass outline above', 1.8, { fill: '#666' });
     out += rect(ox, oy, L, tb, 0.3, '#333') + rect(ox, oy + Wd - tb, L, tb, 0.3, '#333');
@@ -289,7 +325,9 @@
     var W = m.W, D = m.D, H = m.H, b = s.base.height, out = '';
     // legs (front-left, front-right, back-right visible)
     function leg(x, z) { var t = s.base.tube; out += poly([P(x, 0, z), P(x + t, 0, z), P(x + t, b, z), P(x, b, z)], '#222', 0.2); out += poly([P(x + t, 0, z), P(x + t, 0, z - t), P(x + t, b, z - t), P(x + t, b, z)], '#111', 0.2); }
-    leg(s.base.insetX, D - s.base.insetY); leg(W - s.base.insetX - s.base.tube, D - s.base.insetY); leg(W - s.base.insetX - s.base.tube, s.base.insetY + s.base.tube);
+    if (m.plinth) { var px0 = s.base.insetX, px1 = W - s.base.insetX, pz0 = s.base.insetBack || 0, pz1 = D - (s.base.insetFront || 0);
+      out += poly([P(px0, 0, pz1), P(px1, 0, pz1), P(px1, b, pz1), P(px0, b, pz1)], '#b8956a', 0.2) + poly([P(px1, 0, pz1), P(px1, 0, pz0), P(px1, b, pz0), P(px1, b, pz1)], '#a5835a', 0.2); }
+    else { leg(s.base.insetX, D - s.base.insetY); leg(W - s.base.insetX - s.base.tube, D - s.base.insetY); leg(W - s.base.insetX - s.base.tube, s.base.insetY + s.base.tube); }
     var y0 = b, y1 = b + H;
     out += poly([P(0, y1, 0), P(W, y1, 0), P(W, y1, D), P(0, y1, D)], '#e9dcc4');              // top
     out += poly([P(W, y0, D), P(W, y0, 0), P(W, y1, 0), P(W, y1, D)], '#d8c4a2');             // right side
@@ -300,8 +338,8 @@
       if (m.slatDoors.indexOf(i + 1) !== -1 && m.slatInfo) for (var q = 0; q < m.slatInfo.count; q++) { var sx = x + m.slatInfo.margin + q * (m.slatInfo.width + m.slatInfo.gap); [sx, sx + m.slatInfo.width].forEach(function (lx2) { out += line(P(lx2, y0, D)[0], P(lx2, y0, D)[1], P(lx2, y1, D)[0], P(lx2, y1, D)[1], 0.15); }); }
       x += d + s.doorGap;
     });
-    var tM1 = P(W * 0.3, y1 - H * 0.4, D), dbc = ((s.doorBoard && s.doorBoard.material) ? s.doorBoard : s.board).code, tM3 = P(s.base.insetX + 10, b * 0.5, D - s.base.insetY), tTop = P(W * 0.55, y1, D * 0.5);
-    out += tag(tM1[0], tM1[1], dbc) + tag(tM3[0] - 4, tM3[1] + 4, s.base.code) + tag(tTop[0], tTop[1], s.board.code);
+    var tM1 = P(W * 0.3, y1 - H * 0.4, D), dbc = ((s.doorBoard && s.doorBoard.material) ? s.doorBoard : s.board).code, tM3 = m.plinth ? P(s.base.insetX + 60, b * 0.5, D - (s.base.insetFront || 0)) : P(s.base.insetX + 10, b * 0.5, D - s.base.insetY), tTop = P(W * 0.55, y1, D * 0.5);
+    out += tag(tM1[0], tM1[1], dbc) + tag(tM3[0] - 4, tM3[1] + 4, m.plinth ? s.board.code : s.base.code) + tag(tTop[0], tTop[1], s.board.code);
     return out;
   }
 
@@ -425,7 +463,7 @@
         var k = m.k, sx = 24 + m.W * k + 34;
         return frontView(s, m, 24, 104, false) + viewTitle(24, 118, 1, 'CARCASS FRONT (doors off)', m.scale) +
           sideView(s, m, sx, 104, true) + viewTitle(sx, 118, 2, 'CARCASS SIDE SECTION', m.scale) +
-          baseTopView(s, m, 24 + s.base.insetX * k, 146) + viewTitle(24, 204, 3, 'STEEL BASE, PLAN', m.scale);
+          baseTopView(s, m, 24 + s.base.insetX * k, 146) + viewTitle(24, 204, 3, m.plinth ? 'PLINTH, PLAN' : 'STEEL BASE, PLAN', m.scale);
       }
     }
   };
