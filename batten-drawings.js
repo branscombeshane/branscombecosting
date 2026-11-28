@@ -1704,7 +1704,7 @@
     part('Front leg', 2, lh, L, L, lg, 'square ' + L);
     var bTop = lg.backTop || L, blankW = Math.ceil((Math.max(bTop, (lg.foot || L) + (lg.rake || 0)) + 10) / 5) * 5;
     part('Back leg (blank)', 2, lh + 20, blankW, L, lg, 'sabre: ' + bTop + ' at the seat curving back ' + (lg.rake || 0) + ' to ' + (lg.foot || L) + ' at the floor; band-saw from the blank');
-    part('Seat rail, front/back', 2, W - 2 * L, rh, rt, rl, 'between the legs, top flush with the legs; + tenons');
+    part('Seat rail, front/back', 2, W - 2 * L, rh, rt, rl, 'between the legs, top flush with the legs' + (rt === L ? ', faces flush' : '') + '; + tenons');
     part('Seat rail, side', 2, D - 2 * L, rh, rt, rl, 'between the front and back legs; + tenons');
     var sideLen = D + at - R, backLen = W + 2 * at - 2 * R, bow = ar.backBow == null ? 10 : ar.backBow;
     part('Arm band, side', 2, sideLen, ah, at, ar, 'front of the arm back to the corner; top at ' + aTop + ' from the floor');
