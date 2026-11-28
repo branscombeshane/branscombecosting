@@ -1677,8 +1677,11 @@
       var a = ln[Math.max(0, i - 1)], b = ln[Math.min(ln.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d;
       L.push([p[0] + nx * t / 2, p[1] + ny * t / 2]); R.push([p[0] - nx * t / 2, p[1] - ny * t / 2]);
     });
-    function cap(p, q, c) { var o = []; var a0 = Math.atan2(p[1] - c[1], p[0] - c[0]); for (var k = 1; k < 8; k++) { var a = a0 + Math.PI * k / 8; o.push([c[0] + t / 2 * Math.cos(a), c[1] + t / 2 * Math.sin(a)]); } return o; }
-    var end = cap(L[L.length - 1], R[R.length - 1], ln[ln.length - 1]), start = cap(R[0], L[0], ln[0]);
+    // round end: from side p, out past the end of the leg (direction `out`), round to the other side
+    function cap(p, c, out) { var o = [], u = [(p[0] - c[0]) / (t / 2), (p[1] - c[1]) / (t / 2)]; for (var k = 1; k < 8; k++) { var f = Math.PI * k / 8; o.push([c[0] + t / 2 * (Math.cos(f) * u[0] + Math.sin(f) * out[0]), c[1] + t / 2 * (Math.cos(f) * u[1] + Math.sin(f) * out[1])]); } return o; }
+    function dir(a, b) { var dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1; return [dx / d, dy / d]; }
+    var e1 = ln[ln.length - 1], e0 = ln[0];
+    var end = cap(L[L.length - 1], e1, dir(ln[ln.length - 2], e1)), start = cap(R[0], e0, dir(ln[1], e0));
     return L.concat(end).concat(R.reverse()).concat(start);
   }
   function chordSag(line) {                 // straight length and curve depth of a leg in plan
