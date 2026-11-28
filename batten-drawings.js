@@ -433,7 +433,7 @@
   }
 
   function sheetClient(s, m, tpl) {
-    var f = frame(s, 1, 2, 'FOR CLIENT APPROVAL', '#2f5d6b');
+    var f = frame(s, 1, m.sheetCount || 2, 'FOR CLIENT APPROVAL', '#2f5d6b');
     var out = f.svg;
     // approval box
     var x = f.x, w = f.w, y = f.y + 2;
@@ -461,7 +461,7 @@
   }
 
   function sheetWorkshop(s, m, tpl) {
-    var f = frame(s, 2, 2, 'WORKSHOP · FOR PRODUCTION', '#7a4b1f');
+    var f = frame(s, 2, m.sheetCount || 2, 'WORKSHOP · FOR PRODUCTION', '#7a4b1f');
     var out = f.svg, x = f.x, w = f.w, y = f.y + 2;
     out += text(x, y + 2, 'HARDWARE', 2.6, { weight: 'bold' });
     out += table(x, y + 7, [{ title: 'REF', w: 8 }, { title: 'QTY', w: 7, align: 'end' }, { title: 'ITEM', w: w - 15 }], m.hardware.map(function (h) { return [h.code, h.qty, h.name]; }), { size: 2.1, rowH: 3.6, boldFirst: true });
@@ -478,9 +478,22 @@
     out += line(M, BAND_Y - 22, TB_X, BAND_Y - 22, 0.5);
     out += text(14, BAND_Y - 16.5, 'CUTTING LIST', 2.8, { weight: 'bold' });
     out += text(48, BAND_Y - 16.5, 'per unit · ' + s.quantity + ' unit(s) · L = along the grain', 2.1, { fill: '#666' });
-    var rows = m.parts.map(function (p) { return [p.code, p.name, p.qty, p.length, p.width, p.thickness, p.material, p.edge || p.note || '']; })
-      .concat((m.steel || []).map(function (b) { return [b.code, b.name, b.qty, b.length, String(b.w || 25), String(b.t || 25), b.material, b.note || 'weld, grind'];}));
+    var rows = cutRows(m), fit = CUT_FIT, rh = Math.min(3.75, CUT_AVAIL / (rows.length + 1));
+    if (rows.length > fit) { rows = rows.slice(0, fit - 1).concat([['', '… ' + (rows.length - fit + 1) + ' more lines on sheet 3', '', '', '', '', '', '']]); rh = CUT_AVAIL / (fit + 1); }
     out += table(14, BAND_Y - 11, [{ title: 'REF', w: 9 }, { title: 'PART', w: 30 }, { title: 'QTY', w: 9, align: 'end' }, { title: 'L', w: 13, align: 'end' }, { title: 'W', w: 13, align: 'end' }, { title: 'T', w: 9, align: 'end' }, { title: '', w: 4 }, { title: 'MATERIAL', w: 52 }, { title: 'EDGING / NOTE', w: 50 }],
+      rows.map(function (r) { return [r[0], r[1], r[2], r[3], r[4], r[5], '', r[6], r[7]]; }), { zebra: true, rowH: rh, size: rh < 3.2 ? 1.9 : 2.2, boldFirst: true });
+    return svgDoc(out);
+  }
+  // cutting list lines; long lists shrink to fit (down to 2.6 mm rows), the rest go on a third sheet
+  var CUT_AVAIL = PAGE_H - M - (BAND_Y - 11) - 2.5, CUT_FIT = Math.floor(CUT_AVAIL / 2.6) - 1;
+  function cutRows(m) {
+    return m.parts.map(function (p) { return [p.code, p.name, p.qty, p.length, p.width, p.thickness, p.material, p.edge || p.note || '']; })
+      .concat((m.steel || []).map(function (b) { return [b.code, b.name, b.qty, b.length, String(b.w || 25), String(b.t || 25), b.material, b.note || 'weld, grind'];}));
+  }
+  function sheetCutMore(s, m) {
+    var f = frame(s, 3, 3, 'WORKSHOP · CUTTING LIST (cont.)', '#7a4b1f'), out = f.svg, rows = cutRows(m).slice(CUT_FIT - 1);
+    out += text(14, 20, 'CUTTING LIST (continued)', 2.8, { weight: 'bold' });
+    out += table(14, 27, [{ title: 'REF', w: 9 }, { title: 'PART', w: 30 }, { title: 'QTY', w: 9, align: 'end' }, { title: 'L', w: 13, align: 'end' }, { title: 'W', w: 13, align: 'end' }, { title: 'T', w: 9, align: 'end' }, { title: '', w: 4 }, { title: 'MATERIAL', w: 52 }, { title: 'EDGING / NOTE', w: 160 }],
       rows.map(function (r) { return [r[0], r[1], r[2], r[3], r[4], r[5], '', r[6], r[7]]; }), { zebra: true, rowH: 3.75, size: 2.2, boldFirst: true });
     return svgDoc(out);
   }
@@ -806,8 +819,9 @@
     var totals = {};
     parts.forEach(function (p) {
       var u = p.unit || 'm²';
-      totals[p.code] = totals[p.code] || { code: p.code, material: p.material, unit: u, amount: 0 };
-      totals[p.code].amount += u === 'm' ? p.qty * p.length / 1000 : p.qty * p.length * p.width / 1e6;
+      var key = p.code + (u === 'm' ? '|m' : '');                       // a material in m² and in m: two lines
+      totals[key] = totals[key] || { code: p.code, material: p.material, unit: u, amount: 0 };
+      totals[key].amount += u === 'm' ? p.qty * p.length / 1000 : p.qty * p.length * p.width / 1e6;
     });
     return Object.keys(totals).sort().map(function (k) { return totals[k]; });
   }
@@ -2106,15 +2120,237 @@
         text(x2, 30 + m.H * k + 40 + m.legs.length * 4 + 2, 'Sub-base and legs CNC cut; legs curve to follow the edge.', 1.9, { fill: '#555' });
     }
   };
+  // ================================================================ template: parts =========
+  // Build from parts (Shane, 28 Nov 2026: "anyone must be able to design any piece of furniture"):
+  // the piece is a list of parts, each a solid placed in the piece. Axes: x across (from the left),
+  // y up (from the floor), z from the back (0) towards the front.
+  // A part: name, shape, mat (material ref), w (x size), h (y size), d (z size), x / y / z of its
+  // left / bottom / back corner, plus by shape:
+  //   box     board, solid section, rail; corner = plan corner radius (x-z), e.g. a top
+  //   taper   square / rectangular leg narrowing to `end` (mm) at its low end along `axis`
+  //   round   round or oval section along `axis` (y = upright leg or disc top, x / z = round rail);
+  //           `end` > 0 tapers it to that diameter at the low end
+  //   cushion upholstery block: top and vertical edges rounded `radius`, sides straight down to a
+  //           flat bottom; `cover` = material ref of the fabric (area worked out, +15% waste)
+  // cnc: yes adds the CNC clamping margin (+50 on length and width) to the cutting list blank.
+  // Views, cutting list, material totals and the costing hand-off are all worked out from the parts.
+  var PART_SHAPES = { box: 1, taper: 1, round: 1, cushion: 1 };
+  function partColour(mat) {
+    var t = String(mat || '').toLowerCase();
+    if (/foam|fabric|leather|cushion|uphol|velvet|boucl/.test(t)) return FABRIC;
+    if (/stone|marble|granite|quartz|concrete|terrazzo|ceramic/.test(t)) return STONE;
+    if (/brass|gold|bronze/.test(t)) return GOLD;
+    if (/steel|metal|iron|alu|chrome/.test(t)) return '#a9b0b5';
+    if (/glass|mirror/.test(t)) return GLASS;
+    if (/mdf|chipboard|melamine/.test(t)) return MDF;
+    if (/veneer|ply|board/.test(t)) return VENEER;
+    return OAK;
+  }
+  function shadeHex(hex, f) {
+    var n = parseInt(hex.slice(1), 16);
+    function c(v) { return Math.max(0, Math.min(255, Math.round(v * f))); }
+    return '#' + ((1 << 24) + (c(n >> 16) << 16) + (c((n >> 8) & 255) << 8) + c(n & 255)).toString(16).slice(1);
+  }
+  function partsNorm(s) {
+    var mats = {};
+    (s.materials || []).forEach(function (x) { if (x && String(x.code || '').trim()) mats[String(x.code).trim()] = x; });
+    var raw = s.parts || [];
+    if (!raw.length) throw new Error('Add at least one part');
+    if (raw.length > 150) throw new Error('Too many parts (150 is the most)');
+    return raw.map(function (p, i) {
+      var q = { n: i + 1, name: String(p.name || ('Part ' + (i + 1))), shape: PART_SHAPES[p.shape] ? p.shape : 'box', code: String(p.mat || '').trim(),
+        x: Number(p.x) || 0, y: Number(p.y) || 0, z: Number(p.z) || 0, w: Number(p.w), h: Number(p.h), d: Number(p.d),
+        axis: p.axis === 'x' || p.axis === 'z' ? p.axis : 'y', end: Math.max(0, Number(p.end) || 0), corner: Math.max(0, Number(p.corner) || 0),
+        radius: Math.max(0, Number(p.radius) || 0), cnc: p.cnc === true || p.cnc === 'yes', cover: String(p.cover || '').trim(), note: String(p.note || '') };
+      var who = 'Part ' + q.n + ' (' + q.name + ')';
+      if (!(q.w > 0 && q.h > 0 && q.d > 0)) throw new Error(who + ': width, height and depth must all be more than 0');
+      if (!mats[q.code]) throw new Error(who + ': material ref "' + q.code + '" is not in the materials list');
+      if (q.cover && !mats[q.cover]) throw new Error(who + ': cover ref "' + q.cover + '" is not in the materials list');
+      q.mat = mats[q.code];
+      q.lo = [q.x, q.y, q.z]; q.hi = [q.x + q.w, q.y + q.h, q.z + q.d];
+      return q;
+    });
+  }
+  // the solid as two end outlines (3D points) along its axis; a cushion as a cloud of points
+  function partSolid(q) {
+    if (q.shape === 'cushion') {
+      var r = Math.min(q.radius || Math.min(q.h / 2, 40), q.h, q.w / 2, q.d / 2), pts = [], lo = q.lo, hi = q.hi;
+      for (var a = 0; a <= 6; a++) for (var b = 0; b < 16; b++) {
+        var th = Math.PI / 2 * a / 6, ph = 2 * Math.PI * b / 16, e = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)];
+        var qq = [e[0] < 0 ? lo[0] + r + r * e[0] : hi[0] - r + r * e[0], hi[1] - r + r * e[1], e[2] < 0 ? lo[2] + r + r * e[2] : hi[2] - r + r * e[2]];
+        pts.push(qq); pts.push([qq[0], lo[1], qq[2]]);                 // straight down to the flat bottom
+      }
+      return { cloud: pts, r: r };
+    }
+    var ai = { x: 0, y: 1, z: 2 }[q.shape === 'box' ? 'y' : q.axis], ui = ai === 0 ? 2 : 0, vi = ai === 1 ? 2 : 1;
+    var cu = (q.lo[ui] + q.hi[ui]) / 2, cv = (q.lo[vi] + q.hi[vi]) / 2, hu = (q.hi[ui] - q.lo[ui]) / 2, hv = (q.hi[vi] - q.lo[vi]) / 2, o2 = [];
+    if (q.shape === 'round') for (var i = 0; i < 32; i++) { var t = 2 * Math.PI * i / 32; o2.push([hu * Math.cos(t), hv * Math.sin(t)]); }
+    else if (q.shape === 'box' && q.corner > 0) {
+      var rc = Math.min(q.corner, hu, hv);
+      [[hu - rc, hv - rc, 0], [-hu + rc, hv - rc, 1], [-hu + rc, -hv + rc, 2], [hu - rc, -hv + rc, 3]].forEach(function (c) {
+        for (var j = 0; j <= 6; j++) { var g = Math.PI / 2 * (c[2] + j / 6); o2.push([c[0] + rc * Math.cos(g), c[1] + rc * Math.sin(g)]); }
+      });
+    } else o2 = [[hu, hv], [-hu, hv], [-hu, -hv], [hu, -hv]];
+    var f0 = (q.shape === 'round' || q.shape === 'taper') && q.end > 0 ? Math.min(1, q.end / (2 * Math.max(hu, hv))) : 1;
+    function at(a, f) { return o2.map(function (p) { var v3 = [0, 0, 0]; v3[ai] = a; v3[ui] = cu + p[0] * f; v3[vi] = cv + p[1] * f; return v3; }); }
+    return { ai: ai, ui: ui, vi: vi, o2: o2, s0: at(q.lo[ai], f0), s1: at(q.hi[ai], 1) };
+  }
+  function partPoints(q) { var S = q.solid; return S.cloud || S.s0.concat(S.s1); }
+  // cutting list size of one part: L along the grain (longest), W, T; round parts give the blank
+  function partCut(q) {
+    var ai = { x: 0, y: 1, z: 2 }[q.axis], sz = [q.w, q.h, q.d];
+    if (q.shape === 'round') {
+      var len = sz[ai], dia = Math.max(sz[(ai + 1) % 3], sz[(ai + 2) % 3]);
+      if (len < dia) return { L: dia, W: Math.min(sz[(ai + 1) % 3], sz[(ai + 2) % 3]), T: len, note: 'round Ø' + dia + (sz[(ai + 1) % 3] !== sz[(ai + 2) % 3] ? ' (oval)' : '') };
+      return { L: len, W: dia, T: dia, unit: 'm', note: 'turned Ø' + dia + (q.end ? ' tapering to Ø' + q.end : '') };
+    }
+    var s3 = sz.slice().sort(function (a, b) { return b - a; });
+    return { L: s3[0], W: s3[1], T: s3[2], note: q.shape === 'taper' && q.end ? 'tapers to ' + q.end + ' at the ' + (q.axis === 'y' ? 'foot' : 'end') : q.corner ? 'R' + q.corner + ' corners' : '' };
+  }
+  function buildParts(s) {
+    var list = partsNorm(s), bb = { lo: [1e9, 1e9, 1e9], hi: [-1e9, -1e9, -1e9] };
+    list.forEach(function (q) { q.solid = partSolid(q); for (var i = 0; i < 3; i++) { bb.lo[i] = Math.min(bb.lo[i], q.lo[i]); bb.hi[i] = Math.max(bb.hi[i], q.hi[i]); } });
+    var W = bb.hi[0] - bb.lo[0], H = bb.hi[1] - bb.lo[1], D = bb.hi[2] - bb.lo[2];
+    // cutting list: identical parts on one line
+    var rows = {}, order = [], extras = {}, waste = 1 + (s.fabricWaste == null ? 15 : Number(s.fabricWaste)) / 100;
+    list.forEach(function (q) {
+      var c = partCut(q), L = c.L, Wd = c.W, note = c.note;
+      if (q.cnc) { note = ('CNC to ' + L + ' x ' + Wd + (note ? ', ' + note : '')); L += CNC_MARGIN; Wd += CNC_MARGIN; }
+      var key = [q.name, q.code, L, Wd, c.T, note, q.note].join('|');
+      if (!rows[key]) { rows[key] = { name: q.name, qty: 0, length: Math.round(L), width: Math.round(Wd), thickness: Math.round(c.T), code: q.code, material: q.mat.material, unit: c.unit, edge: '', edgeLen: 0, nums: [], base: note, extra: q.note }; order.push(key); }
+      rows[key].qty++; rows[key].nums.push(q.n);
+      if (q.shape === 'cushion' && q.cover) {
+        var area = 2 * (q.w * q.d + q.w * q.h + q.d * q.h) * waste / 1e6;
+        extras[q.cover] = extras[q.cover] || { code: q.cover, material: null, unit: 'm²', amount: 0 };
+        extras[q.cover].amount += area;
+      }
+    });
+    function nums(a) { return a.length === 1 ? '#' + a[0] : '#' + a.join(', #'); }
+    var parts = order.map(function (k) {
+      var r = rows[k]; r.note = [nums(r.nums), r.base, r.extra].filter(Boolean).join('; ');
+      delete r.nums; delete r.base; delete r.extra; return r;
+    });
+    var matByCode = {}; (s.materials || []).forEach(function (x) { if (x && x.code) matByCode[String(x.code).trim()] = x; });
+    var totals = totalsOf(parts);
+    Object.keys(extras).forEach(function (c) { var e = extras[c]; e.material = matByCode[c].material; var have = totals.filter(function (t) { return t.code === c; })[0]; if (have) have.amount += e.amount; else totals.push(e); });
+    totals.sort(function (a, b) { return a.code < b.code ? -1 : 1; });
+    var used = {}; list.forEach(function (q) { used[q.code] = 1; if (q.cover) used[q.cover] = 1; });
+    var hardware = (s.hardware || []).filter(function (h) { return h && (h.item || h.name); }).map(function (h) { return { code: String(h.code || ''), qty: Number(h.qty) || 1, name: String(h.item || h.name) }; });
+    var den = pickScale(function (k) { return (W + D) * k + 44 <= 200 && (H + D) * k + 50 <= 186; });
+    return { scale: '1:' + den, k: 1 / den, list: list, bb: bb, W: W, H: H, D: D, parts: parts, totals: totals, hardware: hardware,
+      materials: materialsOf(Object.keys(used).map(function (c) { return matByCode[c]; })),
+      overall: { width: Math.round(W), depth: Math.round(D), height: Math.round(H) } };
+  }
+  // orthographic view: dir 'front' (from the front, x across), 'side' (from the right, front to the
+  // right) or 'top' (from above, back at the top); (ox, oy) = left / floor (top view: left / back)
+  function partsView(s, m, ox, oy, dir) {
+    var k = m.k, lo = m.bb.lo, out = '';
+    function pr(p) {
+      if (dir === 'front') return [ox + (p[0] - lo[0]) * k, oy - (p[1] - lo[1]) * k];
+      if (dir === 'side') return [ox + (p[2] - lo[2]) * k, oy - (p[1] - lo[1]) * k];
+      return [ox + (p[0] - lo[0]) * k, oy + (p[2] - lo[2]) * k];
+    }
+    var ax = dir === 'front' ? 2 : dir === 'side' ? 0 : 1, f = dir === 'front' ? 1 : dir === 'side' ? 0.88 : 1.08;
+    m.list.slice().sort(function (a, b) { return (a.lo[ax] + a.hi[ax]) - (b.lo[ax] + b.hi[ax]) || (b.hi[ax] - b.lo[ax]) - (a.hi[ax] - a.lo[ax]); }).forEach(function (q) {
+      out += poly2(hull(partPoints(q).map(pr)), shadeHex(partColour(q.mat.material), f), 0.25);
+    });
+    return out;
+  }
+  function partsIso(s, m, bx, by, bw, bh, numbers) {
+    var c = Math.cos(Math.PI / 6), sn = 0.5, lo = m.bb.lo, W = m.W, D = m.D, H = m.H;
+    var spanX = (W + D) * c, spanY = H + (W + D) * sn, sc = Math.min(bw / spanX, bh / spanY);
+    var cx = bx + (bw - spanX * sc) / 2 + D * c * sc, cy = by + (bh - spanY * sc) / 2 + H * sc;
+    function P(p) { var x = p[0] - lo[0], y = p[1] - lo[1], z = p[2] - lo[2]; return [cx + (x * c - z * c) * sc, cy - y * sc + (x * sn + z * sn) * sc]; }
+    function fill(pts, col, stroke) { return '<polygon points="' + pts.map(function (p) { return n2(p[0]) + ',' + n2(p[1]); }).join(' ') + '" fill="' + col + '" stroke="' + (stroke || col) + '" stroke-width="' + (stroke ? 0.25 : 0.1) + '" stroke-linejoin="round"/>'; }
+    // draw order: a part behind (or under) another along any axis goes first
+    var L = m.list, n = L.length, after = L.map(function () { return []; }), indeg = L.map(function () { return 0; });
+    for (var i = 0; i < n; i++) for (var j = i + 1; j < n; j++) {
+      var A = L[i], B = L[j], first = null;
+      for (var a = 0; a < 3 && first === null; a++) { if (A.hi[a] <= B.lo[a] + 0.01) first = i; else if (B.hi[a] <= A.lo[a] + 0.01) first = j; }
+      if (first === null) first = (A.lo[0] + A.hi[0] + A.lo[1] + A.hi[1] + A.lo[2] + A.hi[2]) <= (B.lo[0] + B.hi[0] + B.lo[1] + B.hi[1] + B.lo[2] + B.hi[2]) ? i : j;
+      var second = first === i ? j : i; after[first].push(second); indeg[second]++;
+    }
+    var ready = [], seq = [];
+    function sum(q) { return q.lo[0] + q.hi[0] + q.lo[1] + q.hi[1] + q.lo[2] + q.hi[2]; }
+    for (var r0 = 0; r0 < n; r0++) if (!indeg[r0]) ready.push(r0);
+    while (seq.length < n) {
+      if (!ready.length) { var left = []; for (var r1 = 0; r1 < n; r1++) if (seq.indexOf(r1) < 0) left.push(r1); left.sort(function (a2, b2) { return sum(L[a2]) - sum(L[b2]); }); ready.push(left[0]); indeg[left[0]] = 0; }
+      ready.sort(function (a2, b2) { return sum(L[a2]) - sum(L[b2]); });
+      var nx = ready.shift(); if (seq.indexOf(nx) >= 0) continue; seq.push(nx);
+      after[nx].forEach(function (t) { if (--indeg[t] === 0) ready.push(t); });
+    }
+    var out = '', tags = {};
+    seq.forEach(function (idx) {
+      var q = L[idx], S = q.solid, base = partColour(q.mat.material), outline = hull(partPoints(q).map(P));
+      if (S.cloud) {
+        var r = S.r, top = [[q.lo[0] + r, q.lo[2] + r], [q.hi[0] - r, q.lo[2] + r], [q.hi[0] - r, q.hi[2] - r], [q.lo[0] + r, q.hi[2] - r]].map(function (p) { return P([p[0], q.hi[1], p[1]]); });
+        var front = [[q.lo[0] + r, q.lo[1]], [q.hi[0] - r, q.lo[1]], [q.hi[0] - r, q.hi[1] - r], [q.lo[0] + r, q.hi[1] - r]].map(function (p) { return P([p[0], p[1], q.hi[2]]); });
+        out += poly2(outline, shadeHex(base, 0.88), 0.25) + fill(front, base) + fill(top, shadeHex(base, 1.1));
+      } else {
+        var o2 = S.o2, N = o2.length, faces = '';
+        for (var e = 0; e < N; e++) {
+          var p0 = o2[e], p1 = o2[(e + 1) % N], nu = p1[1] - p0[1], nv = -(p1[0] - p0[0]);
+          if (nu * (p0[0] + p1[0]) + nv * (p0[1] + p1[1]) < 0) { nu = -nu; nv = -nv; }     // outward
+          var nn = [0, 0, 0], len = Math.hypot(nu, nv) || 1; nn[S.ui] = nu / len; nn[S.vi] = nv / len;
+          if (nn[0] + nn[1] + nn[2] <= 1e-6) continue;
+          var fct = 0.82 * nn[0] * nn[0] + 1.1 * nn[1] * nn[1] + 0.98 * nn[2] * nn[2];
+          faces += fill([P(S.s0[e]), P(S.s0[(e + 1) % N]), P(S.s1[(e + 1) % N]), P(S.s1[e])], shadeHex(base, fct));
+        }
+        var capF = S.ai === 1 ? 1.1 : S.ai === 0 ? 0.82 : 0.98;
+        out += poly2(outline, shadeHex(base, 0.9), 0.25) + faces + fill(S.s1.map(P), shadeHex(base, capF)) + poly2(outline, 'none', 0.25);
+      }
+      if (numbers) { var flat = q.h <= q.w && q.h <= q.d; tags[q.n] = P([(q.lo[0] + q.hi[0]) / 2, flat ? q.hi[1] : (q.lo[1] + q.hi[1]) / 2, flat ? (q.lo[2] + q.hi[2]) / 2 : q.hi[2]]); }
+      else if (!tags[q.code]) { tags[q.code] = P([(q.lo[0] + q.hi[0]) / 2, (q.lo[1] + q.hi[1]) / 2, q.hi[2]]); }
+    });
+    if (!numbers) Object.keys(tags).forEach(function (code) { out += tag(tags[code][0] + 4, tags[code][1], code); });
+    else Object.keys(tags).forEach(function (nn) { var cc = tags[nn]; out += circle(cc[0], cc[1], 1.5, '#fff', 0.15) + text(cc[0], cc[1] + 0.6, nn, 1.6, { anchor: 'middle' }); });
+    return out;
+  }
+  function partsDims(m, ox, oy, sx, ty) {           // overall sizes on the front, side and top views
+    var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k;
+    return hChain([ox, ox + w], [Math.round(m.W)], oy - h - 5, oy - h) + vChain([oy - h, oy], [Math.round(m.H)], sx + d + 6, sx + d) +
+      hChain([sx, sx + d], [Math.round(m.D)], oy + 5, oy) + vChain([ty, ty + d], [Math.round(m.D)], ox + w + 6, ox + w);
+  }
+  TEMPLATES.parts = {
+    build: buildParts,
+    clientViews: function (s, m) {
+      var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k, oy = 26 + h, sx = 24 + w + 30, ty = oy + 26, ix = sx + d + 22;
+      var out = partsView(s, m, 24, oy, 'front') + viewTitle(24, oy + 13, 1, 'FRONT VIEW', m.scale) +
+        partsView(s, m, sx, oy, 'side') + viewTitle(sx, oy + 13, 2, 'SIDE VIEW', m.scale) +
+        partsView(s, m, 24, ty, 'top') + viewTitle(24, ty + d + 10, 3, 'TOP VIEW', m.scale) + partsDims(m, 24, oy, sx, ty);
+      // 3D: in the larger of the space right of the side view or right of the top view
+      var r1 = { x: ix, y: 18, w: 318 - ix, h: 205 }, r2 = { x: 24 + w + 30, y: ty, w: 318 - (24 + w + 30), h: 214 - ty };
+      var R = Math.min(r1.w, r1.h) >= Math.min(r2.w, r2.h) ? r1 : r2;
+      return out + partsIso(s, m, R.x, R.y, R.w, R.h - 14, false) + viewTitle(R.x, R.y + R.h - 4, 4, '3D VIEW', 'not to scale');
+    },
+    workshopViews: function (s, m) {
+      var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k, oy = 26 + h, sx = 24 + w + 30, ty = oy + 26;
+      var out = partsView(s, m, 24, oy, 'front') + viewTitle(24, oy + 13, 1, 'FRONT', m.scale) +
+        partsView(s, m, sx, oy, 'side') + viewTitle(sx, oy + 13, 2, 'SIDE (from the right)', m.scale) +
+        partsView(s, m, 24, ty, 'top') + viewTitle(24, ty + d + 10, 3, 'TOP', m.scale) + partsDims(m, 24, oy, sx, ty);
+      var ix = 24 + w + 30, iw = 228 - ix;                              // beside the top view
+      if (iw > 40) out += partsIso(s, m, ix, ty - 4, iw, 200 - ty, true) + viewTitle(ix, 204, 4, '3D, PART NUMBERS', 'not to scale');
+      // positions of every part (its left / bottom / back corner)
+      var rows = m.list.map(function (q) { return [q.n, q.name.length > 18 ? q.name.slice(0, 17) + '…' : q.name, Math.round(q.w) + '×' + Math.round(q.h) + '×' + Math.round(q.d), Math.round(q.x), Math.round(q.y), Math.round(q.z)]; });
+      var maxRows = Math.floor((204 - 26) / 3.2);
+      if (rows.length > maxRows) rows = rows.slice(0, maxRows - 1).concat([['…', (m.list.length - maxRows + 1) + ' more', '', '', '', '']]);
+      out += text(232, 18, 'PART POSITIONS', 2.4, { weight: 'bold' }) + text(232, 21.5, 'left / bottom / back corner: from the left, the floor, the back', 1.6, { fill: '#555' });
+      out += table(232, 26, [{ title: '#', w: 6 }, { title: 'PART', w: 30 }, { title: 'W×H×D', w: 24 }, { title: 'X', w: 10, align: 'end' }, { title: 'Y', w: 10, align: 'end' }, { title: 'Z', w: 10, align: 'end' }], rows, { size: 1.8, rowH: 3.2, zebra: true });
+      return out;
+    }
+  };
   function sheets(spec, opts) {
     LOGO = (opts && opts.logo) || '';
     var tpl = TEMPLATES[spec.template];
     if (!tpl) throw new Error('Unknown template: ' + spec.template);
     var m = tpl.build(spec);
     SCALE = m.scale;
-    return { model: m, svgs: [sheetClient(spec, m, tpl), sheetWorkshop(spec, m, tpl)] };
+    m.sheetCount = cutRows(m).length > CUT_FIT ? 3 : 2;
+    var svgs = [sheetClient(spec, m, tpl), sheetWorkshop(spec, m, tpl)];
+    if (m.sheetCount === 3) svgs.push(sheetCutMore(spec, m));
+    return { model: m, svgs: svgs };
   }
 
-  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
+  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, buildParts: buildParts, sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BattenDrawings = api;
 })(this);
