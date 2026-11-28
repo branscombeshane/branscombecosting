@@ -1237,7 +1237,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-28.27';
+  var BATTEN_VERSION = '2026-11-28.28';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -8706,6 +8706,24 @@
   }
 
   // ---- editor ----
+  // wood / veneer colours are picked from the finishes the workshop uses (Shane, 28 Nov):
+  // Jax Oleum single coat wood stain (jaxoleum.co.za, 87 colours) and Rubio Monocoat Oil Plus 2C
+  // (rubiomonocoatusa.com, current range, 40 colours). Lists read off the makers' sites 28 Nov 2026.
+  var FINISH_BRANDS_ = [
+    { brand:'Jax Oleum', product:'Jax Oleum single coat wood stain', colours:["Anchor Grey", "Bare", "Black", "Blue", "Blue Grey", "Bone", "Bronze", "Brown", "Castle Grey", "Champagne", "Cherry", "Chestnut", "Clear", "Cloud Grey", "Cornsilk", "Cumin", "Custard", "Dark Black", "Dark Blue Grey", "Dark Brown", "Dark Cloud", "Dark Grey", "Dark Gunmetal", "Dark Java", "Dark Mahogany", "Dark Mist", "Dark Oak", "Dark Sand", "Dark Silver", "Dark Silver Wash", "Dark Sky", "Dark Smoke", "Dark Wheat", "Dove Grey", "Dune", "Ebony", "Emerald", "Espresso", "Extra Black", "Extra Dark Gunmetal", "Extra Dark Mahogany", "Extra Extra Black", "Extra Extra White", "Extra White", "Fawn", "Ghost White", "Ginger", "Gold", "Green", "Grey", "Gunmetal", "Java", "Jura", "Latte", "Light Grey", "Light Oak", "Mahogany", "Mink", "Mist Brown", "Mist Grey", "Natural", "Old Teak", "Olive", "Orange", "Pale Wheat", "Pebble", "Pecan", "Pink", "Purple", "Putty", "Red", "Sage", "Sand", "Sapphire", "Silver", "Silver Wash", "Sky Grey", "Smoke", "Sofa Grey", "Sofa Sky", "Sofa Storm", "Storm Grey", "Studio Grey", "Walnut", "Wheat", "White", "Yellow"] },
+    { brand:'Rubio Monocoat', product:'Rubio Monocoat Oil Plus 2C', colours:["Affogato", "Almond", "Arabica", "Ash Grey", "Black", "Bourbon", "Castle Brown", "Charcoal", "Chocolate", "Cocoa", "Cortado", "Cotton White", "Dark Oak", "Dark Roast", "Dulce", "Dunes", "Fern", "Golden Hour", "Hazelnut", "Honey", "Light Roast", "Linen", "Macchiato", "Midnight Sky", "Mist", "Mist 5%", "Mocha", "Natural", "Oyster", "Pure", "Red Velvet", "Shell Grey", "Smoke", "Smoke 5%", "Super White", "Vanilla", "Vienna", "Walnut", "White", "White 5%"] }
+  ];
+  function isWoodMat_(m){ return /oak|wood|veneer|walnut|\bash\b|beech|maple|cherry|teak|timber|ply|pine|iroko|meranti|saligna|kiaat|sapele|birch/i.test(String(m||'')) && !/mdf|melamine|laminate/i.test(String(m||'')); }
+  function colourSelectHtml_(path, label, value){
+    var v=String(value==null?'':value), known=v==='' || v==='Natural, no colour' || FINISH_BRANDS_.some(function(b){ return b.colours.some(function(c){ return v===b.brand+' - '+c; }); });
+    var h='<label class="field dsg-field"><span class="label">'+esc(label)+'</span><select data-path="'+esc(path)+'" data-type="select" data-colour="1">'+
+      '<option value=""'+(v===''?' selected':'')+'>Choose a colour…</option><option'+(v==='Natural, no colour'?' selected':'')+'>Natural, no colour</option>'+
+      (known?'':'<option value="'+esc(v)+'" selected>'+esc(v)+' (as saved)</option>');
+    FINISH_BRANDS_.forEach(function(b){
+      h+='<optgroup label="'+esc(b.brand)+'">'+b.colours.map(function(c){ var o=b.brand+' - '+c; return '<option value="'+esc(o)+'"'+(v===o?' selected':'')+'>'+esc(c)+'</option>'; }).join('')+'</optgroup>';
+    });
+    return h+'</select></label>';
+  }
   // a thickness comes from the material: "17mm Oak Veneer" = 17, "Solid Oak - 25mm" = 25 (Shane, 28 Nov)
   function matThick_(name){ var t=String(name||''), m=/^\s*(\d+(?:\.\d+)?)\s*mm\b/i.exec(t) || /-\s*(\d+(?:\.\d+)?)\s*mm\s*$/i.exec(t); return m ? Number(m[1]) : null; }
   function fieldHtml_(path, label, type, value, opts){
@@ -8751,6 +8769,7 @@
         sec.fields.forEach(function(f){ var p=(sec.path?sec.path+'.':'')+f[0], o=f[3]||{}; if(o.show && !o.show(s)) return;
           var lbl=f[1];
           if(/(^|\.)thickness$/.test(f[0]) && f[2]==='number'){ var mt=matThick_(getPath_(s,(sec.path?sec.path+'.':'')+f[0].replace(/thickness$/,'material'))); if(mt!=null){ o=Object.assign({}, o, { readonly:true }); lbl=f[1]+' — from the material'; if(getPath_(s,p)!==mt) setPath_(s,p,mt); } }
+          if(/(^|\.)colour$/.test(f[0]) && f[2]==='text'){ var cm=getPath_(s,(sec.path?sec.path+'.':'')+f[0].replace(/colour$/,'material')); if(isWoodMat_(cm) || !cm){ form += colourSelectHtml_(p, lbl, getPath_(s,p)); return; } }
           form += fieldHtml_(p, lbl, f[2], getPath_(s,p), o); });
       }
       form += '</div>';
@@ -8780,12 +8799,22 @@
       markDesignDirty_();
     });
     formEl.addEventListener('change', function(e){                     // a choice (e.g. leg type) changes which fields apply
-      var el=e.target; if(el.dataset.type!=='select') return;
+      var el=e.target;
+      if(el.dataset.type==='text' && /(^|\.)material$/.test(el.dataset.path||'')){
+        var cEl=formEl.querySelector('[data-path="'+el.dataset.path.replace(/material$/,'colour')+'"]');
+        if(cEl && (cEl.tagName==='SELECT') !== (isWoodMat_(el.value) || !el.value)){ var fs0=formEl.scrollTop; renderDesignEditor_(); var f3=document.getElementById('dsg-form'); if(f3) f3.scrollTop=fs0; }
+        return;
+      }
+      if(el.dataset.type!=='select') return;
       if(el.dataset.path==='style' && DESIGN_STYLE_DEFAULTS_[s.template] && DESIGN_STYLE_DEFAULTS_[s.template][el.value]){
         var keep={}; DESIGN_JOB_FIELDS_.forEach(function(f){ keep[f[0]]=s[f[0]]; }); keep.revisions=s.revisions; keep.notes=s.notes; keep.informationFromClient=s.informationFromClient; keep.template=s.template;
         Object.keys(s).forEach(function(k2){ delete s[k2]; });
         Object.assign(s, clone_(DESIGN_STYLE_DEFAULTS_[s.template||keep.template][el.value]), keep);
       } else setPath_(s, el.dataset.path, el.value);
+      if(el.dataset.colour){
+        var fp=el.dataset.path.replace(/colour$/,'finish'), br=FINISH_BRANDS_.filter(function(b){ return el.value.indexOf(b.brand+' - ')===0; })[0];
+        if(br && !getPath_(s, fp)) setPath_(s, fp, br.product);
+      }
       designDirty_=true;
       // keep the person's place: the form is rebuilt (fields depend on the choice) but scroll and focus stay put
       var path=el.dataset.path, fs=formEl.scrollTop, ws=window.pageYOffset, top=el.getBoundingClientRect().top;
@@ -9039,6 +9068,7 @@
       if(sec.parts && sec.parts!==true) lines.push(sec.parts+': EXTRA parts added to this piece (the family fields above make the rest). Same format as parts: {name, shape (box|taper|round|cushion), mat, w, h, d, x, y, z, axis, end, corner, radius, cover, cnc, note}; mm, x across from the left, y up from the floor, z from the back towards the front, x/y/z = left/bottom/back corner. mat must be one of the piece\'s material codes or one in extraMaterials.');
     });
     if(DESIGN_STYLE_DEFAULTS_[spec.template]) lines.push('style: changing it replaces the whole set of fields; do not change it unless asked.');
+    lines.push('colour of a wood or veneer material: exactly "Natural, no colour" or "<brand> - <colour>" with brand Jax Oleum ('+FINISH_BRANDS_[0].colours.join(', ')+') or Rubio Monocoat ('+FINISH_BRANDS_[1].colours.join(', ')+'); set finish to the brand product ("Jax Oleum single coat wood stain" / "Rubio Monocoat Oil Plus 2C").');
     lines.push('informationFromClient: free text; notes: list of strings');
     return lines.join('\n');
   }
