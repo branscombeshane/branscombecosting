@@ -1761,9 +1761,21 @@
       var pts = x.band.map(function (p) { return P(p[0], y0, p[1]); }).concat(x.bottom.map(function (p) { return P(p[0], 0, p[1]); }));
       out += poly2(hull(pts), '#c4a378', 0.3);
     });
-    var topY = m.legH + m.St, under = m.pts.map(function (p) { return P(p[0], m.legH, p[1]); }), upper = m.pts.map(function (p) { return P(p[0], topY, p[1]); });
-    out += poly2(hull(under.concat(upper)), '#b9ab95', 0.3) + poly2(upper, MDF, 0.3);
-    if (m.T) { var up2 = m.pts.map(function (p) { return P(p[0], topY + m.T, p[1]); }); out += poly2(hull(upper.concat(up2)), '#c6c3bb', 0.3) + poly2(up2, STONE, 0.3); }
+    // a flat slab of any outline (concave too): the edge faces that face the viewer, back to front, then the top
+    function slab(pts, y0, y1, side, topFill) {
+      var faces = [], o = '';
+      for (var i = 0; i < pts.length; i++) {
+        var a = pts[i], b = pts[(i + 1) % pts.length], dx = b[0] - a[0], dz = b[1] - a[1];
+        if (dz - dx <= 0) continue;                                  // outward normal (dz, -dx) must face +x / +z (the viewer)
+        faces.push({ d: a[0] + a[1] + b[0] + b[1], q: [P(a[0], y0, a[1]), P(b[0], y0, b[1]), P(b[0], y1, b[1]), P(a[0], y1, a[1])] });
+      }
+      faces.sort(function (f, g) { return f.d - g.d; }).forEach(function (f) { o += '<polygon points="' + f.q.map(function (q) { return n2(q[0]) + ',' + n2(q[1]); }).join(' ') + '" fill="' + side + '" stroke="' + side + '" stroke-width="0.2"/>'; });
+      var outline = pts.map(function (p) { return P(p[0], y0, p[1]); });
+      return o + poly2(pts.map(function (p) { return P(p[0], y1, p[1]); }), topFill, 0.3);
+    }
+    var topY = m.legH + m.St;
+    out += slab(m.pts, m.legH, topY, '#b9ab95', MDF);
+    if (m.T) out += slab(m.pts, topY, topY + m.T, '#c6c3bb', STONE);
     var tS = P(W * 0.5, topY + m.T, D * 0.5), tL = P(m.legs[0].line[12][0], m.legH * 0.4, m.legs[0].line[12][1]);
     out += tag(tS[0], tS[1], (m.T ? s.top : s.subBase).code) + tag(tL[0] + 5, tL[1], s.legs.code);
     return out;
