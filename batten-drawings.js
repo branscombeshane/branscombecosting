@@ -230,7 +230,10 @@
 
   // ---------------------------------------------------------------- views ------------------
   // All views at 1:10 (k = 0.1 drawing-mm per real mm). (ox, oy) = left end at floor level.
+  // withDoors: true = doors on (client), false = doors off with the joiners' marks (workshop),
+  // 'inside' = doors off for the client (Shane, 28 Nov): shelves and dividers, no workshop marks
   function frontView(s, m, ox, oy, withDoors) {
+    var inside = withDoors === 'inside'; if (inside) withDoors = false;
     var k = m.k, W = m.W * k, H = m.H * k, b = s.base.height * k, T = m.T * k, out = '';
     var top = oy - b - H;
     // base: a plinth box, or a steel frame (legs at each end, rail along the front)
@@ -265,13 +268,14 @@
         for (var j = 1; j <= shelves; j++) {
           var at = m.shelfAt[j - 1], sy = at ? top + H - T - (at + T) * k : top + T + (H - 2 * T) * j / (shelves + 1) - T / 2;   // shelf: given clear height from the bottom, else evenly
           out += rect(cx + 0.1, sy, bay * k - 0.2, T, 0.25, 'none', DASH);
-          out += text(cx + bay * k / 2, sy - 1, 'shelf', 1.8, { anchor: 'middle' });
+          out += text(cx + bay * k / 2, sy - 1, inside ? ((s.shelvesFixed === true || s.shelvesFixed === 'yes') ? 'fixed shelf' : 'adjustable shelf') : 'shelf', 1.8, { anchor: 'middle' });
         }
         if (m.holeD) { var ha = holeAt(m.holeV, m.holeH, m.H - 2 * m.T, bay, m.holeD), hy = top + T + ha.y * k; out += circle(cx + ha.x * k, hy, m.holeD * k / 2, '#fff', 0.25) + (i === 0 ? text(cx + ha.x * k + m.holeD * k / 2 + 1, hy + 0.7, 'Ø' + m.holeD + ' in the back', 1.6, { fill: '#555' }) : ''); }
         cx += bay * k;
         if (i < m.bays.length - 1) { out += rect(cx, top + T, T, H - 2 * T, 0.3, '#d9c4a0'); cx += T; }
       });
       // hinge plates (Shane, 28 Nov: the joiners need to see where they go on the carcass)
+      if (!inside) {
       var dt = m.topOver ? m.T + m.dGap : 0, hys = hingeYs(s, m), memX = [ox], acc = ox, pw = Math.max(0.9, 12 * k), ph = Math.max(1.6, 48 * k), opw = openerItemFix(s.openers || {});
       m.bays.forEach(function (bay) { acc += T + bay * k; memX.push(acc); });
       m.bays.forEach(function (bay, i) {
@@ -283,8 +287,14 @@
       var c0 = [top].concat(hys.map(function (y) { return top + (dt + y) * k; })), v0 = [dt + hys[0]].concat(hys.slice(1).map(function (y, i) { return y - hys[i]; }));
       out += vChain(c0, v0, ox + T + 7, ox + T);                         // hinge heights, inside the first compartment
       out += text(ox, oy + 9.5, '■ hinge plates on the sides / dividers, centred ' + ((s.setout || {}).pinRowsFromEdge || 37) + ' in from the front edge; heights from the top of the carcass (in the first compartment), the same on every hinged side', 1.7, { fill: '#444' });
+      }
     }
     // dimensions
+    if (inside) {                                                   // the client's inside view: compartments and heights only
+      var xi = [ox], vi = [], qi = ox; xi.push(qi += T); vi.push(m.T);
+      m.bays.forEach(function (bay) { xi.push(qi += bay * k); vi.push(bay); xi.push(qi += T); vi.push(m.T); });
+      return out + hChain(xi, vi, top - 4, top) + vChain([top, top + T, top + H - T, top + H], [m.T, m.H - 2 * m.T, m.T], ox - 5, ox);
+    }
     out += hChain([ox, ox + W], [m.W], top - 9, top);
     if (withDoors) {
       var xs = [ox], vals = [];
@@ -604,7 +614,7 @@
         var k = m.k, sx = 24 + m.W * k + 34, ix = 24 + m.W * k + 14, size = Math.min(80, 318 - ix);
         return frontView(s, m, 24, 104, true) + viewTitle(24, 118, 1, 'FRONT VIEW', m.scale) +
           sideView(s, m, sx, 104, false) + viewTitle(sx, 118, 2, 'SIDE VIEW', m.scale) +
-          topView(s, m, 24, 142) + viewTitle(24, 212, 3, 'TOP VIEW', m.scale) +
+          frontView(s, m, 24, 134 + (m.H + s.base.height) * k, 'inside') + viewTitle(24, 146 + (m.H + s.base.height) * k, 3, 'INSIDE (doors off)', m.scale) +
           iso(s, m, ix, 126, 318 - ix, 80) + viewTitle(ix, 212, 4, '3D VIEW', 'not to scale');
       },
       workshopViews: function (s, m) {
