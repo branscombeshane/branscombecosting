@@ -1683,28 +1683,36 @@
     return out;
   }
   // ---- chair style 'arm' (from Michal Raviv dining chairs): upholstered armchair --------------
-  // Frame (solid): 4 legs (back legs raked and tapering towards the floor) joined by seat rails
-  // all round at the top of the legs; an upholstered seat on the rails and an upholstered back
-  // behind it; open arms each side: a top rail and a front post, fixed to the seat frame and the
-  // back. Sizes: width = frame (outside the legs), arms add their thickness each side.
+  // Frame (solid): 4 square legs (back legs raked back and tapering towards the floor) joined by
+  // seat rails all round at the top of the legs; an upholstered seat on the rails and an
+  // upholstered back over the back of the seat. The arms are one continuous solid band (`arms`),
+  // at arm height: from the front of one arm, back along the side, round the back of the chair
+  // with radius corners and forward to the other arm, outside the legs and behind the back;
+  // a front post under each arm end runs down to the seat rail.
+  // Plan coordinates: x across (0..W = outside of the legs), z from the back of the legs (0) to
+  // the front (D); the band sits at x -t..0 / W..W+t and z -t..0.
   function buildArmChair(s) {
     var W = s.width, D = s.depth, H = s.height, lg = s.legs, rl = s.rails, ar = s.arms, st = s.seat, bk = s.back, up = s.upholstery;
-    var L = lg.size, lh = lg.height, rh = rl.height, rt = rl.thickness, at = ar.thickness, ah = ar.railHeight, aTop = ar.top;
-    var seatTop = lh + st.thickness, bt = bk.depth, armFront = D, armLen = ar.length, armBack = armFront - armLen;
+    var L = lg.size, lh = lg.height, rh = rl.height, rt = rl.thickness, at = ar.thickness, ah = ar.railHeight, aTop = ar.top, R = ar.cornerRadius == null ? 60 : ar.cornerRadius;
+    var seatTop = lh + st.thickness, bt = bk.depth;
     if (seatTop >= H) throw new Error('The seat is higher than the chair');
     if (aTop <= seatTop || aTop > H) throw new Error('The arms must be above the seat and below the top of the back');
     if (bt + 100 > D) throw new Error('The back is too deep for the chair');
+    if (R < at) throw new Error('The arm band corner radius must be at least its thickness (' + at + ')');
     var parts = [];
     function part(name, qty, l, w, th, mat, note) { parts.push({ name: name, qty: qty, length: Math.round(l), width: w, thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '' }); }
     part('Front leg', 2, lh, L, L, lg, 'square ' + L);
     part('Back leg', 2, Math.round(Math.hypot(lh, lg.rake || 0)), L, L, lg, 'raked ' + (lg.rake || 0) + ' back at the floor, tapers to ' + (lg.foot || L) + ' at the floor');
     part('Seat rail, front/back', 2, W - 2 * L, rh, rt, rl, 'between the legs, top flush with the legs; + tenons');
-    part('Seat rail, side', 2, D - bt - 2 * L, rh, rt, rl, 'between the front and back legs; + tenons');
-    part('Arm top rail', 2, armLen, ah, at, ar, 'top at ' + aTop + ' from the floor');
-    part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, 'seat rail to the arm rail');
+    part('Seat rail, side', 2, D - 2 * L, rh, rt, rl, 'between the front and back legs; + tenons');
+    var sideLen = D + at - R, backLen = W + 2 * at - 2 * R;
+    part('Arm band, side', 2, sideLen, ah, at, ar, 'front of the arm back to the corner; top at ' + aTop + ' from the floor');
+    part('Arm band, back', 1, backLen, ah, at, ar, 'across the back of the chair, behind the upholstered back');
+    part('Arm band corner (block)', 2, R + 20, R + 20, ah, ar, 'R' + R + ' outside, ' + at + ' wall; shape after glue-up');
+    part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, 'seat rail to the arm band');
     var M = CNC_MARGIN, bb = up.base, foamT = up.foam.thickness;
-    part('Seat base (blank)', 1, W + M, D - bt + M, bb.thickness, bb, 'cut to ' + W + ' x ' + (D - bt) + ', R' + (st.cornerRadius || 0) + ' corners');
-    part('Back frame (CNC blank)', 1, W + M, H - seatTop + M, bb.thickness, bb, 'CNC to ' + W + ' x ' + (H - seatTop) + ', fixed to the back legs');
+    part('Seat base (blank)', 1, W + M, D - bt + M, bb.thickness, bb, 'cut to ' + W + ' x ' + (D - bt));
+    part('Back frame (CNC blank)', 1, W + M, H - lh + M, bb.thickness, bb, 'CNC to ' + W + ' x ' + (H - lh) + ', fixed to the back legs and the arm band');
     parts.push({ name: 'Seat foam', qty: 1, length: W, width: D - bt, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: '' });
     parts.push({ name: 'Back foam', qty: 1, length: W, width: H - seatTop, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: 'front, wrapped over the top' });
     var wrap = up.wrap == null ? 50 : up.wrap, waste = 1 + (up.waste == null ? 15 : up.waste) / 100;
@@ -1713,14 +1721,28 @@
     var totals = totalsOf(parts);
     totals.push({ code: up.fabric.code, material: up.fabric.material, unit: 'm²', amount: (fabSeat + fabBack) / 1e6 });
     totals.sort(function (a, b) { return a.code < b.code ? -1 : 1; });
-    var den = pickScale(function (k) { return H * k <= 130 && (2 * (W + 2 * at) + D) * k + 100 <= 294; });   // front, side and top views side by side
-    return { arm: true, scale: '1:' + den, k: 1 / den, materials: materialsOf([lg, rl, ar, bb, up.foam, up.fabric]), W: W, D: D, H: H, L: L, lh: lh, rh: rh, rt: rt, at: at, ah: ah, aTop: aTop,
-      armBack: armBack, armLen: armLen, seatTop: seatTop, bt: bt, fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals,
-      overall: { width: W + 2 * at, depth: D, height: H } };
+    var den = pickScale(function (k) { return H * k <= 130 && (2 * (W + 2 * at) + D + at) * k + 100 <= 294; });
+    return { arm: true, scale: '1:' + den, k: 1 / den, materials: materialsOf([lg, rl, ar, bb, up.foam, up.fabric]), W: W, D: D, H: H, L: L, lh: lh, rh: rh, rt: rt, at: at, ah: ah, aTop: aTop, R: R,
+      seatTop: seatTop, bt: bt, fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals,
+      overall: { width: W + 2 * at, depth: D + at, height: H } };
+  }
+  // the arm band in plan: outer and inner outline (x across, z from the back of the legs)
+  function armBand(m, steps) {
+    var W = m.W, D = m.D, t = m.at, R = m.R, ri = R - t, N = steps || 10, outer = [], inner = [];
+    outer.push([-t, D]);
+    for (var i = 0; i <= N; i++) { var a = Math.PI - Math.PI / 2 * i / N; outer.push([-t + R + R * Math.cos(a), -t + R - R * Math.sin(a)]); }
+    for (var j = 0; j <= N; j++) { var b = Math.PI / 2 - Math.PI / 2 * j / N; outer.push([W + t - R + R * Math.cos(b), -t + R - R * Math.sin(b)]); }
+    outer.push([W + t, D]);
+    inner.push([W, D]);
+    for (var q = 0; q <= N; q++) { var c = 0 + Math.PI / 2 * q / N; inner.push([W - ri + ri * Math.cos(c), R - t - ri * Math.sin(c)]); }
+    for (var r = 0; r <= N; r++) { var e = Math.PI / 2 + Math.PI / 2 * r / N; inner.push([ri + ri * Math.cos(e), R - t - ri * Math.sin(e)]); }
+    inner.push([0, D]);
+    return outer.concat(inner);
   }
   // front view (frame only when !uph); (ox, oy) = left edge of the frame at floor level
   function armFront(s, m, ox, oy, uph) {
     var k = m.k, W = m.W * k, out = '', at = m.at * k;
+    out += rect(ox - at, oy - m.aTop * k, W + 2 * at, m.ah * k, 0.3, '#b8956a');                                   // the band across the back, seen behind
     if (uph) out += '<rect x="' + n2(ox) + '" y="' + n2(oy - m.H * k) + '" width="' + n2(W) + '" height="' + n2((m.H - m.seatTop) * k + 2) + '" rx="' + n2(Math.min(4, 30 * k)) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
     out += rect(ox, oy - m.lh * k, m.L * k, m.lh * k, 0.3, OAK) + rect(ox + W - m.L * k, oy - m.lh * k, m.L * k, m.lh * k, 0.3, OAK);
     out += rect(ox + m.L * k, oy - m.lh * k, W - 2 * m.L * k, m.rh * k, 0.3, FACE);
@@ -1732,68 +1754,81 @@
     out += vChain([oy - m.H * k, oy], [m.H], ox + W + at + 14, ox + W + at);
     return out;
   }
-  // side view; (ox, oy) = back of the chair at floor level, front to the right
+  // side view; (ox, oy) = back of the legs at floor level, front to the right
   function armSide(s, m, ox, oy, uph) {
-    var k = m.k, D = m.D * k, out = '', bt = m.bt * k, L = m.L * k, rake = (s.legs.rake || 0) * k, foot = (s.legs.foot || m.L) * k;
+    var k = m.k, D = m.D * k, out = '', bt = m.bt * k, L = m.L * k, at = m.at * k, rake = (s.legs.rake || 0) * k, foot = (s.legs.foot || m.L) * k;
     out += poly2([[ox, oy - m.lh * k], [ox + L, oy - m.lh * k], [ox + foot - rake, oy], [ox - rake, oy]], OAK, 0.3);                  // back leg, raked
     out += rect(ox + D - L, oy - m.lh * k, L, m.lh * k, 0.3, OAK);                                                                    // front leg
-    out += rect(ox + L, oy - m.lh * k, D - bt * 0 - 2 * L, m.rh * k, 0.3, FACE);                                                    // side rail
+    out += rect(ox + L, oy - m.lh * k, D - 2 * L, m.rh * k, 0.3, FACE);                                                              // side rail
     if (uph) {
-      var sb = oy - (m.lh) * k;                                                                   // the back runs down to the seat frame
+      var sb = oy - m.lh * k;
       out += '<path d="M' + n2(ox) + ',' + n2(sb) + ' L' + n2(ox) + ',' + n2(oy - m.H * k + bt * 0.5) + ' Q' + n2(ox) + ',' + n2(oy - m.H * k) + ' ' + n2(ox + bt * 0.5) + ',' + n2(oy - m.H * k) +
         ' Q' + n2(ox + bt * 1.15) + ',' + n2(oy - m.H * k) + ' ' + n2(ox + bt * 1.1) + ',' + n2(oy - m.H * k + bt * 0.6) + ' Q' + n2(ox + bt * 0.7) + ',' + n2(oy - (m.seatTop + (m.H - m.seatTop) * 0.4) * k) + ' ' + n2(ox + bt) + ',' + n2(sb) + ' Z" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
       out += seatShape(ox + bt, oy - m.seatTop * k, D - bt, s.seat.thickness * k, Math.min(s.seat.thickness * k / 2, 3));
     }
-    var a0 = ox + m.armBack * k;
-    out += rect(a0, oy - m.aTop * k, m.armLen * k, m.ah * k, 0.3, OAK) + rect(ox + D - m.ah * k, oy - m.aTop * k, m.ah * k, (m.aTop - (m.lh - m.rh)) * k, 0.3, OAK);
-    out += hChain([ox, a0, ox + D], [m.armBack, m.armLen], oy - m.H * k - 5, oy - m.H * k);
-    out += hChain([ox, ox + D], [m.D], oy - m.H * k - 10, oy - m.H * k);
+    out += rect(ox - at, oy - m.aTop * k, D + at, m.ah * k, 0.3, OAK) + rect(ox + D - m.ah * k, oy - m.aTop * k, m.ah * k, (m.aTop - (m.lh - m.rh)) * k, 0.3, OAK);   // arm band (side), front post
+    out += hChain([ox - at, ox, ox + D], [m.at, m.D], oy - m.H * k - 5, oy - m.H * k);
     out += vChain([oy - m.aTop * k, oy - (m.aTop - m.ah) * k], [m.ah], ox + D + 6, ox + D);
     if (rake) out += hChain([ox - rake, ox], [s.legs.rake], oy + 5, oy);
     return out;
   }
-  // top view; (ox, oy) = back-left of the frame
+  // top view; (ox, oy) = back-left corner of the legs
   function armPlan(s, m, ox, oy) {
-    var k = m.k, W = m.W * k, D = m.D * k, out = '', at = m.at * k, r = (s.seat.cornerRadius || 60) * k;
+    var k = m.k, W = m.W * k, D = m.D * k, out = '', r = (s.seat.cornerRadius || 40) * k;
     out += '<rect x="' + n2(ox) + '" y="' + n2(oy) + '" width="' + n2(W) + '" height="' + n2(D) + '" rx="' + n2(r) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
     out += line(ox, oy + m.bt * k, ox + W, oy + m.bt * k, 0.25) + text(ox + W / 2, oy + m.bt * k / 2 + 0.7, 'back', 1.7, { anchor: 'middle', fill: '#333' });
-    [ox - at, ox + W].forEach(function (x) { out += rect(x, oy + m.armBack * k, at, m.armLen * k, 0.3, OAK); });
-    out += hChain([ox - at, ox, ox + W, ox + W + at], [m.at, m.W, m.at], oy - 5, oy);
-    out += vChain([oy, oy + m.bt * k, oy + D], [m.bt, m.D - m.bt], ox + W + at + 6, ox + W + at);
-    out += text(ox + 2, oy + 3.5, 'R' + (s.seat.cornerRadius || 60), 1.7, { fill: '#333' });
+    out += poly2(armBand(m).map(function (p) { return [ox + p[0] * k, oy + p[1] * k]; }), OAK, 0.3);
+    out += hChain([ox - m.at * k, ox, ox + W, ox + W + m.at * k], [m.at, m.W, m.at], oy - m.at * k - 5, oy - m.at * k);
+    out += vChain([oy - m.at * k, oy, oy + m.bt * k, oy + D], [m.at, m.bt, m.D - m.bt], ox + W + m.at * k + 6, ox + W + m.at * k);
+    out += text(ox - m.at * k + 1, oy - m.at * k + 4.5, 'R' + m.R, 1.7, { fill: '#333' });
     return out;
   }
-  // frame plan for the workshop: legs, seat rails and arms, dimensioned
+  // frame plan for the workshop: legs, seat rails and the arm band, dimensioned
   function armFramePlan(s, m, ox, oy) {
-    var k = m.k, W = m.W * k, D = m.D * k, L = m.L * k, rt = m.rt * k, at = m.at * k, bt = m.bt * k, out = '';
-    var zb = bt, zf = D - L;                                     // back legs sit behind the seat, under the back
-    [[0, zb], [W - L, zb], [0, zf], [W - L, zf]].forEach(function (p) { out += rect(ox + p[0], oy + p[1], L, L, 0.3, OAK); });
-    out += rect(ox + L, oy + zb + (L - rt) / 2, W - 2 * L, rt, 0.25, FACE) + rect(ox + L, oy + zf + (L - rt) / 2, W - 2 * L, rt, 0.25, FACE);
-    out += rect(ox + (L - rt) / 2, oy + zb + L, rt, zf - zb - L, 0.25, FACE) + rect(ox + W - L + (L - rt) / 2, oy + zb + L, rt, zf - zb - L, 0.25, FACE);
-    [ox - at, ox + W].forEach(function (x) { out += rect(x, oy + m.armBack * k, at, m.armLen * k, 0.25, '#e8d9c0', ' fill-opacity="0.7"'); });
-    out += hChain([ox, ox + L, ox + W - L, ox + W], [m.L, m.W - 2 * m.L, m.L], oy - 4, oy);
-    out += vChain([oy, oy + zb, oy + zb + L, oy + zf, oy + D], [m.bt, m.L, Math.round(m.D - m.bt - 2 * m.L), m.L], ox + W + at + 5, ox + W + at);
-    out += text(ox + W / 2, oy + D + 4, 'arms shown light, ' + m.at + ' outside the legs', 1.7, { anchor: 'middle', fill: '#555' });
+    var k = m.k, W = m.W * k, D = m.D * k, L = m.L * k, rt = m.rt * k, at = m.at * k, out = '';
+    out += poly2(armBand(m).map(function (p) { return [ox + p[0] * k, oy + p[1] * k]; }), '#e8d9c0', 0.25);
+    [[0, 0], [W - L, 0], [0, D - L], [W - L, D - L]].forEach(function (p) { out += rect(ox + p[0], oy + p[1], L, L, 0.3, OAK); });
+    out += rect(ox + L, oy + (L - rt) / 2, W - 2 * L, rt, 0.25, FACE) + rect(ox + L, oy + D - L + (L - rt) / 2, W - 2 * L, rt, 0.25, FACE);
+    out += rect(ox + (L - rt) / 2, oy + L, rt, D - 2 * L, 0.25, FACE) + rect(ox + W - L + (L - rt) / 2, oy + L, rt, D - 2 * L, 0.25, FACE);
+    out += hChain([ox, ox + L, ox + W - L, ox + W], [m.L, m.W - 2 * m.L, m.L], oy - at - 4, oy - at);
+    out += vChain([oy - at, oy, oy + L, oy + D - L, oy + D], [m.at, m.L, Math.round(m.D - 2 * m.L), m.L], ox + W + at + 5, ox + W + at);
+    out += text(ox + W / 2, oy + D + 4, 'arm band (light) at ' + (m.aTop - m.ah) + '-' + m.aTop + ', R' + m.R + ' corners', 1.7, { anchor: 'middle', fill: '#555' });
     return out;
   }
   function armIso(s, m, bx, by, bw, bh) {
-    var c = Math.cos(Math.PI / 6), sn = 0.5, W = m.W + 2 * m.at, D = m.D, H = m.H, x0 = m.at;
+    var c = Math.cos(Math.PI / 6), sn = 0.5, t = m.at, W = m.W + 2 * t, D = m.D + t, H = m.H;
     var spanX = (W + D) * c, spanY = H + (W + D) * sn, sc = Math.min(bw / spanX, bh / spanY);
     var cx = bx + (bw - spanX * sc) / 2 + D * c * sc, cy = by + (bh - spanY * sc) / 2 + H * sc;
-    function P(x, y, z) { x += x0; return [cx + (x * c - z * c) * sc, cy - y * sc + (x * sn + z * sn) * sc]; }
-    function box(xa, xb, ya, yb, za, zb, fill, top) {
-      var all = []; [[xa, za], [xb, za], [xb, zb], [xa, zb]].forEach(function (p) { all.push(P(p[0], ya, p[1])); all.push(P(p[0], yb, p[1])); });
-      return poly2(hull(all), fill, 0.3) + poly2([P(xa, yb, za), P(xb, yb, za), P(xb, yb, zb), P(xa, yb, zb)], top || fill, 0.3) + poly2([P(xa, ya, zb), P(xb, ya, zb), P(xb, yb, zb), P(xa, yb, zb)], fill, 0.3);
+    function P(x, y, z) { x += t; z += t; return [cx + (x * c - z * c) * sc, cy - y * sc + (x * sn + z * sn) * sc]; }
+    function face(q, fill) { return '<polygon points="' + q.map(function (p) { return n2(p[0]) + ',' + n2(p[1]); }).join(' ') + '" fill="' + fill + '" stroke="#111" stroke-width="0.25" stroke-linejoin="round"/>'; }
+    // any outline in plan, extruded: the faces turned to the viewer, back to front, then the top
+    function prism(pts, y0, y1, side, top) {
+      var o = '', fs = [];
+      for (var i = 0; i < pts.length; i++) {
+        var a = pts[i], b = pts[(i + 1) % pts.length], dx = b[0] - a[0], dz = b[1] - a[1];
+        var nx = dz, nz = -dx;                                                           // outward for a clockwise outline (x right, z towards the viewer)
+        if (nx + nz <= 0) continue;
+        fs.push({ d: a[0] + a[1] + b[0] + b[1], q: [P(a[0], y0, a[1]), P(b[0], y0, b[1]), P(b[0], y1, b[1]), P(a[0], y1, a[1])], f: nx > nz ? side : top === side ? side : side });
+      }
+      fs.sort(function (p, q) { return p.d - q.d; }).forEach(function (f) { o += face(f.q, f.f); });
+      return o + face(pts.map(function (p) { return P(p[0], y1, p[1]); }), top);
     }
-    var out = '', L = m.L, lh = m.lh;
-    out += box(0, L, 0, lh, 0, L, '#a5835a') + box(m.W - L, m.W, 0, lh, 0, L, '#a5835a');                                     // back legs
-    out += box(0, m.W, m.seatTop, H, 0, m.bt, FABRIC_D, FABRIC);                                                                // back
-    out += box(-m.at, 0, m.aTop - m.ah, m.aTop, m.armBack, D, '#a5835a', '#c4a378') + box(-m.at, 0, lh - m.rh, m.aTop - m.ah, D - m.ah, D, '#a5835a');   // left arm
-    out += box(L, m.W - L, lh - m.rh, lh, D - L, D - L + m.rt, '#c4a378');                                                      // front rail
-    out += box(0, m.W, lh, m.seatTop, m.bt, D, FABRIC_D, FABRIC);                                                               // seat
-    out += box(0, L, 0, lh, D - L, D, '#c4a378') + box(m.W - L, m.W, 0, lh, D - L, D, '#c4a378');                              // front legs
-    out += box(m.W, m.W + m.at, m.aTop - m.ah, m.aTop, m.armBack, D, '#c4a378', '#d6b88f') + box(m.W, m.W + m.at, lh - m.rh, m.aTop - m.ah, D - m.ah, D, '#c4a378');   // right arm
-    var tS = P(m.W / 2, m.seatTop, (m.bt + D) / 2), tA = P(m.W + m.at / 2, m.aTop, D - m.armLen / 2), tL = P(m.W - L / 2, lh * 0.4, D);
+    function box(x0, x1, y0, y1, z0, z1, side, top) { return prism([[x0, z0], [x1, z0], [x1, z1], [x0, z1]], y0, y1, side, top || side); }
+    var out = '', L = m.L, lh = m.lh, rh = m.rh, rail = lh - rh, a0 = m.aTop - m.ah, band = armBand(m, 8), n = band.length / 2;
+    var outer = band.slice(0, n), inner = band.slice(n);
+    // band split into: the back (with its corners), the left arm, the right arm
+    function bandPart(x0, x1, z0, z1) { return [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]; }
+    var backBand = outer.slice(1, outer.length - 1).concat(inner.slice(1, inner.length - 1));
+    out += prism(backBand, a0, m.aTop, '#a5835a', '#c4a378');                                                       // band round the back
+    out += box(0, L, 0, lh, 0, L, '#a5835a') + box(m.W - L, m.W, 0, lh, 0, L, '#a5835a');                             // back legs
+    out += prism(bandPart(-t, 0, m.R - t, m.D), a0, m.aTop, '#a5835a', '#c4a378') + box(-t, 0, rail, a0, m.D - m.ah, m.D, '#a5835a', '#c4a378');   // left arm + post
+    out += box(L, m.W - L, rail, lh, 0, m.rt, '#c4a378') + box(0, L, rail, lh, L, m.D - L, '#c4a378');                // back + left seat rails
+    out += box(0, m.W, lh, m.H, 0, m.bt, FABRIC_D, FABRIC);                                                           // upholstered back
+    out += box(m.W - L, m.W, rail, lh, L, m.D - L, '#c4a378');                                                        // right seat rail
+    out += box(0, m.W, lh, m.seatTop, m.bt, m.D, FABRIC_D, FABRIC);                                                   // seat
+    out += box(0, L, 0, lh, m.D - L, m.D, '#c4a378') + box(L, m.W - L, rail, lh, m.D - m.rt, m.D, '#c4a378') + box(m.W - L, m.W, 0, lh, m.D - L, m.D, '#c4a378');   // front legs + rail
+    out += prism(bandPart(m.W, m.W + t, m.R - t, m.D), a0, m.aTop, '#b8956a', '#d6b88f') + box(m.W, m.W + t, rail, a0, m.D - m.ah, m.D, '#b8956a', '#d6b88f');   // right arm + post
+    var tS = P(m.W / 2, m.seatTop, (m.bt + m.D) / 2), tA = P(m.W + t / 2, m.aTop, m.D * 0.6), tL = P(m.W - L / 2, lh * 0.4, m.D);
     out += tag(tS[0], tS[1], s.upholstery.fabric.code) + tag(tA[0] + 5, tA[1] - 2, s.arms.code) + tag(tL[0] + 5, tL[1], s.legs.code);
     return out;
   }
@@ -1802,11 +1837,11 @@
     // laid out to fill the sheet: front + side large on the left, top view and 3D stacked on the right
     clientViews: function (s, m) {
       if (m.arm) {
-        var ka = m.k, wa = (m.W + 2 * m.at) * ka, oya = 32 + m.H * ka + 8, sxa = 34 + wa + 30, rxa = sxa + m.D * ka + 30;
+        var ka = m.k, wa = (m.W + 2 * m.at) * ka, oya = 32 + m.H * ka + 8, sxa = 34 + wa + 30, rxa = sxa + (m.D + m.at) * ka + 30;
         return armFront(s, m, 34 + m.at * ka, oya, true) + viewTitle(24, oya + 14, 1, 'FRONT VIEW', m.scale) +
-          armSide(s, m, sxa, oya, true) + viewTitle(sxa - 6, oya + 14, 2, 'SIDE VIEW', m.scale) +
-          armPlan(s, m, rxa + m.at * ka, 30) + viewTitle(rxa, 30 + m.D * ka + 14, 3, 'TOP VIEW', m.scale) +
-          armIso(s, m, rxa - 6, 30 + m.D * ka + 22, 318 - rxa + 6, 210 - (30 + m.D * ka + 22)) + viewTitle(rxa, 222, 4, '3D VIEW', 'not to scale');
+          armSide(s, m, sxa + m.at * ka, oya, true) + viewTitle(sxa - 6, oya + 14, 2, 'SIDE VIEW', m.scale) +
+          armPlan(s, m, rxa + m.at * ka, 30 + m.at * ka) + viewTitle(rxa, 30 + (m.D + m.at) * ka + 14, 3, 'TOP VIEW', m.scale) +
+          armIso(s, m, rxa - 6, 30 + (m.D + m.at) * ka + 22, 318 - rxa + 6, 210 - (30 + (m.D + m.at) * ka + 22)) + viewTitle(rxa, 222, 4, '3D VIEW', 'not to scale');
       }
       var k = m.k, w = Math.max(m.W, s.seat.frontWidth, s.back.width) * k, ox = 34 + (w - m.W * k) / 2, oy = 32 + m.oh * k + 8;
       var sx = 34 + w + 30, sd = Math.max(m.D, m.pt + s.seat.depth) * k, rx = sx + sd + 24, rw = 318 - rx;
@@ -1817,14 +1852,14 @@
     },
     workshopViews: function (s, m) {
       if (m.arm) {
-        var kb = m.k, wb = (m.W + 2 * m.at) * kb, oyb = 32 + m.H * kb + 6, sxb = 34 + wb + 30, rxb = sxb + m.D * kb + 30;
+        var kb = m.k, wb = (m.W + 2 * m.at) * kb, oyb = 32 + m.H * kb + 6, sxb = 34 + wb + 30, rxb = sxb + (m.D + m.at) * kb + 30;
         return armFront(s, m, 34 + m.at * kb, oyb, false) + viewTitle(24, oyb + 12, 1, 'FRAME FRONT', m.scale) +
-          armSide(s, m, sxb, oyb, false) + viewTitle(sxb - 6, oyb + 12, 2, 'FRAME SIDE', m.scale) +
-          armFramePlan(s, m, rxb + m.at * kb, 76) + viewTitle(rxb, 76 + m.D * kb + 14, 3, 'FRAME PLAN', m.scale) +
+          armSide(s, m, sxb + m.at * kb, oyb, false) + viewTitle(sxb - 6, oyb + 12, 2, 'FRAME SIDE', m.scale) +
+          armFramePlan(s, m, rxb + m.at * kb, 76 + m.at * kb) + viewTitle(rxb, 76 + (m.D + m.at) * kb + 14, 3, 'FRAME PLAN', m.scale) +
           text(rxb, 40, 'Seat ' + s.seat.thickness + ' thick: ' + s.upholstery.base.thickness + ' base board + ' + s.upholstery.foam.thickness + ' foam + fabric.', 1.9, { fill: '#333' }) +
           text(rxb, 44.5, 'Back: ' + s.upholstery.base.thickness + ' CNC back frame on the back legs, foam, fabric.', 1.9, { fill: '#333' }) +
           text(rxb, 49, 'Fabric about ' + n2(m.fabSeat / 1e6) + ' m² seat + ' + n2(m.fabBack / 1e6) + ' m² back per chair.', 1.9, { fill: '#333' }) +
-          text(rxb, 53.5, 'Arms: ' + m.at + ' solid, top rail ' + m.armLen + ' long, front post seat rail to arm.', 1.9, { fill: '#333' });
+          text(rxb, 53.5, 'Arms: one ' + m.at + ' solid band round the back (R' + m.R + ' corners), front post under each end.', 1.9, { fill: '#333' });
       }
       var k = m.k, oy = 30 + m.H * k + 6, sx = 34 + m.W * k + 30, px = sx + m.D * k + 30, pk = 0.1;
       return chairFront(s, m, 34, oy, false) + viewTitle(24, oy + 12, 1, 'FRAME FRONT', m.scale) +
