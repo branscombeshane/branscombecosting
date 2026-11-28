@@ -1708,7 +1708,7 @@
     var sideLen = D + at - R, backLen = W + 2 * at - 2 * R;
     part('Arm band, side', 2, sideLen, ah, at, ar, 'front of the arm back to the corner; top at ' + aTop + ' from the floor');
     part('Arm band, back', 1, backLen, ah, at, ar, 'across the back of the chair, behind the upholstered back');
-    part('Arm band corner (block)', 2, R + 20, R + 20, ah, ar, 'R' + R + ' outside, ' + at + ' wall; shape after glue-up');
+    part('Arm band corner (block)', 2, R + 20, R + 20, ah, ar, 'cut from solid blocks, glued up, then shaped: R' + R + ' outside, ' + at + ' wall');
     part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, 'seat rail to the arm band');
     var M = CNC_MARGIN, bb = up.base, foamT = up.foam.thickness;
     part('Seat base (blank)', 1, W + M, D - bt + M, bb.thickness, bb, 'cut to ' + W + ' x ' + (D - bt));
