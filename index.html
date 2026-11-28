@@ -1226,7 +1226,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-28.15';
+  var BATTEN_VERSION = '2026-11-28.16';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){

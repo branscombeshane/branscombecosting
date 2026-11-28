@@ -1710,10 +1710,10 @@
     part('Arm band, side', 2, sideLen, ah, at, ar, 'front of the arm back to the corner; top at ' + aTop + ' from the floor');
     part('Arm band, back (blank)', 1, backLen, ah, Math.ceil((at + bow + 5) / 5) * 5, ar, 'curved in plan, bowing out ' + bow + ' between the corners; ' + at + ' finished, behind the upholstered back');
     part('Arm band corner (block)', 2, R + 20, R + 20, ah, ar, 'cut from solid blocks, glued up, then shaped: R' + R + ' outside, ' + at + ' wall');
-    part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, 'seat rail to the arm band');
+    part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, 'joined to the bottom frame (seat rail) and the arm band');
     var M = CNC_MARGIN, bb = up.base, foamT = up.foam.thickness;
     part('Seat base (blank)', 1, W + M, D - bt + M, bb.thickness, bb, 'cut to ' + W + ' x ' + (D - bt));
-    part('Back frame (CNC blank)', 1, W + M, H - lh + M, bb.thickness, bb, 'CNC to ' + W + ' x ' + (H - lh) + ', fixed to the back legs and the arm band');
+    part('Back frame (CNC blank)', 1, W + M, H - lh + M, bb.thickness, bb, 'CNC to ' + W + ' x ' + (H - lh) + ', sits on the bottom frame, fixed to the back band');
     parts.push({ name: 'Seat foam', qty: 1, length: W, width: D - bt, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: '' });
     parts.push({ name: 'Back foam', qty: 1, length: W, width: H - seatTop, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: 'front, wrapped over the top' });
     var wrap = up.wrap == null ? 50 : up.wrap, waste = 1 + (up.waste == null ? 15 : up.waste) / 100;
@@ -1864,11 +1864,16 @@
         var kb = m.k, wb = (m.W + 2 * m.at) * kb, oyb = 32 + m.H * kb + 6, sxb = 34 + wb + 30, rxb = sxb + (m.D + m.at) * kb + 30;
         return armFront(s, m, 34 + m.at * kb, oyb, false) + viewTitle(24, oyb + 12, 1, 'FRAME FRONT', m.scale) +
           armSide(s, m, sxb + m.at * kb, oyb, false) + viewTitle(sxb - 6, oyb + 12, 2, 'FRAME SIDE', m.scale) +
-          armFramePlan(s, m, rxb + m.at * kb, 76 + m.at * kb) + viewTitle(rxb, 76 + (m.D + m.at) * kb + 14, 3, 'FRAME PLAN', m.scale) +
+          armFramePlan(s, m, rxb + m.at * kb, 92 + m.at * kb) + viewTitle(rxb, 92 + (m.D + m.at) * kb + 14, 3, 'FRAME PLAN', m.scale) +
           text(rxb, 40, 'Seat ' + s.seat.thickness + ' thick: ' + s.upholstery.base.thickness + ' base board + ' + s.upholstery.foam.thickness + ' foam + fabric.', 1.9, { fill: '#333' }) +
-          text(rxb, 44.5, 'Back: ' + s.upholstery.base.thickness + ' CNC back frame on the back legs, foam, fabric.', 1.9, { fill: '#333' }) +
+          text(rxb, 44.5, 'Back: ' + s.upholstery.base.thickness + ' CNC back frame on the bottom frame, fixed to the back band; foam, fabric.', 1.9, { fill: '#333' }) +
           text(rxb, 49, 'Fabric about ' + n2(m.fabSeat / 1e6) + ' m² seat + ' + n2(m.fabBack / 1e6) + ' m² back per chair.', 1.9, { fill: '#333' }) +
-          text(rxb, 53.5, 'Arms: one ' + m.at + ' solid band round the back (R' + m.R + ' corners), front post under each end.', 1.9, { fill: '#333' });
+          text(rxb, 53.5, 'Arms: one ' + m.at + ' solid band round the back (R' + m.R + ' corners), front post under each end.', 1.9, { fill: '#333' }) +
+          text(rxb, 60, 'Build order:', 1.9, { fill: '#111', weight: 'bold' }) +
+          text(rxb, 64, '1. Bottom frame: legs and seat rails (the back legs stop at the frame).', 1.9, { fill: '#333' }) +
+          text(rxb, 68, '2. Seat sits on top of the bottom frame.', 1.9, { fill: '#333' }) +
+          text(rxb, 72, '3. Arm rests (front posts + side bands) joined to the bottom frame.', 1.9, { fill: '#333' }) +
+          text(rxb, 76, '4. Arm rests joined to the back band; upholstered back fixed to it.', 1.9, { fill: '#333' });
       }
       var k = m.k, oy = 30 + m.H * k + 6, sx = 34 + m.W * k + 30, px = sx + m.D * k + 30, pk = 0.1;
       return chairFront(s, m, 34, oy, false) + viewTitle(24, oy + 12, 1, 'FRAME FRONT', m.scale) +
