@@ -1240,7 +1240,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-28.37';
+  var BATTEN_VERSION = '2026-11-28.38';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -8817,6 +8817,10 @@
         Object.keys(s).forEach(function(k2){ delete s[k2]; });
         Object.assign(s, clone_(DESIGN_STYLE_DEFAULTS_[s.template||keep.template][el.value]), keep);
       } else setPath_(s, el.dataset.path, el.value);
+      if(el.dataset.path==='openers.type' && s.openers){                                  // the item name follows the kind of opener
+        s.openers.item = el.value==='pushToOpen' ? 'Push to open piston 1006 F, grey' : el.value==='knob' ? 'Knob' : (s.openers.mount==='edge' ? 'Lip handle' : 'Bar handle');
+      }
+      if(el.dataset.path==='openers.mount' && s.openers && s.openers.type==='handle' && /^(lip|bar) handle$/i.test(s.openers.item||'')) s.openers.item = el.value==='edge' ? 'Lip handle' : 'Bar handle';
       if(el.dataset.path==='shape.type' && el.value==='kidney' && s.shape){                // a kidney: long enough to bend, with its dip
         var kw=Number(s.shape.width)||450; if(!(Number(s.shape.length)>=2.2*kw)) s.shape.length=Math.round(kw*2.4);
         if(!(Number(s.shape.bow)>0)) s.shape.bow=Math.round(kw*0.2);

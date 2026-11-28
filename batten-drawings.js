@@ -46,6 +46,22 @@
     return (v === 'middle' ? 'halfway up' : v === 'bottom' ? (Math.round(ih) - at.y) + ' above the inside of the bottom' : at.y + ' below the inside of the top') +
       ', ' + (h === 'middle' ? 'centred across' : (h === 'left' ? 'left' : 'right') + ' side, an eighth of the compartment width in from it (at least ' + (d / 2 + 15) + ')');
   }
+  // the opener's item name must be for that kind of opener (Shane, 28 Nov: hardware said push to open
+  // while the doors had handles, because the item text was left over from push to open)
+  function openerItemFix(op) {
+    var o = {}; for (var k in op) o[k] = op[k];
+    var it = String(o.item || '');
+    if (o.type === 'handle' && (!it || /push|piston|latch|knob/i.test(it))) o.item = o.mount === 'edge' ? 'Lip handle' : 'Bar handle';
+    else if (o.type === 'knob' && (!it || /push|piston|latch|handle/i.test(it))) o.item = 'Knob';
+    else if (o.type === 'pushToOpen' && (!it || /handle|knob/i.test(it))) o.item = 'Push to open piston';
+    return o;
+  }
+  // hinge heights on a door, from the door top (Blum: 2 up to 900, 3 up to 1600, then 4)
+  function hingeYs(s, m) {
+    var fromEnd = (s.setout || {}).hingeFromEnd || 100, H = m.doorH, ys = [];
+    for (var i = 0; i < m.hingesPerDoor; i++) ys.push(i === 0 ? fromEnd : i === m.hingesPerDoor - 1 ? H - fromEnd : Math.round(fromEnd + (H - 2 * fromEnd) * i / (m.hingesPerDoor - 1)));
+    return ys;
+  }
   function buildCarcass(s) {
     var T = s.board.thickness, db = (s.doorBoard && s.doorBoard.material) ? s.doorBoard : s.board, Td = db.thickness, B = s.back.thickness, R = s.back.rebate || 8, W = s.width, D = s.depth, H = s.carcassHeight, n = s.columns;
     var Dc = D - Td;                       // carcass depth (sides, top, bottom), the back sits inside it
@@ -134,6 +150,7 @@
     var hw = [];
     function item(code, qty, name) { hw.push({ code: code, qty: qty, name: name }); }
     var hc = 1, op = s.openers || {};
+    op = openerItemFix(op);
     if (full) item('H' + hc++, full, 'Hinge, full overlay');
     if (half) item('H' + hc++, half, 'Hinge, half overlay');
     item('H' + hc++, full + half, 'Hinge plate');
@@ -254,6 +271,18 @@
         cx += bay * k;
         if (i < m.bays.length - 1) { out += rect(cx, top + T, T, H - 2 * T, 0.3, '#d9c4a0'); cx += T; }
       });
+      // hinge plates (Shane, 28 Nov: the joiners need to see where they go on the carcass)
+      var dt = m.topOver ? m.T + m.dGap : 0, hys = hingeYs(s, m), memX = [ox], acc = ox, pw = Math.max(0.9, 12 * k), ph = Math.max(1.6, 48 * k), opw = openerItemFix(s.openers || {});
+      m.bays.forEach(function (bay) { acc += T + bay * k; memX.push(acc); });
+      m.bays.forEach(function (bay, i) {
+        var left = m.hinge[i] === 'L', px = left ? memX[i] + T : memX[i + 1] - pw;
+        hys.forEach(function (y) { out += rect(px, top + (dt + y) * k - ph / 2, pw, ph, 0.15, '#333'); });
+        var hasHandle = opw.type === 'handle' ? m.handleDoors.indexOf(i + 1) !== -1 : opw.type === 'knob';
+        out += text(memX[i] + T + bay * k / 2, top + H - T - 1.6, 'D' + (i + 1) + ': hinged ' + (left ? 'left' : 'right') + (hasHandle ? ', ' + (opw.type === 'knob' ? 'knob' : 'handle') + ' ' + (left ? 'right' : 'left') : opw.type === 'pushToOpen' ? ', push to open' : ''), 1.6, { anchor: 'middle', fill: '#444' });
+      });
+      var c0 = [top].concat(hys.map(function (y) { return top + (dt + y) * k; })), v0 = [dt + hys[0]].concat(hys.slice(1).map(function (y, i) { return y - hys[i]; }));
+      out += vChain(c0, v0, ox + T + 7, ox + T);                         // hinge heights, inside the first compartment
+      out += text(ox, oy + 9.5, '■ hinge plates on the sides / dividers, centred ' + ((s.setout || {}).pinRowsFromEdge || 37) + ' in from the front edge; heights from the top of the carcass (in the first compartment), the same on every hinged side', 1.7, { fill: '#444' });
     }
     // dimensions
     out += hChain([ox, ox + W], [m.W], top - 9, top);
@@ -315,12 +344,11 @@
   // hardware setting out: one door seen from the inside, hinge cups and handle dimensioned, notes
   function cabSetout(s, m, x0, y0, pw) {
     var so = s.setout || {}, fromEnd = so.hingeFromEnd || 100, cup = so.cupDia || 35, cupE = so.cupFromEdge || 22, rows = so.pinRowsFromEdge || 37, pitch = so.pinPitch || 32;
-    var d = m.doors[0], H = m.doorH, kd = (d * 0.1 <= pw * 0.55) ? 0.1 : 1 / 15, dw = d * kd, dh = H * kd, out = '', op = s.openers || {};
+    var d = m.doors[0], H = m.doorH, kd = (d * 0.1 <= pw * 0.55) ? 0.1 : 1 / 15, dw = d * kd, dh = H * kd, out = '', op = openerItemFix(s.openers || {});
     var hingeLeft = m.hinge[0] === 'L';          // seen from the inside the hinge side is mirrored
     var hx = hingeLeft ? x0 + dw - cupE * kd : x0 + cupE * kd;
     out += rect(x0, y0, dw, dh, 0.3, '#efe4d2');
-    var ys = [];
-    for (var i = 0; i < m.hingesPerDoor; i++) ys.push(i === 0 ? fromEnd : i === m.hingesPerDoor - 1 ? H - fromEnd : Math.round(fromEnd + (H - 2 * fromEnd) * i / (m.hingesPerDoor - 1)));
+    var ys = hingeYs(s, m);
     ys.forEach(function (y) { out += circle(hx, y0 + y * kd, cup / 2 * kd, '#fff', 0.25) + line(hx - 2, y0 + y * kd, hx + 2, y0 + y * kd, 0.12) + line(hx, y0 + y * kd - 2, hx, y0 + y * kd + 2, 0.12); });
     out += vChain([y0].concat(ys.map(function (y) { return y0 + y * kd; })).concat([y0 + dh]), [ys[0]].concat(ys.slice(1).map(function (y, i) { return y - ys[i]; })).concat([H - ys[ys.length - 1]]), hingeLeft ? x0 + dw + 5 : x0 - 5, hingeLeft ? x0 + dw : x0);
     out += hingeLeft ? hChain([hx, x0 + dw], [cupE], y0 - 4, y0) : hChain([x0, hx], [cupE], y0 - 4, y0);
