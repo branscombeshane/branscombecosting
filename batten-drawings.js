@@ -418,6 +418,7 @@
       ['DRAWN', s.drawnBy], ['CHECKED', s.checkedBy], ['DATE', (s.revisions[s.revisions.length - 1] || {}).date || ''], ['SCALE', SCALE + ' at A3'],
       ['SHEET', sheetNo + ' of ' + sheetCount], ['REVISION', (s.revisions[s.revisions.length - 1] || {}).rev || '']];
     rows.forEach(function (r) {
+      if (r[0] === 'JOB NO' && !String(r[1] || '').trim()) { out += text(x, y + 3.2, r[0], 2, { fill: '#666' }) + text(x + 20, y + 3.2, 'Given when saved', 2.3, { fill: '#999' }) + line(x, y + 5, x + w, y + 5, 0.12); y += 5.6; return; }
       out += text(x, y + 3.2, r[0], 2, { fill: '#666' }) + text(x + 20, y + 3.2, r[1], 2.6, { weight: r[0] === 'JOB NO' || r[0] === 'PRODUCT' ? 'bold' : 'normal' });
       out += line(x, y + 5, x + w, y + 5, 0.12);
       y += 5.6;
@@ -429,6 +430,10 @@
       y += 4;
       out += text(x, y, r.rev, 2.2, { weight: 'bold' }) + text(x + 5, y, r.date, 2.2) + text(x + 23, y, r.note.length > 34 ? r.note.slice(0, 33) + '…' : r.note, 2.1);
     });
+    var jb = PAGE_H - M - 4 - 16, job = String(s.job || '').trim();        // job number, large, at the foot of the title block
+    out += rect(x, jb, w, 16, 0.4, '#fff') + text(x + 2.5, jb + 4.2, 'JOB NO', 2.1, { fill: '#666' }) +
+      text(x + w / 2, jb + 12.6, job || 'Given when saved', job ? 8 : 3.6, { anchor: 'middle', weight: job ? 'bold' : 'normal', fill: job ? '#111' : '#999', spacing: job ? '0.6' : null }) +
+      text(x + w - 2.5, jb + 4.2, 'SHEET ' + sheetNo + ' / ' + sheetCount, 2.1, { anchor: 'end', fill: '#666' });
     return { svg: out, y: y + 5, x: x, w: w };
   }
   function table(x, y, cols, rows, opts) {
