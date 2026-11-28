@@ -2040,6 +2040,14 @@
   }
   function buildFreeform(s) {
     var sh = s.shape, sb = s.subBase, lg = s.legs, tp = s.top || {}, H = s.height;
+    // a kidney needs its inside dip: none given = a fifth of the band width (the Begin kidney is 88 on 427)
+    // the inside edge must not fold over itself: the bend radius stays above 0.6 x the band width
+    if (sh.type === 'kidney') {
+      var kc = Number(sh.length) - Number(sh.width), kq = 0.6 * Number(sh.width), maxBow = kc / 2 >= kq ? 1e9 : Math.floor(kq - Math.sqrt(kq * kq - kc * kc / 4));
+      if (maxBow < 20) throw new Error('Too short for a kidney: make the length at least ' + Math.ceil(Number(sh.width) * 1.9) + ' (about 2.4 x the width looks best)');
+      if (!(Number(sh.bow) > 0)) sh.bow = Math.min(Math.round(Number(sh.width) * 0.2), maxBow);
+      if (Number(sh.bow) > maxBow) throw new Error('The kidney dip of ' + sh.bow + ' folds the inside edge over: at most ' + maxBow + ' for this length, or make it longer');
+    }
     var T = Number(tp.thickness) || 0, St = sb.thickness, legH = H - T - St, t = lg.thickness, taper = lg.taper == null ? 0.2 : lg.taper;
     if (legH <= 50) throw new Error('The height leaves only ' + legH + ' for the legs');
     if (!(sh.width > 100 && sh.length > 100)) throw new Error('The shape needs a width and a length');
