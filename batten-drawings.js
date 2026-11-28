@@ -210,7 +210,11 @@
       if (m.topOver) out += rect(ox, top, W, T, 0.3, '#d9c4a0');
       m.doors.forEach(function (d, i) {
         out += rect(x, dTop, d * k, dH, 0.3, '#e8d9c0');
-        if (op.type === 'handle' && m.handleDoors.indexOf(i + 1) !== -1) { var hx = m.hinge[i] === 'L' ? x + d * k - (op.fromEdge || 30) * k : x + (op.fromEdge || 30) * k; out += rect(hx - Math.max(0.6, 8 * k), dTop + (op.fromTop || 150) * k, Math.max(1.2, 16 * k), (op.length || 160) * k, 0.2, '#333'); }
+        if (op.type === 'handle' && m.handleDoors.indexOf(i + 1) !== -1) {
+          var hy = dTop + (op.fromTop || 150) * k, hl = (op.length || 160) * k;
+          if (op.mount === 'edge') { var lw = Math.max(0.8, 10 * k), lx2 = m.hinge[i] === 'L' ? x + d * k - lw : x; out += rect(lx2, hy, lw, hl, 0.2, '#333'); }   // lip handle on the door edge
+          else { var hx = m.hinge[i] === 'L' ? x + d * k - (op.fromEdge || 30) * k : x + (op.fromEdge || 30) * k; out += rect(hx - Math.max(0.6, 8 * k), hy, Math.max(1.2, 16 * k), hl, 0.2, '#333'); }
+        }
         var slatted = m.slatDoors.indexOf(i + 1) !== -1;
         if (slatted && m.slatInfo) { for (var q = 0; q < m.slatInfo.count; q++) { var sx = x + (m.slatInfo.margin + q * (m.slatInfo.width + m.slatInfo.gap)) * k; out += rect(sx, dTop, m.slatInfo.width * k, dH, 0.2, '#d6be98'); } }
         if (op.type === 'knob' && (!slatted || op.slatted)) { var kx = m.hinge[i] === 'L' ? x + d * k - (op.fromEdge || 50) * k : x + (op.fromEdge || 50) * k; out += circle(kx, dTop + (op.fromTop || 110) * k, Math.max(0.8, 15 * k), '#333', 0.2); }
