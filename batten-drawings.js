@@ -274,7 +274,7 @@
     out += hChain([ox, ox + D], [m.D], top - 9, top);
     out += section ? hChain([ox, ox + B, ox + Dc, ox + D], [m.B, m.Din, m.Td], top - 4, top) : hChain([ox, ox + Dc, ox + D], [m.Dc, m.Td], top - 4, top);
     out += vChain([top, oy - b, oy], [m.H, s.base.height], ox + D + 5, ox + D);
-    if (m.plinth) out += hChain([ox, ox + pb, ox + D - pf, ox + D], [s.base.insetBack || 0, m.frameW, s.base.insetFront || 0], oy + 5, oy);
+    if (m.plinth) { var px = [ox + pb], pv = [m.frameW]; if (pb > 0) { px.unshift(ox); pv.unshift(s.base.insetBack); } px.push(ox + D - pf); if (pf > 0) { px.push(ox + D); pv.push(s.base.insetFront); } out += hChain(px, pv, oy + 5, oy); }
     else out += hChain([ox, ox + by, ox + by + tb, ox + D - by - tb, ox + D - by, ox + D], [s.base.insetY, s.base.tube, m.frameW - 2 * s.base.tube, s.base.tube, s.base.insetY], oy + 5, oy);
     return out;
   }
