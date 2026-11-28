@@ -2282,7 +2282,7 @@
     totals.sort(function (a, b) { return a.code < b.code ? -1 : 1; });
     var used = {}; list.forEach(function (q) { used[q.code] = 1; if (q.cover) used[q.cover] = 1; });
     var hardware = (s.hardware || []).filter(function (h) { return h && (h.item || h.name); }).map(function (h) { return { code: String(h.code || ''), qty: Number(h.qty) || 1, name: String(h.item || h.name) }; });
-    var den = pickScale(function (k) { return (W + D) * k + 44 <= 200 && (H + D) * k + 50 <= 186; });
+    var den = pickScale(function (k) { return (W + D) * k + 56 <= 200 && (H + D) * k + 60 <= 186; });
     return { scale: '1:' + den, k: 1 / den, list: list, bb: bb, W: W, H: H, D: D, parts: parts, totals: totals, hardware: hardware,
       materials: materialsOf(Object.keys(used).map(function (c) { return matByCode[c]; })),
       overall: { width: Math.round(W), depth: Math.round(D), height: Math.round(H) } };
@@ -2352,29 +2352,72 @@
     else Object.keys(tags).forEach(function (nn) { var cc = tags[nn]; out += circle(cc[0], cc[1], 1.5, '#fff', 0.15) + text(cc[0], cc[1] + 0.6, nn, 1.6, { anchor: 'middle' }); });
     return out;
   }
-  function partsDims(m, ox, oy, sx, ty) {           // overall sizes on the front, side and top views
-    var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k;
-    return hChain([ox, ox + w], [Math.round(m.W)], oy - h - 5, oy - h) + vChain([oy - h, oy], [Math.round(m.H)], sx + d + 6, sx + d) +
-      hChain([sx, sx + d], [Math.round(m.D)], oy + 5, oy) + vChain([ty, ty + d], [Math.round(m.D)], ox + w + 6, ox + w);
+  // Shane, 28 Nov: "not enough dimensions". Besides the overall sizes, each view gets chains of
+  // the positions that matter, worked out from the parts themselves:
+  //   front: along the bottom, where the legs / sides / dividers stand (parts reaching the floor or
+  //          most of the height); up the left, the levels of the tops, shelves, aprons, stretchers
+  //          (parts spanning a good part of the width);
+  //   side:  the same front to back, and up its left the levels of parts spanning most of the depth;
+  //   top:   where the legs stand front to back and across, dashed, under the top.
+  function edgeChain(lo, hi, edges) {               // sorted edges from lo to hi, near-duplicates dropped
+    var e = [lo].concat(edges.filter(function (v) { return v > lo + 0.5 && v < hi - 0.5; })).concat([hi]).sort(function (a, b) { return a - b; }), out = [];
+    e.forEach(function (v) { if (!out.length || v - out[out.length - 1] >= 2) out.push(v); else if (v === hi) out[out.length - 1] = hi; });
+    return out;
+  }
+  var CHAIN_K = 0.1;                               // scale of the chain being labelled (too small on paper = no label)
+  function chainVals(e) { var v = []; for (var i = 1; i < e.length; i++) { var g = e[i] - e[i - 1]; v.push(g * CHAIN_K < 2.6 ? '' : Math.round(g)); } return v; }
+  function partsDims(m, ox, oy, sx, ty) {
+    var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k, lo = m.bb.lo, hi = m.bb.hi, L = m.list, out = '';
+    CHAIN_K = k;
+    function standing(q) { return q.lo[1] <= lo[1] + 5 || (q.hi[1] - q.lo[1]) >= 0.6 * m.H; }
+    // front: across
+    var ex = []; L.forEach(function (q) { if (standing(q)) ex.push(q.lo[0], q.hi[0]); });
+    var cx = edgeChain(lo[0], hi[0], ex);
+    if (cx.length > 2) out += hChain(cx.map(function (v) { return ox + (v - lo[0]) * k; }), chainVals(cx), oy + 5, oy);
+    // front: levels up the left
+    var ey = []; L.forEach(function (q) { if ((q.hi[0] - q.lo[0]) >= 0.3 * m.W && !standing(q)) ey.push(q.lo[1], q.hi[1]); else if ((q.hi[0] - q.lo[0]) >= 0.3 * m.W) ey.push(q.hi[1]); });
+    var cy = edgeChain(lo[1], hi[1], ey);
+    if (cy.length > 2) out += vChain(cy.slice().reverse().map(function (v) { return oy - (v - lo[1]) * k; }), chainVals(cy).reverse(), ox - 6, ox);
+    // side: front to back
+    var ez = []; L.forEach(function (q) { if (standing(q)) ez.push(q.lo[2], q.hi[2]); });
+    var cz = edgeChain(lo[2], hi[2], ez);
+    if (cz.length > 2) out += hChain(cz.map(function (v) { return sx + (v - lo[2]) * k; }), chainVals(cz), oy + 5, oy);
+    // side: levels of parts spanning most of the depth
+    var ey2 = []; L.forEach(function (q) { if ((q.hi[2] - q.lo[2]) >= 0.5 * m.D && !standing(q)) ey2.push(q.lo[1], q.hi[1]); });
+    var cy2 = edgeChain(lo[1], hi[1], ey2);
+    if (cy2.length > 2) out += vChain(cy2.slice().reverse().map(function (v) { return oy - (v - lo[1]) * k; }), chainVals(cy2).reverse(), sx - 6, sx);
+    // top: the legs under the top, dashed, with their positions
+    var legs = L.filter(function (q) { return q.lo[1] <= lo[1] + 5 && (q.hi[0] - q.lo[0]) < 0.3 * m.W && (q.hi[2] - q.lo[2]) < 0.3 * m.D; });
+    legs.forEach(function (q) { out += rect(ox + (q.lo[0] - lo[0]) * k, ty + (q.lo[2] - lo[2]) * k, (q.hi[0] - q.lo[0]) * k, (q.hi[2] - q.lo[2]) * k, 0.2, 'none', DASH); });
+    if (legs.length) {
+      var lz = []; legs.forEach(function (q) { lz.push(q.lo[2], q.hi[2]); });
+      var cz2 = edgeChain(lo[2], hi[2], lz);
+      if (cz2.length > 2) out += vChain(cz2.map(function (v) { return ty + (v - lo[2]) * k; }), chainVals(cz2), ox - 6, ox);
+      out += text(ox + 1, ty + d + 4, 'dashed: legs under the top', 1.6, { fill: '#555' });
+    }
+    // overall sizes
+    out += hChain([ox, ox + w], [Math.round(m.W)], oy - h - 5, oy - h) + vChain([oy - h, oy], [Math.round(m.H)], sx + d + 6, sx + d) +
+      hChain([sx, sx + d], [Math.round(m.D)], oy + 11, oy) + vChain([ty, ty + d], [Math.round(m.D)], ox + w + 6, ox + w);
+    return out;
   }
   TEMPLATES.parts = {
     build: buildParts,
     clientViews: function (s, m) {
-      var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k, oy = 26 + h, sx = 24 + w + 30, ty = oy + 26, ix = sx + d + 22;
-      var out = partsView(s, m, 24, oy, 'front') + viewTitle(24, oy + 13, 1, 'FRONT VIEW', m.scale) +
-        partsView(s, m, sx, oy, 'side') + viewTitle(sx, oy + 13, 2, 'SIDE VIEW', m.scale) +
-        partsView(s, m, 24, ty, 'top') + viewTitle(24, ty + d + 10, 3, 'TOP VIEW', m.scale) + partsDims(m, 24, oy, sx, ty);
+      var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k, oy = 26 + h, sx = 30 + w + 34, ty = oy + 30, ix = sx + d + 22;
+      var out = partsView(s, m, 30, oy, 'front') + viewTitle(24, oy + 18, 1, 'FRONT VIEW', m.scale) +
+        partsView(s, m, sx, oy, 'side') + viewTitle(sx, oy + 18, 2, 'SIDE VIEW', m.scale) +
+        partsView(s, m, 30, ty, 'top') + viewTitle(24, ty + d + 12, 3, 'TOP VIEW', m.scale) + partsDims(m, 30, oy, sx, ty);
       // 3D: in the larger of the space right of the side view or right of the top view
-      var r1 = { x: ix, y: 18, w: 318 - ix, h: 205 }, r2 = { x: 24 + w + 30, y: ty, w: 318 - (24 + w + 30), h: 214 - ty };
+      var r1 = { x: ix, y: 18, w: 318 - ix, h: 205 }, r2 = { x: 30 + w + 34, y: ty, w: 318 - (30 + w + 34), h: 214 - ty };
       var R = Math.min(r1.w, r1.h) >= Math.min(r2.w, r2.h) ? r1 : r2;
       return out + partsIso(s, m, R.x, R.y, R.w, R.h - 14, false) + viewTitle(R.x, R.y + R.h - 4, 4, '3D VIEW', 'not to scale');
     },
     workshopViews: function (s, m) {
-      var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k, oy = 26 + h, sx = 24 + w + 30, ty = oy + 26;
-      var out = partsView(s, m, 24, oy, 'front') + viewTitle(24, oy + 13, 1, 'FRONT', m.scale) +
-        partsView(s, m, sx, oy, 'side') + viewTitle(sx, oy + 13, 2, 'SIDE (from the right)', m.scale) +
-        partsView(s, m, 24, ty, 'top') + viewTitle(24, ty + d + 10, 3, 'TOP', m.scale) + partsDims(m, 24, oy, sx, ty);
-      var ix = 24 + w + 30, iw = 228 - ix;                              // beside the top view
+      var k = m.k, w = m.W * k, h = m.H * k, d = m.D * k, oy = 26 + h, sx = 30 + w + 34, ty = oy + 30;
+      var out = partsView(s, m, 30, oy, 'front') + viewTitle(24, oy + 18, 1, 'FRONT', m.scale) +
+        partsView(s, m, sx, oy, 'side') + viewTitle(sx, oy + 18, 2, 'SIDE (from the right)', m.scale) +
+        partsView(s, m, 30, ty, 'top') + viewTitle(24, ty + d + 12, 3, 'TOP', m.scale) + partsDims(m, 30, oy, sx, ty);
+      var ix = 30 + w + 34, iw = 228 - ix;                              // beside the top view
       if (iw > 40) out += partsIso(s, m, ix, ty - 4, iw, 200 - ty, true) + viewTitle(ix, 204, 4, '3D, PART NUMBERS', 'not to scale');
       // positions of every part (its left / bottom / back corner)
       var rows = m.list.map(function (q) { return [q.n, q.name.length > 18 ? q.name.slice(0, 17) + '…' : q.name, Math.round(q.w) + '×' + Math.round(q.h) + '×' + Math.round(q.d), Math.round(q.x), Math.round(q.y), Math.round(q.z)]; });
