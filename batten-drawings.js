@@ -1615,6 +1615,173 @@
         chairPadNotes(s, m, 24, oy + 22);
     }
   };
+  // ================================================================ template: freeform ======
+  // Free-form table base (from Begin Interiors coffee table base): an organic sub-base (CNC MDF)
+  // on curved blade legs that follow its edge and taper towards the floor. Shapes:
+  //  - 'pebble': an egg-like oval, width x length, `egg` = how much fuller one end is;
+  //  - 'kidney': the same oval bent sideways by `bow` (concave on the left), so the overall
+  //    width is width + bow (e.g. 427 + 88).
+  // Each leg: `at` = where its middle sits around the edge (0 = top, 0.25 = right, 0.5 = bottom,
+  // 0.75 = left, clockwise), `inset` = from the edge to the leg's outer face, `length` = along
+  // the leg (plan). Legs run from the floor to the underside of the sub-base; an optional top
+  // sits on the sub-base (thickness 0 = base only).
+  function freeOutline(sh, steps) {
+    var W = sh.width, L = sh.length, e = sh.egg == null ? 0.12 : sh.egg, bow = sh.type === 'kidney' ? (sh.bow || 0) : 0, N = steps || 180, pts = [];
+    if (sh.type === 'kidney') {                    // a bean: a band `width` wide along an arc bowed `bow`, round ends
+      var c = L - W, r = W / 2, R = bow ? (c * c / 4 + bow * bow) / (2 * bow) : 1e9, half = Math.asin(Math.min(1, c / 2 / R)), cx0 = -R + bow, M = 60;
+      function cen(a) { return [cx0 + R * Math.cos(a), R * Math.sin(a)]; }   // centre line, bulging right (x up to `bow`)
+      var outer = [], inner = [];
+      for (var q = 0; q <= M; q++) { var a = -half + 2 * half * q / M, cc = cen(a), nx = Math.cos(a), ny = Math.sin(a); outer.push([cc[0] + nx * r, cc[1] + ny * r]); inner.push([cc[0] - nx * r, cc[1] - ny * r]); }
+      var capB = [], capT = [], cb = cen(half), ct = cen(-half);
+      for (var q2 = 1; q2 < 20; q2++) { var b = half + Math.PI * q2 / 20; capB.push([cb[0] + r * Math.cos(b), cb[1] + r * Math.sin(b)]); var b2 = -half + Math.PI + Math.PI * q2 / 20; capT.push([ct[0] + r * Math.cos(b2), ct[1] + r * Math.sin(b2)]); }
+      pts = outer.concat(capB).concat(inner.reverse()).concat(capT);
+      var mnX = Math.min.apply(null, pts.map(function (p) { return p[0]; })), mnY = Math.min.apply(null, pts.map(function (p) { return p[1]; }));
+      return pts.map(function (p) { return [p[0] - mnX, p[1] - mnY]; });
+    }
+    for (var i = 0; i < N; i++) {
+      var t = -Math.PI / 2 + i / N * 2 * Math.PI, ct = Math.cos(t), st = Math.sin(t);
+      var nr = sh.roundness || 2.6, sp = function (v) { return (v < 0 ? -1 : 1) * Math.pow(Math.abs(v), 2 / nr); };   // fuller than an ellipse (superellipse)
+      var x = W / 2 * sp(ct) * (1 + e * st), y = L / 2 * sp(st);
+      x += bow * (1 - Math.pow(2 * y / L, 2));                     // bend: the middle moves right by `bow`
+      pts.push([x, y]);
+    }
+    var minX = Math.min.apply(null, pts.map(function (p) { return p[0]; })), maxX = Math.max.apply(null, pts.map(function (p) { return p[0]; }));
+    var minY = Math.min.apply(null, pts.map(function (p) { return p[1]; })), maxY = Math.max.apply(null, pts.map(function (p) { return p[1]; }));
+    var sx = (W + bow) / (maxX - minX), sy = L / (maxY - minY);
+    return pts.map(function (p) { return [(p[0] - minX) * sx, (p[1] - minY) * sy]; });
+  }
+  function freeNormals(pts) {                // inward unit normals (outline runs clockwise on paper)
+    return pts.map(function (p, i) {
+      var a = pts[(i + pts.length - 1) % pts.length], b = pts[(i + 1) % pts.length], dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1;
+      return [-dy / L, dx / L];
+    });
+  }
+  // a leg's centre line: a shallow arc, `length` long, parallel to the edge at position `at`, its
+  // middle (inset + t/2) in from the edge, bowed `curve` mm towards the edge (it follows the shape)
+  function freeLegLine(pts, nrm, leg, t) {
+    // where the leg sits: the edge point in direction `at` from the middle of the shape (0 top, 0.25 right, 0.5 bottom, 0.75 left)
+    var xs = pts.map(function (p) { return p[0]; }), ys = pts.map(function (p) { return p[1]; });
+    var mx = (Math.min.apply(null, xs) + Math.max.apply(null, xs)) / 2, my = (Math.min.apply(null, ys) + Math.max.apply(null, ys)) / 2;
+    var th = -Math.PI / 2 + (((leg.at % 1) + 1) % 1) * 2 * Math.PI, best = -1, bi = 0;
+    pts.forEach(function (p, i) { var dx = p[0] - mx, dy = p[1] - my, d = Math.hypot(dx, dy) || 1, sc = (dx * Math.cos(th) + dy * Math.sin(th)) / d; if (sc > best + 1e-9 || (Math.abs(sc - best) < 1e-9 && d > Math.hypot(pts[bi][0] - mx, pts[bi][1] - my))) { best = sc; bi = i; } });
+    var j = bi + 1, E = pts[bi];
+    var n = nrm[bi], tx = [-n[1], n[0]], off = leg.inset + t / 2, sag = leg.curve == null ? 25 : leg.curve, out = [];
+    for (var q = 0; q <= 24; q++) { var u = q / 12 - 1, x = u * leg.length / 2, d = sag * u * u; out.push([E[0] + n[0] * (off + d) + tx[0] * x, E[1] + n[1] * (off + d) + tx[1] * x]); }
+    return out;
+  }
+  function bandOf(line, t, shrink) {        // plan of a blade: the centre line +- t/2, ends rounded; shrink 0..1 shortens it about its middle
+    var n = line.length, mid = (n - 1) / 2, ln = line;
+    if (shrink) { var keep = Math.max(2, Math.round((n - 1) * (1 - shrink) / 2)); ln = line.slice(Math.floor(mid - keep), Math.ceil(mid + keep) + 1); }
+    var L = [], R = [];
+    ln.forEach(function (p, i) {
+      var a = ln[Math.max(0, i - 1)], b = ln[Math.min(ln.length - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d;
+      L.push([p[0] + nx * t / 2, p[1] + ny * t / 2]); R.push([p[0] - nx * t / 2, p[1] - ny * t / 2]);
+    });
+    function cap(p, q, c) { var o = []; var a0 = Math.atan2(p[1] - c[1], p[0] - c[0]); for (var k = 1; k < 8; k++) { var a = a0 + Math.PI * k / 8; o.push([c[0] + t / 2 * Math.cos(a), c[1] + t / 2 * Math.sin(a)]); } return o; }
+    var end = cap(L[L.length - 1], R[R.length - 1], ln[ln.length - 1]), start = cap(R[0], L[0], ln[0]);
+    return L.concat(end).concat(R.reverse()).concat(start);
+  }
+  function chordSag(line) {                 // straight length and curve depth of a leg in plan
+    var a = line[0], b = line[line.length - 1], c = Math.hypot(b[0] - a[0], b[1] - a[1]), nx = -(b[1] - a[1]) / (c || 1), ny = (b[0] - a[0]) / (c || 1), sag = 0;
+    line.forEach(function (p) { sag = Math.max(sag, Math.abs((p[0] - a[0]) * nx + (p[1] - a[1]) * ny)); });
+    return { chord: c, sag: sag };
+  }
+  function buildFreeform(s) {
+    var sh = s.shape, sb = s.subBase, lg = s.legs, tp = s.top || {}, H = s.height;
+    var T = Number(tp.thickness) || 0, St = sb.thickness, legH = H - T - St, t = lg.thickness, taper = lg.taper == null ? 0.2 : lg.taper;
+    if (legH <= 50) throw new Error('The height leaves only ' + legH + ' for the legs');
+    if (!(sh.width > 100 && sh.length > 100)) throw new Error('The shape needs a width and a length');
+    var pts = freeOutline(sh), nrm = freeNormals(pts), W = sh.width + (sh.type === 'kidney' ? (sh.bow || 0) : 0), Lg = sh.length;
+    var list = (lg.list || []).slice();
+    if (!list.length && lg.clock) {                // the Batten form: clock positions (12 top, 3 right, 6 bottom, 9 left) + lists
+      var pick = function (arr, i, d) { arr = typeof arr === 'string' ? arr.split(/[,\s]+/).filter(Boolean).map(Number) : (arr || []); return arr.length ? (arr[i] != null ? arr[i] : arr[arr.length - 1]) : d; };
+      var clock = typeof lg.clock === 'string' ? lg.clock.split(/[,\s]+/).filter(Boolean).map(Number) : lg.clock;
+      list = clock.map(function (h, i) { return { at: ((h % 12) + 12) % 12 / 12, inset: pick(lg.insets, i, 80), length: pick(lg.lengths, i, 286), curve: pick(lg.curves, i, 25) }; });
+    }
+    list = list.filter(function (x) { return x && x.length > 0; });
+    if (!list.length) throw new Error('Add at least one leg');
+    var legs = list.map(function (x, i) {
+      var line = freeLegLine(pts, nrm, x, t);
+      function inside(p) { var c = false; for (var a = 0, b = pts.length - 1; a < pts.length; b = a++) { var pa = pts[a], pb = pts[b]; if ((pa[1] > p[1]) !== (pb[1] > p[1]) && p[0] < (pb[0] - pa[0]) * (p[1] - pa[1]) / (pb[1] - pa[1]) + pa[0]) c = !c; } return c; }
+      bandOf(line, t).forEach(function (p) { if (!inside(p)) throw new Error('Leg ' + (i + 1) + ' runs outside the sub-base: shorter, more inset or moved'); });
+      return { line: line, band: bandOf(line, t), bottom: bandOf(line, t, taper), cs: chordSag(line), spec: x };
+    });
+    var parts = [], M = CNC_MARGIN;
+    function part(name, qty, l, w, th, mat, note) { parts.push({ name: name, qty: qty, length: Math.round(l), width: Math.round(w), thickness: th, code: mat.code, material: mat.material, edge: '', edgeLen: 0, note: note || '' }); }
+    if (T) part('Top (CNC blank)', 1, Lg + M, W + M, T, tp, 'CNC to the ' + sh.type + ' outline, ' + Math.round(W) + ' x ' + Lg + ' (+' + M + ' to clamp)');
+    part('Sub-base (CNC blank)', 1, Lg + M, W + M, St, sb, 'CNC to the ' + sh.type + ' outline, ' + Math.round(W) + ' x ' + Lg + ' (+' + M + ' to clamp)');
+    legs.forEach(function (x, i) {
+      var blankT = Math.ceil((t + x.cs.sag) / 5) * 5;
+      part('Leg ' + (i + 1) + ' (CNC blank)', 1, x.cs.chord + M, legH + M, blankT, lg, 'curved blade ' + x.spec.length + ' long (plan), ' + t + ' thick, ' + Math.round(x.cs.sag) + ' curve following the edge; tapers to ' + Math.round(x.spec.length * (1 - taper)) + ' at the floor; blank ' + blankT + ' thick (glue up)');
+    });
+    var den = pickScale(function (k) { return Math.max(W, Lg) * k <= 110 && H * k <= 60; });
+    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([T ? tp : null, sb, lg]), W: W, L: Lg, H: H, T: T, St: St, legH: legH, t: t, taper: taper, pts: pts, legs: legs,
+      parts: parts, hardware: [], totals: totalsOf(parts), overall: { width: Math.round(W), depth: Lg, height: H } };
+  }
+  var MDF = '#d8cfbf';
+  // plan; mode 'top' (sub-base outline + legs dashed) or 'layout' (legs with sizes)
+  function freePlan(s, m, ox, oy, mode) {
+    var k = m.k, out = '', pl = function (pp) { return pp.map(function (p) { return [ox + p[0] * k, oy + p[1] * k]; }); };
+    out += poly2(pl(m.pts), mode === 'top' ? MDF : '#efebe3', 0.35);
+    m.legs.forEach(function (x, i) {
+      out += poly2(pl(x.band), mode === 'top' ? 'none' : OAK, mode === 'top' ? 0.2 : 0.3, mode === 'top' ? DASH : '');
+      if (mode !== 'top') { var c = x.line[Math.floor(x.line.length / 2)]; out += text(ox + c[0] * k, oy + c[1] * k + 0.7, String(i + 1), 1.8, { anchor: 'middle', weight: 'bold' }); }
+    });
+    out += hChain([ox, ox + m.W * k], [Math.round(m.W)], oy - 5, oy) + vChain([oy, oy + m.L * k], [m.L], ox + m.W * k + 6, ox + m.W * k);
+    if (s.shape.type === 'kidney' && s.shape.bow) out += hChain([ox, ox + s.shape.bow * k, ox + m.W * k], [s.shape.bow, s.shape.width], oy + m.L * k / 2 + 3, oy + m.L * k / 2);
+    return out;
+  }
+  // elevation: dir 'front' looks along y (x across), 'side' looks along x (y across)
+  function freeElev(s, m, ox, oy, dir) {
+    var k = m.k, out = '', ix = dir === 'front' ? 0 : 1, span = dir === 'front' ? m.W : m.L, top = oy - m.H * k;
+    var lo = top + (m.T + m.St) * k;
+    var order = m.legs.slice().sort(function (a, b) { var ca = a.line[12][1 - ix], cb = b.line[12][1 - ix]; return ca - cb; });
+    order.forEach(function (x) {
+      var a = Math.min.apply(null, x.band.map(function (p) { return p[ix]; })), b = Math.max.apply(null, x.band.map(function (p) { return p[ix]; }));
+      var c = Math.min.apply(null, x.bottom.map(function (p) { return p[ix]; })), d = Math.max.apply(null, x.bottom.map(function (p) { return p[ix]; }));
+      out += poly2([[ox + a * k, lo], [ox + b * k, lo], [ox + d * k, oy], [ox + c * k, oy]], OAK, 0.3);
+    });
+    out += rect(ox, top + m.T * k, span * k, m.St * k, 0.3, MDF);
+    if (m.T) out += rect(ox, top, span * k, m.T * k, 0.3, STONE);
+    out += hChain([ox, ox + span * k], [Math.round(span)], top - 5, top);
+    var ys = [top], vs = []; if (m.T) { ys.push(top + m.T * k); vs.push(m.T); } ys.push(lo); vs.push(m.St); ys.push(oy); vs.push(m.legH);
+    out += vChain(ys, vs, ox + span * k + 5, ox + span * k) + vChain([top, oy], [m.H], ox + span * k + 12, ox + span * k);
+    return out;
+  }
+  function freeIso(s, m, bx, by, bw, bh) {
+    var c = Math.cos(Math.PI / 6), sn = 0.5, W = m.W, D = m.L, H = m.H;
+    var spanX = (W + D) * c, spanY = H + (W + D) * sn, sc = Math.min(bw / spanX, bh / spanY);
+    var cx = bx + (bw - spanX * sc) / 2 + D * c * sc, cy = by + (bh - spanY * sc) / 2 + H * sc;
+    function P(x, y, z) { return [cx + (x * c - z * c) * sc, cy - y * sc + (x * sn + z * sn) * sc]; }
+    var out = '', y0 = m.legH;
+    m.legs.slice().sort(function (a, b) { var pa = a.line[12], pb = b.line[12]; return (pa[0] + pa[1]) - (pb[0] + pb[1]); }).forEach(function (x) {
+      var pts = x.band.map(function (p) { return P(p[0], y0, p[1]); }).concat(x.bottom.map(function (p) { return P(p[0], 0, p[1]); }));
+      out += poly2(hull(pts), '#c4a378', 0.3);
+    });
+    var topY = m.legH + m.St, under = m.pts.map(function (p) { return P(p[0], m.legH, p[1]); }), upper = m.pts.map(function (p) { return P(p[0], topY, p[1]); });
+    out += poly2(hull(under.concat(upper)), '#b9ab95', 0.3) + poly2(upper, MDF, 0.3);
+    if (m.T) { var up2 = m.pts.map(function (p) { return P(p[0], topY + m.T, p[1]); }); out += poly2(hull(upper.concat(up2)), '#c6c3bb', 0.3) + poly2(up2, STONE, 0.3); }
+    var tS = P(W * 0.5, topY + m.T, D * 0.5), tL = P(m.legs[0].line[12][0], m.legH * 0.4, m.legs[0].line[12][1]);
+    out += tag(tS[0], tS[1], (m.T ? s.top : s.subBase).code) + tag(tL[0] + 5, tL[1], s.legs.code);
+    return out;
+  }
+  TEMPLATES.freeform = {
+    build: buildFreeform,
+    clientViews: function (s, m) {
+      var k = m.k, w = m.W * k, l = m.L * k, x2 = 30 + w + 30, y1 = 36 + m.H * k, y2 = y1 + 30 + m.H * k, x3 = x2 + Math.max(w, l) + 34;
+      return freePlan(s, m, 30, 30, 'top') + viewTitle(24, 30 + l + 14, 1, 'TOP VIEW', m.scale) +
+        freeElev(s, m, x2, y1, 'front') + viewTitle(x2, y1 + 12, 2, 'FRONT VIEW', m.scale) +
+        freeElev(s, m, x2, y2, 'side') + viewTitle(x2, y2 + 12, 3, 'SIDE VIEW', m.scale) +
+        freeIso(s, m, x3, 30, 318 - x3, 130) + viewTitle(x3, 172, 4, '3D VIEW', 'not to scale');
+    },
+    workshopViews: function (s, m) {
+      var k = m.k, w = m.W * k, l = m.L * k, x2 = 30 + w + 34;
+      return freePlan(s, m, 30, 30, 'layout') + viewTitle(24, 30 + l + 14, 1, 'LEG LAYOUT (sub-base from below)', m.scale) +
+        freeElev(s, m, x2, 30 + m.H * k + 10, 'front') + viewTitle(x2, 30 + m.H * k + 24, 2, 'FRONT VIEW', m.scale) +
+        m.legs.map(function (x, i) { return text(x2, 30 + m.H * k + 40 + i * 4, 'Leg ' + (i + 1) + ': ' + x.spec.length + ' long, ' + x.spec.inset + ' in from the edge, ' + m.t + ' thick, ' + Math.round(x.cs.sag) + ' curve, tapers to ' + Math.round(x.spec.length * (1 - m.taper)) + ' at the floor', 1.9, { fill: '#333' }); }).join('') +
+        text(x2, 30 + m.H * k + 40 + m.legs.length * 4 + 2, 'Sub-base and legs CNC cut; legs curve to follow the edge.', 1.9, { fill: '#555' });
+    }
+  };
   function sheets(spec, opts) {
     LOGO = (opts && opts.logo) || '';
     var tpl = TEMPLATES[spec.template];
@@ -1624,6 +1791,6 @@
     return { model: m, svgs: [sheetClient(spec, m, tpl), sheetWorkshop(spec, m, tpl)] };
   }
 
-  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
+  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BattenDrawings = api;
 })(this);
