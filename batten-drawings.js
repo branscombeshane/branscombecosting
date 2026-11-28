@@ -35,6 +35,17 @@
   //    17 veneer on a 23 solid carcass); dividers are centred behind the gaps between doors, so
   //    each door covers its own compartment; a door can be faced with solid slats on a thinner
   //    veneer door (s.slats); openers can be knobs; edging only on parts whose material has it.
+  // where a back hole sits in a compartment: mm from the inside top and from the compartment's left
+  function holeAt(v, h, ih, bw, d) {
+    var e = d / 2 + 15, y = v === 'middle' ? ih / 2 : v === 'bottom' ? ih - Math.max(ih / 8, e) : Math.max(ih / 8, e);
+    var x = h === 'left' ? Math.max(bw / 8, e) : h === 'right' ? bw - Math.max(bw / 8, e) : bw / 2;
+    return { y: Math.round(y), x: Math.round(x) };
+  }
+  function holeWords(v, h, ih, d) {
+    var at = holeAt(v, h, ih, 1000, d);
+    return (v === 'middle' ? 'halfway up' : v === 'bottom' ? (Math.round(ih) - at.y) + ' above the inside of the bottom' : at.y + ' below the inside of the top') +
+      ', ' + (h === 'middle' ? 'centred across' : (h === 'left' ? 'left' : 'right') + ' side, an eighth of the compartment width in from it (at least ' + (d / 2 + 15) + ')');
+  }
   function buildCarcass(s) {
     var T = s.board.thickness, db = (s.doorBoard && s.doorBoard.material) ? s.doorBoard : s.board, Td = db.thickness, B = s.back.thickness, R = s.back.rebate || 8, W = s.width, D = s.depth, H = s.carcassHeight, n = s.columns;
     var Dc = D - Td;                       // carcass depth (sides, top, bottom), the back sits inside it
@@ -97,8 +108,10 @@
       part('Door (slatted)', r.qty, doorH, r.w, sb.thickness, sb, 'all round', 2 * (doorH + r.w), cnt + ' slats ' + sw + ' wide, ' + sg + ' apart, ' + marg + ' in from each edge');
       part('Slat', r.qty * cnt, doorH, sw, sl.thickness, sl, '', 0, 'glued to the slatted door face');
     });
-    var bh = s.backHoles || {}, holeD = Number(bh.diameter) || 0;      // cable holes through the back, centred in each compartment, in its upper quarter
-    part('Back (rebated ' + R + ' mm)', 1, W - 2 * T + 2 * R, H - 2 * T + 2 * R, B, s.back, '', 0, holeD ? n + ' x Ø' + holeD + ' holes, centred in each compartment, ' + Math.round((H - 2 * T) / 8) + ' below the top inside' : '');
+    // cable holes through the back, one per compartment; where (Shane, 28 Nov): top / middle / bottom
+    // (top = centre of the upper quarter) and left / middle / right (left = centre of the outer quarter)
+    var bh = s.backHoles || {}, holeD = Number(bh.diameter) || 0, holeV = bh.vertical || 'top', holeH = bh.horizontal || 'middle';
+    part('Back (rebated ' + R + ' mm)', 1, W - 2 * T + 2 * R, H - 2 * T + 2 * R, B, s.back, '', 0, holeD ? n + ' x Ø' + holeD + ' holes, one per compartment: ' + holeWords(holeV, holeH, H - 2 * T, holeD) : '');
     var base = s.base, plinth = base.type === 'plinth', steel = [], mid = base.middleRails || 0, frameL, frameW, legH;
     if (plinth) {                                  // a box of carcass board under the carcass, set in from the ends, front and back
       frameL = W - 2 * base.insetX; frameW = D - (base.insetFront || 0) - (base.insetBack || 0); legH = base.height;
@@ -147,7 +160,7 @@
     var list = Object.keys(totals).sort().map(function (k) { return totals[k]; }).concat(Object.keys(edging).sort().map(function (k) { return edging[k]; }));
     var den = pickScale(function (k) { return (W + D) * k <= 255 && (H + base.height) * k <= 80 && D * k <= 62; });
     return { scale: '1:' + den, k: 1 / den, materials: materialsOf([s.board, db, s.slats && slatDoors.length ? sl.doorBoard : null, slatDoors.length ? sl : null, s.back, plinth ? null : s.base]),
-      topOver: topOver, dGap: dGap, doorH: doorH, hingesPerDoor: perDoor, plinth: plinth, handleDoors: handleDoors, holeD: holeD,
+      topOver: topOver, dGap: dGap, doorH: doorH, hingesPerDoor: perDoor, plinth: plinth, handleDoors: handleDoors, holeD: holeD, holeV: holeV, holeH: holeH,
       T: T, Td: Td, B: B, R: R, W: W, D: D, H: H, n: n, Dc: Dc, Din: Din, sideH: sideH, divH: divH, bays: bays, doors: doors, cuts: cuts, hinge: hinge, slatDoors: slatDoors, slatInfo: slatInfo,
       crossN: plinth ? (base.crossMembers == null ? n - 1 : Number(base.crossMembers) || 0) : 0,
       frameL: frameL, frameW: frameW, legH: legH, parts: parts, steel: steel, hardware: hw, totals: list, shelfAt: shelfAt, overall: { width: W, depth: D, height: H + base.height } };
@@ -237,7 +250,7 @@
           out += rect(cx + 0.1, sy, bay * k - 0.2, T, 0.25, 'none', DASH);
           out += text(cx + bay * k / 2, sy - 1, 'shelf', 1.8, { anchor: 'middle' });
         }
-        if (m.holeD) { var hy = top + T + (H - 2 * T) / 8; out += circle(cx + bay * k / 2, hy, m.holeD * k / 2, '#fff', 0.25) + (i === 0 ? text(cx + bay * k / 2 + m.holeD * k / 2 + 1, hy + 0.7, 'Ø' + m.holeD + ' in the back', 1.6, { fill: '#555' }) : ''); }
+        if (m.holeD) { var ha = holeAt(m.holeV, m.holeH, m.H - 2 * m.T, bay, m.holeD), hy = top + T + ha.y * k; out += circle(cx + ha.x * k, hy, m.holeD * k / 2, '#fff', 0.25) + (i === 0 ? text(cx + ha.x * k + m.holeD * k / 2 + 1, hy + 0.7, 'Ø' + m.holeD + ' in the back', 1.6, { fill: '#555' }) : ''); }
         cx += bay * k;
         if (i < m.bays.length - 1) { out += rect(cx, top + T, T, H - 2 * T, 0.3, '#d9c4a0'); cx += T; }
       });
@@ -327,7 +340,7 @@
     if (op.type === 'pushToOpen') notes.push('Push to open: one per door at the top, on the edge away from the hinge.');
     var shelfN = (s.shelves || []).reduce(function (a, b) { return a + b; }, 0), fixed = s.shelvesFixed === true || s.shelvesFixed === 'yes';
     if (shelfN && !fixed) notes.push('Shelf pins: Ø5 holes in the sides / dividers, 2 rows ' + rows + ' in from front and back, ' + pitch + ' apart, from 100 above the bottom to 100 below the top.');
-    if (m.holeD) notes.push('Back: Ø' + m.holeD + ' hole centred in each compartment, ' + Math.round((m.H - 2 * m.T) / 8) + ' below the inside of the top.');
+    if (m.holeD) notes.push('Back: Ø' + m.holeD + ' hole in each compartment, ' + holeWords(m.holeV, m.holeH, m.H - 2 * m.T, m.holeD) + '.');
     var nx = x0 + dw + 14, nw = 318 - nx, ny = y0 + 2;
     if (nw < 40) { nx = x0; nw = pw; ny = y0 + dh + 8; }
     notes.forEach(function (t) { var lines = Math.ceil(t.length / (nw / (1.7 * 0.5))); out += wrap(t, nx, ny, nw, 1.7); ny += lines * 1.7 * 1.3 + 1.2; });
@@ -1517,6 +1530,10 @@
   function buildChair(s) {
     if (s.style === 'arm') return buildArmChair(s);
     var fr = s.frame, W = s.width, H = s.height, lg = s.frontLegs, bp = s.backPosts, rl = s.rails, bl = s.blocks, st = s.seat, bk = s.back, up = s.upholstery;
+    // upholstery is optional: seat and back each 'pad' (upholstered) or 'wood' (solid, CNC cut to shape)
+    var seatWood = up.seat === 'wood', backWood = up.back === 'wood', wd = s.wood || { code: 'M5', thickness: 30, material: '30mm Solid Oak' };
+    if (seatWood) st.thickness = Number(wd.thickness) || 30;
+    if (backWood) bk.thickness = Number(wd.thickness) || 30;
     var lw = lg.width, ld = lg.depth, lh = lg.height, rh = rl.height, rt = rl.thickness, pw = bp.width, pt = bp.thickness, gap = bp.gap;
     var D = s.depth, postsW = 2 * pw + gap, railLen = W - 2 * lw, railZ = D - ld + (ld - rt) / 2, spineLen = railZ - pt;
     var seatTop = lh + st.thickness, backBottom = seatTop + bk.gap, overall = Math.max(H, backBottom + bk.height);
@@ -1537,32 +1554,39 @@
     part('Spine', 1, n2(spineLen), rh, rt, rl, 'front rail to the back posts, at seat height; + tenons');
     part('Post block', (bl.at || []).length, bl.width, bl.height, pt, bl, 'housed between the posts at ' + (bl.at || []).join(', ') + ' from the floor');
     var M = CNC_MARGIN;
-    part('Seat base (CNC blank)', 1, Math.max(st.frontWidth, st.backWidth) + M, st.depth + M, up.base.thickness, up.base, 'CNC to the seat outline (+' + M + ' to clamp)');
-    part('Back base (CNC blank)', 1, bk.width + M, bk.height + M, up.base.thickness, up.base, 'CNC oval ' + bk.width + ' x ' + bk.height + ' (+' + M + ' to clamp)');
     foamSync_(up); var foamT = Number(up.foam.thickness);
-    parts.push({ name: 'Seat foam', qty: 1, length: Math.max(st.frontWidth, st.backWidth), width: st.depth, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: 'cut to the seat outline' });
-    parts.push({ name: 'Back foam', qty: 1, length: bk.width, width: bk.height, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: 'cut to the oval' });
-    var fabSeat = (seatA + seatP * (st.thickness + 2 * wrap)) * waste, fabBack = (2 * backA + backP * (bk.thickness + 2 * wrap)) * waste;
+    if (seatWood) part('Seat, solid (CNC blank)', 1, Math.max(st.frontWidth, st.backWidth) + M, st.depth + M, wd.thickness, wd, 'CNC to the seat outline, R' + (st.cornerRadius || 0) + ' corners, edges eased (+' + M + ' to clamp)');
+    else {
+      part('Seat base (CNC blank)', 1, Math.max(st.frontWidth, st.backWidth) + M, st.depth + M, up.base.thickness, up.base, 'CNC to the seat outline (+' + M + ' to clamp)');
+      parts.push({ name: 'Seat foam', qty: 1, length: Math.max(st.frontWidth, st.backWidth), width: st.depth, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: 'cut to the seat outline' });
+    }
+    if (backWood) part('Back, solid (CNC blank)', 1, bk.width + M, bk.height + M, wd.thickness, wd, 'CNC oval ' + bk.width + ' x ' + bk.height + ', edges eased (+' + M + ' to clamp)');
+    else {
+      part('Back base (CNC blank)', 1, bk.width + M, bk.height + M, up.base.thickness, up.base, 'CNC oval ' + bk.width + ' x ' + bk.height + ' (+' + M + ' to clamp)');
+      parts.push({ name: 'Back foam', qty: 1, length: bk.width, width: bk.height, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: 'cut to the oval' });
+    }
+    var fabSeat = seatWood ? 0 : (seatA + seatP * (st.thickness + 2 * wrap)) * waste, fabBack = backWood ? 0 : (2 * backA + backP * (bk.thickness + 2 * wrap)) * waste;
     var totals = totalsOf(parts.filter(function (p) { return p.code !== up.fabric.code; }));
-    totals.push({ code: up.fabric.code, material: up.fabric.material, unit: 'm²', amount: (fabSeat + fabBack) / 1e6 });
+    if (fabSeat + fabBack > 0) totals.push({ code: up.fabric.code, material: up.fabric.material, unit: 'm²', amount: (fabSeat + fabBack) / 1e6 });
     totals.sort(function (a, b) { return a.code < b.code ? -1 : 1; });
     var den = pickScale(function (k) { return overall * k <= 130 && Math.max(W, st.frontWidth, bk.width) * k <= 76 && Math.max(D, pt + st.depth) * k <= 80; });
-    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([fr, lg, bp, rl, bl, up.base, up.foam, up.fabric]), W: W, D: D, H: H, oh: overall, lw: lw, ld: ld, lh: lh, rh: rh, rt: rt,
+    return { scale: '1:' + den, k: 1 / den, materials: materialsOf([fr, lg, bp, rl, bl].concat(seatWood || backWood ? [wd] : []).concat(seatWood && backWood ? [] : [up.base, up.foam, up.fabric])), W: W, D: D, H: H, oh: overall, lw: lw, ld: ld, lh: lh, rh: rh, rt: rt,
+      seatWood: seatWood, backWood: backWood,
       pw: pw, pt: pt, gap: gap, postsW: postsW, railLen: railLen, railZ: railZ, spineLen: spineLen, seatTop: seatTop, backBottom: backBottom, seatPts: seatPts, z1: z1,
       fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals, overall: { width: Math.max(W, st.frontWidth, bk.width), depth: Math.max(D, z1), height: overall } };
   }
   var FABRIC = '#b9c29a', FABRIC_D = '#a3ad84';
   // back cushion seen from the side: flat against the posts (x), rounded on the front face (x + w)
-  function backShape(x, y, w, h, r) {
+  function backShape(x, y, w, h, r, fill) {
     r = Math.min(r, w, h / 2);
     return '<path d="M' + n2(x) + ',' + n2(y) + ' L' + n2(x + w - r) + ',' + n2(y) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + w) + ',' + n2(y + r) +
-      ' L' + n2(x + w) + ',' + n2(y + h - r) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + w - r) + ',' + n2(y + h) + ' L' + n2(x) + ',' + n2(y + h) + ' Z" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+      ' L' + n2(x + w) + ',' + n2(y + h - r) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + w - r) + ',' + n2(y + h) + ' L' + n2(x) + ',' + n2(y + h) + ' Z" fill="' + (fill || FABRIC) + '" stroke="#111" stroke-width="0.35"/>';
   }
   // seat cushion in elevation: rounded along the top edge, straight sides down to a flat bottom
-  function seatShape(x, y, w, h, r) {
+  function seatShape(x, y, w, h, r, fill) {
     r = Math.min(r, h, w / 2);
     return '<path d="M' + n2(x) + ',' + n2(y + h) + ' L' + n2(x) + ',' + n2(y + r) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + r) + ',' + n2(y) +
-      ' L' + n2(x + w - r) + ',' + n2(y) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + w) + ',' + n2(y + r) + ' L' + n2(x + w) + ',' + n2(y + h) + ' Z" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+      ' L' + n2(x + w - r) + ',' + n2(y) + ' A' + n2(r) + ' ' + n2(r) + ' 0 0 1 ' + n2(x + w) + ',' + n2(y + r) + ' L' + n2(x + w) + ',' + n2(y + h) + ' Z" fill="' + (fill || FABRIC) + '" stroke="#111" stroke-width="0.35"/>';
   }
   // front (client: with upholstery; workshop: frame only); (ox, oy) = left edge of the frame at floor level
   function chairFront(s, m, ox, oy, upholstery) {
@@ -1574,8 +1598,8 @@
     out += rect(ox + m.lw * k, oy - m.lh * k, m.railLen * k, m.rh * k, 0.3, FACE);
     if (upholstery) {
       var sw = st.frontWidth * k, sy = oy - m.seatTop * k;
-      out += seatShape(cx - sw / 2, sy, sw, st.thickness * k, st.thickness * k / 2);
-      out += '<ellipse cx="' + n2(cx) + '" cy="' + n2(oy - (m.backBottom + bk.height / 2) * k) + '" rx="' + n2(bk.width * k / 2) + '" ry="' + n2(bk.height * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+      out += seatShape(cx - sw / 2, sy, sw, st.thickness * k, m.seatWood ? 0.4 : st.thickness * k / 2, m.seatWood ? OAK : FABRIC);
+      out += '<ellipse cx="' + n2(cx) + '" cy="' + n2(oy - (m.backBottom + bk.height / 2) * k) + '" rx="' + n2(bk.width * k / 2) + '" ry="' + n2(bk.height * k / 2) + '" fill="' + (m.backWood ? OAK : FABRIC) + '" stroke="#111" stroke-width="0.35"/>';
       out += hChain([cx - bk.width * k / 2, cx + bk.width * k / 2], [bk.width], oy - m.oh * k - 5, oy - m.oh * k);
       out += hChain([cx - sw / 2, cx + sw / 2], [st.frontWidth], sy + st.thickness * k + 4, sy + st.thickness * k);
       var half = Math.max(m.W, st.frontWidth, bk.width) * k / 2;
@@ -1600,8 +1624,8 @@
     out += rect(ox + D - m.ld * k, oy - m.lh * k, m.ld * k, m.lh * k, 0.3, OAK);
     out += rect(ox + m.railZ * k, oy - m.lh * k, m.rt * k, m.rh * k, 0.15, 'none', DASH);
     if (upholstery) {
-      out += seatShape(ox + m.pt * k, oy - m.seatTop * k, st.depth * k, st.thickness * k, st.thickness * k / 2);
-      out += backShape(ox + m.pt * k, oy - (m.backBottom + bk.height) * k, bk.thickness * k, bk.height * k, bk.thickness * k / 2);
+      out += seatShape(ox + m.pt * k, oy - m.seatTop * k, st.depth * k, st.thickness * k, m.seatWood ? 0.4 : st.thickness * k / 2, m.seatWood ? OAK : FABRIC);
+      out += backShape(ox + m.pt * k, oy - (m.backBottom + bk.height) * k, bk.thickness * k, bk.height * k, m.backWood ? 0.4 : bk.thickness * k / 2, m.backWood ? OAK : FABRIC);
       out += hChain([ox + m.pt * k, ox + (m.pt + st.depth) * k], [st.depth], oy - m.seatTop * k - 4, oy - m.seatTop * k);
       out += hChain([ox + m.pt * k, ox + (m.pt + bk.thickness) * k], [bk.thickness], oy - m.oh * k - 4, oy - m.oh * k);
       out += vChain([oy - m.seatTop * k, oy], [m.seatTop], ox + Math.max(D, (m.pt + st.depth) * k) + 6, ox + D);
@@ -1622,7 +1646,7 @@
       rect(ox + m.lw * k, oy + m.railZ * k, m.railLen * k, m.rt * k, 0.3, FACE) +
       pill(ox, oy + (m.D - m.ld) * k, m.lw * k, m.ld * k) + pill(ox + W - m.lw * k, oy + (m.D - m.ld) * k, m.lw * k, m.ld * k);
     if (mode === 'seat') {
-      out += frame + poly2(m.seatPts.map(function (p) { return [ox + p[0] * k, oy + p[1] * k]; }), FABRIC, 0.35, ' fill-opacity="0.85"');
+      out += frame + poly2(m.seatPts.map(function (p) { return [ox + p[0] * k, oy + p[1] * k]; }), m.seatWood ? OAK : FABRIC, 0.35, ' fill-opacity="0.85"');
       out += hChain([ox + (m.W - s.seat.backWidth) / 2 * k, ox + (m.W + s.seat.backWidth) / 2 * k], [s.seat.backWidth], oy - 4, oy);
       out += hChain([ox + (m.W - s.seat.frontWidth) / 2 * k, ox + (m.W + s.seat.frontWidth) / 2 * k], [s.seat.frontWidth], oy + m.z1 * k + 5, oy + m.z1 * k);
       out += vChain([oy + m.pt * k, oy + m.z1 * k], [s.seat.depth], ox + Math.max(W, s.seat.frontWidth * k) + 4, ox + W);
@@ -1640,19 +1664,21 @@
   function chairPads(s, m, ox, oy, k) {
     var out = '', st = s.seat, bk = s.back, ww = Math.max(st.frontWidth, st.backWidth);
     var off = (ww - m.W) / 2;
-    out += poly2(m.seatPts.map(function (p) { return [ox + (p[0] + off) * k, oy + (p[1] - m.pt) * k]; }), FABRIC, 0.3);
+    out += poly2(m.seatPts.map(function (p) { return [ox + (p[0] + off) * k, oy + (p[1] - m.pt) * k]; }), m.seatWood ? OAK : FABRIC, 0.3);
     out += hChain([ox + (ww - st.backWidth) / 2 * k, ox + (ww + st.backWidth) / 2 * k], [st.backWidth], oy - 4, oy);
     out += hChain([ox, ox + ww * k], [st.frontWidth], oy + st.depth * k + 5, oy + st.depth * k) + vChain([oy, oy + st.depth * k], [st.depth], ox + ww * k + 5, ox + ww * k);
     out += text(ox + ww * k / 2, oy + st.depth * k / 2, 'seat, R' + (st.cornerRadius || 0), 1.7, { anchor: 'middle' });
     var bx = ox + ww * k + 14, by = oy;
-    out += '<ellipse cx="' + n2(bx + bk.width * k / 2) + '" cy="' + n2(by + bk.height * k / 2) + '" rx="' + n2(bk.width * k / 2) + '" ry="' + n2(bk.height * k / 2) + '" fill="' + FABRIC + '" stroke="#111" stroke-width="0.3"/>';
+    out += '<ellipse cx="' + n2(bx + bk.width * k / 2) + '" cy="' + n2(by + bk.height * k / 2) + '" rx="' + n2(bk.width * k / 2) + '" ry="' + n2(bk.height * k / 2) + '" fill="' + (m.backWood ? OAK : FABRIC) + '" stroke="#111" stroke-width="0.3"/>';
     out += hChain([bx, bx + bk.width * k], [bk.width], by - 4, by) + vChain([by, by + bk.height * k], [bk.height], bx + bk.width * k + 5, bx + bk.width * k);
     out += text(bx + bk.width * k / 2, by + bk.height * k / 2, 'back', 1.7, { anchor: 'middle' });
     return out;
   }
   function chairPadNotes(s, m, ox, oy) {
     var st = s.seat, bk = s.back, out = '';
-    out += text(ox, oy, 'Each pad: ' + s.upholstery.base.thickness + ' base board (CNC) + ' + s.upholstery.foam.thickness + ' foam + fabric. Seat ' + st.thickness + ', back ' + bk.thickness + ' thick finished.', 1.8, { fill: '#444' });
+    var wdm = (s.wood || {}).material || 'solid wood';
+    if (m.seatWood && m.backWood) return text(ox, oy, 'No upholstery: seat and back are ' + wdm + ', CNC cut to shape, edges eased.', 1.8, { fill: '#444' });
+    out += text(ox, oy, (m.seatWood ? 'Seat: ' + wdm + ' (CNC). Back pad: ' : m.backWood ? 'Back: ' + wdm + ' (CNC). Seat pad: ' : 'Each pad: ') + s.upholstery.base.thickness + ' base board (CNC) + ' + s.upholstery.foam.thickness + ' foam + fabric. Seat ' + st.thickness + ', back ' + bk.thickness + ' thick finished.', 1.8, { fill: '#444' });
     out += text(ox, oy + 3.5, 'Fabric about ' + n2(m.fabSeat / 1e6) + ' m² seat + ' + n2(m.fabBack / 1e6) + ' m² back (incl. ' + (s.upholstery.wrap == null ? 50 : s.upholstery.wrap) + ' wrap, ' + (s.upholstery.waste == null ? 15 : s.upholstery.waste) + '% waste).', 1.8, { fill: '#444' });
     return out;
   }
@@ -1687,13 +1713,13 @@
       [[0, 0], [0.5, 0], [0.8, rr * 0.4], [1, rr]].forEach(function (q) { all.push(P(bcx + (bk.width / 2 - q[1]) * ct, bcy + (bk.height / 2 - q[1]) * stt, m.pt + bk.thickness * q[0])); });
       face.push(P(bcx + (bk.width / 2 - rr) * ct, bcy + (bk.height / 2 - rr) * stt, m.pt + bk.thickness));
     }
-    out += poly2(hull(all), FABRIC_D, 0.3) + '<path d="M' + face.map(function (q) { return n2(q[0]) + ',' + n2(q[1]); }).join(' L') + ' Z" fill="' + FABRIC + '" stroke="none"/>';
+    out += poly2(hull(all), m.backWood ? '#b8956a' : FABRIC_D, 0.3) + '<path d="M' + face.map(function (q) { return n2(q[0]) + ',' + n2(q[1]); }).join(' L') + ' Z" fill="' + (m.backWood ? '#d6b88f' : FABRIC) + '" stroke="none"/>';
     out += box(m.W / 2 - m.rt / 2, m.W / 2 + m.rt / 2, m.lh - m.rh, m.lh, m.pt, m.railZ, '#c4a378');
     out += box(m.lw, m.W - m.lw, m.lh - m.rh, m.lh, m.railZ, m.railZ + m.rt, '#c4a378');
     out += box(0, m.lw, 0, m.lh, m.D - m.ld, m.D, '#c4a378') + box(m.W - m.lw, m.W, 0, m.lh, m.D - m.ld, m.D, '#c4a378');
-    out += cushion(m.seatPts, m.lh, m.seatTop, st.thickness / 2);
-    var tS = P(m.W / 2, m.seatTop, m.pt + st.depth * 0.5), tB = P(m.W / 2, bcy, m.pt + bk.thickness), tL = P(m.W - m.lw / 2, m.lh * 0.4, m.D);
-    out += tag(tS[0], tS[1], s.upholstery.fabric.code) + tag(tB[0], tB[1], s.upholstery.fabric.code) + tag(tL[0] + 5, tL[1], s.frontLegs.code);
+    out += m.seatWood ? prism(m.seatPts, m.lh, m.seatTop, '#b8956a', '#d6b88f') : cushion(m.seatPts, m.lh, m.seatTop, st.thickness / 2);
+    var tS = P(m.W / 2, m.seatTop, m.pt + st.depth * 0.5), tB = P(m.W / 2, bcy, m.pt + bk.thickness), tL = P(m.W - m.lw / 2, m.lh * 0.4, m.D), wc = (s.wood || {}).code;
+    out += tag(tS[0], tS[1], m.seatWood ? wc : s.upholstery.fabric.code) + tag(tB[0], tB[1], m.backWood ? wc : s.upholstery.fabric.code) + tag(tL[0] + 5, tL[1], s.frontLegs.code);
     return out;
   }
   // ---- chair style 'arm' (from Michal Raviv dining chairs): upholstered armchair --------------
@@ -2135,6 +2161,24 @@
   // cnc: yes adds the CNC clamping margin (+50 on length and width) to the cutting list blank.
   // Views, cutting list, material totals and the costing hand-off are all worked out from the parts.
   var PART_SHAPES = { box: 1, taper: 1, round: 1, cushion: 1 };
+  // Shane, 28 Nov 2026: a thickness can only be the thickness of a real material ("17mm Oak
+  // Veneer" is 17, "Solid Oak - 25mm" is 25). The material's name sets it; anything else is refused.
+  function matThick(name) {
+    var t = String(name || ''), m = /^\s*(\d+(?:\.\d+)?)\s*mm\b/i.exec(t) || /-\s*(\d+(?:\.\d+)?)\s*mm\s*$/i.exec(t);
+    return m ? Number(m[1]) : null;
+  }
+  function checkThickness(spec) {
+    (function walk(o) {
+      if (!o || typeof o !== 'object') return;
+      if (Array.isArray(o)) { o.forEach(walk); return; }
+      var th = Number(o.thickness);
+      if (o.material != null && o.thickness != null && o.thickness !== '' && th > 0) {
+        var t = matThick(o.material);
+        if (t != null && Math.abs(t - th) > 0.01) throw new Error(o.material + ' is ' + t + ' mm thick, but its thickness is set to ' + th + '. Pick a ' + th + ' mm material, or use ' + t + '.');
+      }
+      Object.keys(o).forEach(function (k) { if (k !== 'revisions' && k !== 'parts' && k !== 'extraParts') walk(o[k]); });
+    })(spec);
+  }
   function partColour(mat) {
     var t = String(mat || '').toLowerCase();
     if (/foam|fabric|leather|cushion|uphol|velvet|boucl/.test(t)) return FABRIC;
@@ -2167,6 +2211,8 @@
       if (!mats[q.code]) throw new Error(who + ': material ref "' + q.code + '" is not in the materials list');
       if (q.cover && !mats[q.cover]) throw new Error(who + ': cover ref "' + q.cover + '" is not in the materials list');
       q.mat = mats[q.code];
+      var mt = matThick(q.mat.material), md = Math.min(q.w, q.h, q.d);
+      if (mt != null && Math.abs(mt - md) > 0.01) throw new Error(who + ': it is ' + md + ' thick, but ' + q.mat.material + ' is ' + mt + ' mm. Change the part to ' + mt + ', or give it a ' + md + ' mm material.');
       q.lo = [q.x, q.y, q.z]; q.hi = [q.x + q.w, q.y + q.h, q.z + q.d];
       return q;
     });
@@ -2400,17 +2446,20 @@
       P('Apron, short', at, ah, z1 - z0 - ls, x0 + asb, ay, z0 + ls, am.code); P('Apron, short', at, ah, z1 - z0 - ls, x1 + ls - asb - at, ay, z0 + ls, am.code);
       hw.push({ code: 'H1', qty: 2 * Math.max(2, Math.round((W + D) / 300)), item: 'Top fixing button / buttonhole clip' });
     }
-    var st = s.stretchers || {}, sty = famNum(st.height, 150), sth = famNum(st.size, 40), stc = am ? am.code : mats[1].code;
+    // stretchers: from the apron material (its thickness), else from the leg material; centred on the legs
+    var st = s.stretchers || {}, sty = famNum(st.height, 150), sth = Math.max(famNum(st.size, 40), am ? at : ls), stc = am ? am.code : mats[1].code, sw = am ? at : ls, so = (ls - sw) / 2;
+    if (sth > ls && !am) sth = ls;
     if (st.type === 'sides' || st.type === 'H') {
-      P('Stretcher, side', ls * 0.6, sth, z1 - z0 - ls, x0 + ls * 0.2, sty, z0 + ls, stc); P('Stretcher, side', ls * 0.6, sth, z1 - z0 - ls, x1 + ls * 0.2, sty, z0 + ls, stc);
-      if (st.type === 'H') P('Stretcher, middle', x1 - x0 - ls, sth, ls * 0.6, x0 + ls, sty, (D - ls * 0.6) / 2, stc);
+      P('Stretcher, side', sw, sth, z1 - z0 - ls, x0 + so, sty, z0 + ls, stc); P('Stretcher, side', sw, sth, z1 - z0 - ls, x1 + so, sty, z0 + ls, stc);
+      if (st.type === 'H') P('Stretcher, middle', x1 - x0 - ls, sth, sw, x0 + ls, sty, (D - sw) / 2, stc);
     } else if (st.type === 'box') {
-      P('Stretcher, long', x1 - x0 - ls, sth, ls * 0.6, x0 + ls, sty, z0 + ls * 0.2, stc); P('Stretcher, long', x1 - x0 - ls, sth, ls * 0.6, x0 + ls, sty, z1 + ls * 0.2, stc);
-      P('Stretcher, side', ls * 0.6, sth, z1 - z0 - ls, x0 + ls * 0.2, sty, z0 + ls, stc); P('Stretcher, side', ls * 0.6, sth, z1 - z0 - ls, x1 + ls * 0.2, sty, z0 + ls, stc);
+      P('Stretcher, long', x1 - x0 - ls, sth, sw, x0 + ls, sty, z0 + so, stc); P('Stretcher, long', x1 - x0 - ls, sth, sw, x0 + ls, sty, z1 + so, stc);
+      P('Stretcher, side', sw, sth, z1 - z0 - ls, x0 + so, sty, z0 + ls, stc); P('Stretcher, side', sw, sth, z1 - z0 - ls, x1 + so, sty, z0 + ls, stc);
     }
     var cu = s.cushion || {}, ct = famNum(cu.thickness, 0);
     if (ct > 0) {
-      var fm = famMat(cu, 'M4'), fb = famMat(cu.fabric || {}, 'M5'); if (!fm.material || /^\d+\s*mm Foam$/i.test(fm.material)) fm.material = ct + 'mm Foam'; mats.push(fm);   // the foam name follows its thickness
+      if (!cu.material || /^\d+\s*mm Foam$/i.test(cu.material)) cu.material = ct + 'mm Foam';   // the foam name follows its thickness
+      var fm = famMat(cu, 'M4'), fb = famMat(cu.fabric || {}, 'M5'); mats.push(fm);
       if (fb.material) mats.push(fb);
       P('Seat cushion', W, ct, D, 0, H, 0, fm.code, { shape: 'cushion', radius: Math.min(ct / 2, 30), cover: fb.material ? fb.code : '' });
     }
@@ -2434,6 +2483,7 @@
     var tpl = TEMPLATES[spec.template];
     if (!tpl) throw new Error('Unknown template: ' + spec.template);
     var m = tpl.build(spec);
+    checkThickness(spec);
     SCALE = m.scale;
     m.sheetCount = cutRows(m).length > CUT_FIT ? 3 : 2;
     var svgs = [sheetClient(spec, m, tpl), sheetWorkshop(spec, m, tpl)];
@@ -2441,6 +2491,6 @@
     return { model: m, svgs: svgs };
   }
 
-  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, buildParts: buildParts, expandFamily: expandFamily, families: Object.keys(FAMILIES), sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
+  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, buildParts: buildParts, matThick: matThick, expandFamily: expandFamily, families: Object.keys(FAMILIES), sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BattenDrawings = api;
 })(this);
