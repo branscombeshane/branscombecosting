@@ -1710,11 +1710,11 @@
     part('Seat rail, side', 2, D - 2 * L, rh, rt, rl, 'between the front and back legs; + tenons');
     var setBack = Number(ar.setBack) || 0, aF = D - setBack;
     if (setBack < 0 || aF - ah < R) throw new Error('The arm set back must be between 0 and ' + Math.max(0, D - R - ah) + ' (the post must stay in front of the back corner)');
-    var sideLen = aF + at - R, backLen = W + 2 * at - 2 * R, bow = ar.backBow == null ? 10 : ar.backBow;
-    part('Arm band, side', 2, sideLen, ah, at, ar, 'front of the arm back to the corner; top at ' + aTop + ' from the floor');
+    var sideLen = aF - ah + at - R, backLen = W + 2 * at - 2 * R, bow = ar.backBow == null ? 10 : ar.backBow;
+    part('Arm band, side', 2, sideLen, ah, at, ar, 'corner to the front post (butt joint into the post); top at ' + aTop + ' from the floor');
     part('Arm band, back (blank)', 1, backLen, ah, Math.ceil((at + bow + 5) / 5) * 5, ar, 'curved in plan, bowing out ' + bow + ' between the corners; ' + at + ' finished, behind the upholstered back');
     part('Arm band corner (block)', 2, R + 20, R + 20, ah, ar, 'cut from solid blocks, glued up, then shaped: R' + R + ' outside, ' + at + ' wall');
-    part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, (setBack ? 'front ' + setBack + ' back from the front of the front leg; ' : 'flush with the front of the front leg; ') + 'joined to the bottom frame (seat rail) and the arm band');
+    part('Arm front post', 2, aTop - (lh - rh), ah, at, ar, 'runs to the top of the arm; ' + (setBack ? 'front ' + setBack + ' back from the front of the front leg; ' : 'flush with the front of the front leg; ') + 'joined to the bottom frame (seat rail), the side band butts into it');
     var M = CNC_MARGIN, bb = up.base; foamSync_(up); var foamT = Number(up.foam.thickness);
     part('Seat base (blank)', 1, W + M, D - bt + M, bb.thickness, bb, 'cut to ' + W + ' x ' + (D - bt));
     part('Back frame (CNC blank)', 1, W + M, H - lh + M, bb.thickness, bb, 'CNC to ' + W + ' x ' + (H - lh) + ', sits on the bottom frame, fixed to the back band');
@@ -1780,7 +1780,7 @@
       out += seatShape(ox + bt, oy - m.seatTop * k, D - bt, s.seat.thickness * k, Math.min(s.seat.thickness * k / 2, 3));
     }
     var aF = m.aF * k;
-    out += rect(ox - at, oy - m.aTop * k, aF + at, m.ah * k, 0.3, OAK) + rect(ox + aF - m.ah * k, oy - m.aTop * k, m.ah * k, (m.aTop - (m.lh - m.rh)) * k, 0.3, OAK);   // arm band (side), front post
+    out += rect(ox - at, oy - m.aTop * k, aF - m.ah * k + at, m.ah * k, 0.3, OAK) + rect(ox + aF - m.ah * k, oy - m.aTop * k, m.ah * k, (m.aTop - (m.lh - m.rh)) * k, 0.3, OAK);   // arm band (side), front post
     if (m.setBack) out += hChain([ox + aF, ox + D], [m.setBack], oy - m.aTop * k - 4, oy - m.aTop * k);
     out += hChain([ox - at, ox, ox + D], [m.at, m.D], oy - m.H * k - 5, oy - m.H * k);
     out += vChain([oy - m.aTop * k, oy - (m.aTop - m.ah) * k], [m.ah], ox + D + 6, ox + D);
@@ -1833,18 +1833,36 @@
     function box(x0, x1, y0, y1, z0, z1, side, top) { return prism([[x0, z0], [x1, z0], [x1, z1], [x0, z1]], y0, y1, side, top || side); }
     var out = '', L = m.L, lh = m.lh, rh = m.rh, rail = lh - rh, a0 = m.aTop - m.ah, band = armBand(m, 8), n = band.length / 2;
     var outer = band.slice(0, n), inner = band.slice(n);
+    // upholstery: a box with the chosen edges rounded r (flat where it sits on / against something)
+    function soft(x0, x1, y0, y1, z0, z1, r, rnd) {
+      var pts = [], lo = [x0, y0, z0], hi = [x1, y1, z1], rl = [rnd.x0, rnd.y0, rnd.z0], rh2 = [rnd.x1, rnd.y1, rnd.z1];
+      for (var a = 0; a <= 8; a++) for (var b = 0; b < 16; b++) {
+        var th = Math.PI * a / 8, ph = 2 * Math.PI * b / 16, d = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)], q = [];
+        for (var i = 0; i < 3; i++) q.push(d[i] < 0 ? (rl[i] ? lo[i] + r + r * d[i] : lo[i]) : (rh2[i] ? hi[i] - r + r * d[i] : hi[i]));
+        pts.push(P(q[0], q[1], q[2]));
+      }
+      var ti = rnd.x0 ? r : 0, tj = rnd.x1 ? r : 0, tk = rnd.z0 ? r : 0, tl = rnd.z1 ? r : 0;
+      var top = [[x0 + ti, z0 + tk], [x1 - tj, z0 + tk], [x1 - tj, z1 - tl], [x0 + ti, z1 - tl]].map(function (p) { return P(p[0], y1, p[1]); });
+      return poly2(hull(pts), FABRIC_D, 0.3) + '<path d="M' + top.map(function (q) { return n2(q[0]) + ',' + n2(q[1]); }).join(' L') + ' Z" fill="' + FABRIC + '" stroke="none"/>';
+    }
+    // the band's right-hand corner (it wraps round in front of the back cushion's right side)
+    var ri = m.R - t, rc = [];
+    for (var ia = 0; ia <= 10; ia++) { var ga = Math.PI / 2 - Math.PI / 2 * ia / 10; rc.push([m.W + t - m.R + m.R * Math.cos(ga), -t + m.R - m.R * Math.sin(ga)]); }
+    for (var ib = 0; ib <= 10; ib++) { var gb = Math.PI / 2 * ib / 10; rc.push([m.W - ri + ri * Math.cos(gb), m.R - t - ri * Math.sin(gb)]); }
     // band split into: the back (with its corners), the left arm, the right arm
     function bandPart(x0, x1, z0, z1) { return [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]; }
     var backBand = outer.slice(1, outer.length - 1).concat(inner.slice(1, inner.length - 1));
     out += prism(backBand, a0, m.aTop, '#a5835a', '#c4a378');                                                       // band round the back
     out += box(0, L, 0, lh, 0, L, '#a5835a') + box(m.W - L, m.W, 0, lh, 0, L, '#a5835a');                             // back legs
-    out += prism(bandPart(-t, 0, m.R - t, m.aF), a0, m.aTop, '#a5835a', '#c4a378') + box(-t, 0, rail, a0, m.aF - m.ah, m.aF, '#a5835a', '#c4a378');   // left arm + post
+    out += prism(bandPart(-t, 0, m.R - t, m.aF - m.ah), a0, m.aTop, '#a5835a', '#c4a378') + box(-t, 0, rail, m.aTop, m.aF - m.ah, m.aF, '#a5835a', '#c4a378');   // left arm + post (to the top)
     out += box(L, m.W - L, rail, lh, 0, m.rt, '#c4a378') + box(0, L, rail, lh, L, m.D - L, '#c4a378');                // back + left seat rails
-    out += box(0, m.W, lh, m.H, 0, m.bt, FABRIC_D, FABRIC);                                                           // upholstered back
+    var rb = Math.min(m.bt / 2, ri);
+    out += soft(0, m.W, lh, m.H, 0, m.bt, rb, { x0: 1, x1: 1, z0: 1, z1: 1, y1: 1 });                                // upholstered back
+    out += prism(rc, a0, m.aTop, '#b8956a', '#d6b88f');                                                                 // right band corner, in front of it
     out += box(m.W - L, m.W, rail, lh, L, m.D - L, '#c4a378');                                                        // right seat rail
-    out += box(0, m.W, lh, m.seatTop, m.bt, m.D, FABRIC_D, FABRIC);                                                   // seat
+    out += soft(0, m.W, lh, m.seatTop, m.bt, m.D, Math.min((m.seatTop - lh) / 2, 40), { x0: 1, x1: 1, z1: 1, y1: 1 });   // seat: rounded top, flat bottom
     out += box(0, L, 0, lh, m.D - L, m.D, '#c4a378') + box(L, m.W - L, rail, lh, m.D - m.rt, m.D, '#c4a378') + box(m.W - L, m.W, 0, lh, m.D - L, m.D, '#c4a378');   // front legs + rail
-    out += prism(bandPart(m.W, m.W + t, m.R - t, m.aF), a0, m.aTop, '#b8956a', '#d6b88f') + box(m.W, m.W + t, rail, a0, m.aF - m.ah, m.aF, '#b8956a', '#d6b88f');   // right arm + post
+    out += prism(bandPart(m.W, m.W + t, m.R - t, m.aF - m.ah), a0, m.aTop, '#b8956a', '#d6b88f') + box(m.W, m.W + t, rail, m.aTop, m.aF - m.ah, m.aF, '#b8956a', '#d6b88f');   // right arm + post
     var tS = P(m.W / 2, m.seatTop, (m.bt + m.D) / 2), tA = P(m.W + t / 2, m.aTop, m.D * 0.6), tL = P(m.W - L / 2, lh * 0.4, m.D);
     out += tag(tS[0], tS[1], s.upholstery.fabric.code) + tag(tA[0] + 5, tA[1] - 2, s.arms.code) + tag(tL[0] + 5, tL[1], s.legs.code);
     return out;
