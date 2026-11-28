@@ -2300,9 +2300,9 @@
         out += poly2(outline, shadeHex(base, 0.9), 0.25) + faces + fill(S.s1.map(P), shadeHex(base, capF)) + poly2(outline, 'none', 0.25);
       }
       if (numbers) { var flat = q.h <= q.w && q.h <= q.d; tags[q.n] = P([(q.lo[0] + q.hi[0]) / 2, flat ? q.hi[1] : (q.lo[1] + q.hi[1]) / 2, flat ? (q.lo[2] + q.hi[2]) / 2 : q.hi[2]]); }
-      else if (!tags[q.code]) { tags[q.code] = P([(q.lo[0] + q.hi[0]) / 2, (q.lo[1] + q.hi[1]) / 2, q.hi[2]]); }
+      else { var fr = q.hi[0] + q.hi[2]; if (!tags[q.code] || fr > tags[q.code].fr) tags[q.code] = { fr: fr, p: P([(q.lo[0] + q.hi[0]) / 2, (q.lo[1] + q.hi[1]) / 2, q.hi[2]]) }; }   // tag the front-most part of each material
     });
-    if (!numbers) Object.keys(tags).forEach(function (code) { out += tag(tags[code][0] + 4, tags[code][1], code); });
+    if (!numbers) Object.keys(tags).forEach(function (code) { out += tag(tags[code].p[0] + 4, tags[code].p[1], code); });
     else Object.keys(tags).forEach(function (nn) { var cc = tags[nn]; out += circle(cc[0], cc[1], 1.5, '#fff', 0.15) + text(cc[0], cc[1] + 0.6, nn, 1.6, { anchor: 'middle' }); });
     return out;
   }
@@ -2339,6 +2339,96 @@
       return out;
     }
   };
+  // ================================================================ families on the parts engine ==
+  // Shane, 28 Nov 2026: every design starts from a basic family with plain questions; extra parts
+  // and adjustments are made from there. These families turn their answers into parts (drawn by
+  // the parts engine); `extraParts` / `extraMaterials` / `hardware` add to them, and "Edit every
+  // part" in Batten turns the design into a plain parts design.
+  function famMat(o, fallback) { o = o || {}; return { code: String(o.code || fallback), material: o.material || '', colour: o.colour || '', finish: o.finish || '' }; }
+  function famNum(v, d) { if (v === null || v === undefined || v === '') return d; v = Number(v); return isFinite(v) ? v : d; }
+  function famLegShape(lg) { return lg.type === 'round' ? 'round' : lg.type === 'taper' ? 'taper' : 'box'; }
+  // Shelves / bookcase: sides, top, bottom, optional back, dividers, evenly spaced shelves, a plinth or legs
+  function famShelves(s) {
+    var W = famNum(s.width, 0), H = famNum(s.height, 0), D = famNum(s.depth, 0), bd = s.board || {}, T = famNum(bd.thickness, 18);
+    var bk = s.back || {}, bt = famNum(bk.thickness, 0), cols = Math.max(1, Math.round(famNum(s.columns, 1))), n = Math.max(0, Math.round(famNum(s.shelves, 0)));
+    var base = s.base || {}, type = base.type || 'plinth', bh = type === 'none' ? 0 : famNum(base.height, 80), mats = [famMat(bd, 'M1')], parts = [], hw = [];
+    if (!(W > 0 && H > 0 && D > 0)) throw new Error('Width, height and depth must all be more than 0');
+    var ih = H - bh - 2 * T, iw = W - 2 * T, colW = (iw - (cols - 1) * T) / cols, sd = D - bt;
+    if (ih < 100) throw new Error('The unit is too low for its base and boards');
+    if (colW < 100) throw new Error('The sections are only ' + Math.round(colW) + ' wide: fewer sections or a wider unit');
+    var clear = (ih - n * T) / (n + 1);
+    if (clear < 80) throw new Error('With ' + n + ' shelves the openings are only ' + Math.round(clear) + ' high');
+    var fixed = s.shelvesFixed === 'yes', bc = mats[0].code;
+    function P(name, w, h, d, x, y, z, code, extra) { var p = { name: name, shape: 'box', mat: code, w: w, h: h, d: d, x: x, y: y, z: z }; for (var k in extra || {}) p[k] = extra[k]; parts.push(p); }
+    P('Side', T, H - bh, D, 0, bh, 0, bc); P('Side', T, H - bh, D, W - T, bh, 0, bc);
+    P('Top', iw, T, D, T, H - T, 0, bc); P('Bottom', iw, T, D, T, bh, 0, bc);
+    if (bt > 0) { mats.push(famMat(bk, 'M2')); P('Back', iw, ih, bt, T, bh + T, 0, mats[1].code, { note: 'between the sides, top and bottom' }); }
+    for (var c = 1; c < cols; c++) P('Divider', T, ih, sd, T + c * colW + (c - 1) * T, bh + T, bt, bc);
+    for (var c2 = 0; c2 < cols; c2++) for (var i = 1; i <= n; i++)
+      P('Shelf', fixed ? colW : colW - 2, T, fixed ? sd : sd - 10, T + c2 * (colW + T) + (fixed ? 0 : 1), bh + T + i * clear + (i - 1) * T, bt, bc, { note: fixed ? 'fixed' : 'adjustable, on pins' });
+    if (!fixed && n) hw.push({ code: 'H1', qty: 4 * n * cols, item: 'Shelf pin 5 mm' });
+    if (type === 'plinth' && bh > 0) {
+      var sb = famNum(base.setBack, 50);
+      P('Plinth front', W - 2 * T, bh, T, T, 0, D - sb - T, bc); P('Plinth back', W - 2 * T, bh, T, T, 0, bt, bc);
+      P('Plinth side', T, bh, D - sb - 2 * T - bt, T, 0, bt + T, bc); P('Plinth side', T, bh, D - sb - 2 * T - bt, W - 2 * T, 0, bt + T, bc);
+    } else if (type === 'legs' && bh > 0) {
+      var lg = s.legs || {}, ls = famNum(lg.size, 40), li = famNum(lg.inset, 30), lm = famMat(lg, 'M3'); mats.push(lm);
+      [[li, li], [W - li - ls, li], [li, D - li - ls], [W - li - ls, D - li - ls]].forEach(function (q) { P('Leg', ls, bh, ls, q[0], 0, q[1], lm.code, { shape: famLegShape(lg), axis: 'y', end: famNum(lg.end, 0) }); });
+    }
+    return { materials: mats, parts: parts, hardware: hw };
+  }
+  // Table / bench / stool: a top on four legs with aprons; optional stretchers and a seat cushion
+  function famLegged(s) {
+    var W = famNum(s.width, 0), H = famNum(s.height, 0), D = famNum(s.depth, 0), tp = s.top || {}, tt = famNum(tp.thickness, 30);
+    var lg = s.legs || {}, ls = famNum(lg.size, 50), li = famNum(lg.inset, 0), ap = s.apron || {}, ah = famNum(ap.height, 0), at = famNum(ap.thickness, 22), asb = famNum(ap.setBack, 10);
+    var mats = [famMat(tp, 'M1'), famMat(lg, 'M2')], parts = [], hw = [], lh = H - tt;
+    if (!(W > 0 && H > 0 && D > 0)) throw new Error('Width, height and depth must all be more than 0');
+    if (lh < 50) throw new Error('The top is thicker than the height allows');
+    if (2 * (li + ls) >= Math.min(W, D)) throw new Error('The legs touch: smaller legs or less inset');
+    function P(name, w, h, d, x, y, z, code, extra) { var p = { name: name, shape: 'box', mat: code, w: w, h: h, d: d, x: x, y: y, z: z }; for (var k in extra || {}) p[k] = extra[k]; parts.push(p); }
+    var shape = tp.shape || 'rect';
+    if (shape === 'rect') P('Top', W, tt, D, 0, lh, 0, mats[0].code, { corner: famNum(tp.corner, 0), cnc: famNum(tp.corner, 0) > 0 ? 'yes' : 'no' });
+    else P('Top', W, tt, D, 0, lh, 0, mats[0].code, { shape: 'round', axis: 'y', cnc: 'yes' });
+    var x0 = li, x1 = W - li - ls, z0 = li, z1 = D - li - ls;
+    if (shape !== 'rect') { x0 = W / 2 - (W / 2 - li - ls) * 0.72 - ls / 2; x1 = W - x0 - ls; z0 = D / 2 - (D / 2 - li - ls) * 0.72 - ls / 2; z1 = D - z0 - ls; }   // legs inside the curve
+    [[x0, z0], [x1, z0], [x0, z1], [x1, z1]].forEach(function (q) { P('Leg', ls, lh, ls, q[0], 0, q[1], mats[1].code, { shape: famLegShape(lg), axis: 'y', end: famNum(lg.end, 0) }); });
+    var am = null;
+    if (ah > 0) {
+      am = famMat(ap, 'M3'); if (am.code !== mats[0].code && am.code !== mats[1].code) mats.push(am);
+      var ay = lh - ah;
+      P('Apron, long', x1 - x0 - ls, ah, at, x0 + ls, ay, z0 + asb, am.code); P('Apron, long', x1 - x0 - ls, ah, at, x0 + ls, ay, z1 + ls - asb - at, am.code);
+      P('Apron, short', at, ah, z1 - z0 - ls, x0 + asb, ay, z0 + ls, am.code); P('Apron, short', at, ah, z1 - z0 - ls, x1 + ls - asb - at, ay, z0 + ls, am.code);
+      hw.push({ code: 'H1', qty: 2 * Math.max(2, Math.round((W + D) / 300)), item: 'Top fixing button / buttonhole clip' });
+    }
+    var st = s.stretchers || {}, sty = famNum(st.height, 150), sth = famNum(st.size, 40), stc = am ? am.code : mats[1].code;
+    if (st.type === 'sides' || st.type === 'H') {
+      P('Stretcher, side', ls * 0.6, sth, z1 - z0 - ls, x0 + ls * 0.2, sty, z0 + ls, stc); P('Stretcher, side', ls * 0.6, sth, z1 - z0 - ls, x1 + ls * 0.2, sty, z0 + ls, stc);
+      if (st.type === 'H') P('Stretcher, middle', x1 - x0 - ls, sth, ls * 0.6, x0 + ls, sty, (D - ls * 0.6) / 2, stc);
+    } else if (st.type === 'box') {
+      P('Stretcher, long', x1 - x0 - ls, sth, ls * 0.6, x0 + ls, sty, z0 + ls * 0.2, stc); P('Stretcher, long', x1 - x0 - ls, sth, ls * 0.6, x0 + ls, sty, z1 + ls * 0.2, stc);
+      P('Stretcher, side', ls * 0.6, sth, z1 - z0 - ls, x0 + ls * 0.2, sty, z0 + ls, stc); P('Stretcher, side', ls * 0.6, sth, z1 - z0 - ls, x1 + ls * 0.2, sty, z0 + ls, stc);
+    }
+    var cu = s.cushion || {}, ct = famNum(cu.thickness, 0);
+    if (ct > 0) {
+      var fm = famMat(cu, 'M4'), fb = famMat(cu.fabric || {}, 'M5'); if (!fm.material || /^\d+\s*mm Foam$/i.test(fm.material)) fm.material = ct + 'mm Foam'; mats.push(fm);   // the foam name follows its thickness
+      if (fb.material) mats.push(fb);
+      P('Seat cushion', W, ct, D, 0, H, 0, fm.code, { shape: 'cushion', radius: Math.min(ct / 2, 30), cover: fb.material ? fb.code : '' });
+    }
+    return { materials: mats, parts: parts, hardware: hw };
+  }
+  var FAMILIES = { shelves: famShelves, legtable: famLegged, bench: famLegged };
+  // a family design as a plain parts design: its parts, then the extras
+  function expandFamily(s) {
+    var f = FAMILIES[s.template]; if (!f) return s;
+    var e = f(s), seen = {}, mats = [];
+    e.materials.concat(s.extraMaterials || []).forEach(function (m) { var c = String(m.code || '').trim(); if (c && !seen[c]) { seen[c] = 1; mats.push(m); } });
+    var out = {}; for (var k in s) out[k] = s[k];
+    out.materials = mats; out.parts = e.parts.concat(s.extraParts || []); out.hardware = e.hardware.concat(s.hardware || []);
+    return out;
+  }
+  Object.keys(FAMILIES).forEach(function (k) {
+    TEMPLATES[k] = { build: function (s) { return buildParts(expandFamily(s)); }, clientViews: function (s, m) { return TEMPLATES.parts.clientViews(s, m); }, workshopViews: function (s, m) { return TEMPLATES.parts.workshopViews(s, m); } };
+  });
   function sheets(spec, opts) {
     LOGO = (opts && opts.logo) || '';
     var tpl = TEMPLATES[spec.template];
@@ -2351,6 +2441,6 @@
     return { model: m, svgs: svgs };
   }
 
-  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, buildParts: buildParts, sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
+  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, buildParts: buildParts, expandFamily: expandFamily, families: Object.keys(FAMILIES), sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BattenDrawings = api;
 })(this);
