@@ -1706,9 +1706,9 @@
     part('Back leg (blank)', 2, lh + 20, blankW, L, lg, 'sabre: ' + bTop + ' at the seat curving back ' + (lg.rake || 0) + ' to ' + (lg.foot || L) + ' at the floor; band-saw from the blank');
     part('Seat rail, front/back', 2, W - 2 * L, rh, rt, rl, 'between the legs, top flush with the legs; + tenons');
     part('Seat rail, side', 2, D - 2 * L, rh, rt, rl, 'between the front and back legs; + tenons');
-    var sideLen = D + at - R, backLen = W + 2 * at - 2 * R;
+    var sideLen = D + at - R, backLen = W + 2 * at - 2 * R, bow = ar.backBow == null ? 10 : ar.backBow;
     part('Arm band, side', 2, sideLen, ah, at, ar, 'front of the arm back to the corner; top at ' + aTop + ' from the floor');
-    part('Arm band, back', 1, backLen, ah, at, ar, 'across the back of the chair, behind the upholstered back');
+    part('Arm band, back (blank)', 1, backLen, ah, Math.ceil((at + bow + 5) / 5) * 5, ar, 'curved in plan, bowing out ' + bow + ' between the corners; ' + at + ' finished, behind the upholstered back');
     part('Arm band corner (block)', 2, R + 20, R + 20, ah, ar, 'cut from solid blocks, glued up, then shaped: R' + R + ' outside, ' + at + ' wall');
     part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, 'seat rail to the arm band');
     var M = CNC_MARGIN, bb = up.base, foamT = up.foam.thickness;
@@ -1724,18 +1724,21 @@
     totals.sort(function (a, b) { return a.code < b.code ? -1 : 1; });
     var den = pickScale(function (k) { return H * k <= 130 && (2 * (W + 2 * at) + D + at) * k + 100 <= 294; });
     return { arm: true, scale: '1:' + den, k: 1 / den, materials: materialsOf([lg, rl, ar, bb, up.foam, up.fabric]), W: W, D: D, H: H, L: L, lh: lh, rh: rh, rt: rt, at: at, ah: ah, aTop: aTop, R: R,
-      bTop: bTop, seatTop: seatTop, bt: bt, fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals,
+      bTop: bTop, bow: bow, seatTop: seatTop, bt: bt, fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals,
       overall: { width: W + 2 * at, depth: D + at, height: H } };
   }
   // the arm band in plan: outer and inner outline (x across, z from the back of the legs)
   function armBand(m, steps) {
-    var W = m.W, D = m.D, t = m.at, R = m.R, ri = R - t, N = steps || 10, outer = [], inner = [];
+    var W = m.W, D = m.D, t = m.at, R = m.R, ri = R - t, N = steps || 10, outer = [], inner = [], bow = m.bow || 0, BN = 12;
+    function bowAt(x) { var u = (x - (-t + R)) / ((W + t - R) - (-t + R)); return bow * 4 * u * (1 - u); }   // the back bows out between the corners
     outer.push([-t, D]);
     for (var i = 0; i <= N; i++) { var a = Math.PI - Math.PI / 2 * i / N; outer.push([-t + R + R * Math.cos(a), -t + R - R * Math.sin(a)]); }
+    for (var bi = 1; bi < BN; bi++) { var xb = -t + R + (W + 2 * t - 2 * R) * bi / BN; outer.push([xb, -t - bowAt(xb)]); }
     for (var j = 0; j <= N; j++) { var b = Math.PI / 2 - Math.PI / 2 * j / N; outer.push([W + t - R + R * Math.cos(b), -t + R - R * Math.sin(b)]); }
     outer.push([W + t, D]);
     inner.push([W, D]);
     for (var q = 0; q <= N; q++) { var c = 0 + Math.PI / 2 * q / N; inner.push([W - ri + ri * Math.cos(c), R - t - ri * Math.sin(c)]); }
+    for (var bj = BN - 1; bj >= 1; bj--) { var xi = -t + R + (W + 2 * t - 2 * R) * bj / BN; inner.push([xi, -bowAt(xi)]); }
     for (var r = 0; r <= N; r++) { var e = Math.PI / 2 + Math.PI / 2 * r / N; inner.push([ri + ri * Math.cos(e), R - t - ri * Math.sin(e)]); }
     inner.push([0, D]);
     return outer.concat(inner);
@@ -1785,6 +1788,7 @@
     out += poly2(armBand(m).map(function (p) { return [ox + p[0] * k, oy + p[1] * k]; }), OAK, 0.3);
     out += hChain([ox - m.at * k, ox, ox + W, ox + W + m.at * k], [m.at, m.W, m.at], oy - m.at * k - 5, oy - m.at * k);
     out += vChain([oy - m.at * k, oy, oy + m.bt * k, oy + D], [m.at, m.bt, m.D - m.bt], ox + W + m.at * k + 6, ox + W + m.at * k);
+    if (m.bow) out += text(ox + W / 2, oy - (m.at + m.bow) * k - 1.2, 'back bows out ' + m.bow, 1.6, { anchor: 'middle', fill: '#555' });
     out += text(ox - m.at * k + 1, oy - m.at * k + 4.5, 'R' + m.R, 1.7, { fill: '#333' });
     return out;
   }
