@@ -1240,7 +1240,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-28.41';
+  var BATTEN_VERSION = '2026-11-28.42';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -9010,8 +9010,43 @@
       host.innerHTML = out.svgs.map(function(svg, i){
         return '<div class="dsg-sheet"><div class="dsg-sheet-label">'+(i===0?'Client approval sheet':i===1?'Workshop sheet':'Workshop sheet '+i+' (cutting list continued)')+'</div>'+svg.replace('width="420mm" height="297mm"','width="100%"')+'</div>';
       }).join('');
+      if(can3d_()){
+        var fresh = dsg3d_ && dsg3d_.key===JSON.stringify(design_.spec);
+        (host.firstElementChild||host).insertAdjacentHTML(host.firstElementChild?'afterend':'beforeend', '<div class="dsg-sheet"><div class="dsg-sheet-label">Client 3D views (page 2 of the client PDF)</div><div id="dsg-3d-body">'+
+          (fresh ? '' : '<div style="padding:18px;"><button type="button" class="btn" id="dsg-3d-make">Make the 3D views</button> <span class="sub">With the colours chosen. Takes a few seconds; the Client PDF makes them too.</span></div>')+'</div></div>');
+        if(fresh) show3d_(dsg3d_.svg); else wire3dCard_();
+      }
     }).catch(function(e){
       msg.innerHTML='<div class="status-msg error">Can\'t draw this yet: '+esc((e&&e.message)||e)+'</div>';
+    });
+  }
+  // ---- client 3D views (Shane, 28 Nov 2026: a 3D render page after the client sheet) ----
+  // batten-render.js (three.js + Batten's own model of the piece) is loaded only when needed. The page
+  // is kept until the design changes, so the preview and the PDF use the same render.
+  var DSG_3D_ = ['carcass','parts','shelves','legtable','bench'], dsg3d_ = null;
+  function can3d_(){ return !!design_ && DSG_3D_.indexOf(design_.spec.template)!==-1; }
+  function make3dPage_(){
+    var spec=design_.spec, key=JSON.stringify(spec);
+    if(dsg3d_ && dsg3d_.key===key) return Promise.resolve(dsg3d_.svg);
+    return import('./batten-render.js?v='+encodeURIComponent(BATTEN_VERSION)).then(function(R){ return R.renderViews(spec, window.BattenDrawings); }).then(function(r){
+      if(!r) return null;
+      return designLogo__().then(function(logo){
+        var m=window.BattenDrawings.sheets(spec, { logo:logo }).model, svg=window.BattenDrawings.renderSheet(spec, m, r, { logo:logo });
+        dsg3d_={ key:key, svg:svg }; return svg;
+      });
+    });
+  }
+  function show3d_(svg){
+    var body=document.getElementById('dsg-3d-body'); if(!body) return;
+    body.innerHTML=svg.replace('width="420mm" height="297mm"','width="100%"');
+  }
+  function wire3dCard_(){
+    var b=document.getElementById('dsg-3d-make'); if(!b) return;
+    b.addEventListener('click', function(){
+      b.disabled=true; b.textContent='Making the 3D views…';
+      make3dPage_().then(function(svg){ if(svg) show3d_(svg); }).catch(function(e){
+        var body=document.getElementById('dsg-3d-body'); if(body) body.innerHTML='<div class="status-msg error">Couldn\'t make the 3D views: '+esc((e&&e.message)||e)+'. This needs a browser with 3D graphics (WebGL) switched on.</div>';
+      });
     });
   }
   // Client PDF / Workshop PDF: an A3 vector PDF made in the page and downloaded (Shane, 28 Nov:
@@ -9033,13 +9068,19 @@
       doc.setProperties({ title:title, creator:'Batten' });
       host=document.createElement('div'); host.style.cssText='position:fixed;left:-10000px;top:0;width:420mm;height:297mm;overflow:hidden;';
       document.body.appendChild(host);
-      var chain=Promise.resolve();
-      idx.forEach(function(i,n){ chain=chain.then(function(){
-        if(n) doc.addPage([420,297],'landscape');
-        host.innerHTML=out.svgs[i];
-        return window.svg2pdf.svg2pdf(host.querySelector('svg'), doc, { x:0, y:0, width:420, height:297 });
-      }); });
-      return chain.then(function(){ doc.save(title+'.pdf'); done(); });
+      var pages=idx.map(function(i){ return out.svgs[i]; }), threeD=null;
+      var extra = which[0]===0 && can3d_() ? (btn && (btn.textContent='Making 3D views…'), make3dPage_().catch(function(e){ threeD=(e&&e.message)||String(e); return null; })) : Promise.resolve(null);
+      return extra.then(function(svg3){
+        if(svg3) pages.push(svg3);
+        if(btn) btn.textContent='Making PDF…';
+        var chain=Promise.resolve();
+        pages.forEach(function(svg,n){ chain=chain.then(function(){
+          if(n) doc.addPage([420,297],'landscape');
+          host.innerHTML=svg;
+          return window.svg2pdf.svg2pdf(host.querySelector('svg'), doc, { x:0, y:0, width:420, height:297 });
+        }); });
+        return chain.then(function(){ doc.save(title+'.pdf'); done(); if(threeD) designStatus_('PDF saved without the 3D page: '+threeD+' (this browser may not have 3D graphics switched on).', 'error'); });
+      });
     }).catch(function(e){ done(); alert('Can\'t make the PDF: '+((e&&e.message)||e)); });
   }
   function newDesignRevision_(){

@@ -485,7 +485,7 @@
 
   // ---------------------------------------------------------------- the sheet -------------
   var PAGE_W = 420, PAGE_H = 297, M = 10, TB_X = 328, BAND_Y = 232;
-  function frame(s, sheetNo, sheetCount, stamp, stampColor) {
+  function frame(s, sheetNo, sheetCount, stamp, stampColor, sheetText) {
     var out = rect(M, M, PAGE_W - 2 * M, PAGE_H - 2 * M, 0.6) + line(TB_X, M, TB_X, PAGE_H - M, 0.5);
     var x = TB_X + 4, w = PAGE_W - M - TB_X - 8, y = M + 4;
     if (LOGO) out += '<image href="' + LOGO + '" x="' + x + '" y="' + y + '" width="' + w + '" height="' + n2(w * 420 / 2400) + '" preserveAspectRatio="xMidYMid meet"/>';
@@ -496,7 +496,7 @@
     y += 13;
     var rows = [['JOB NO', s.job], ['PRODUCT', s.product], ['CLIENT', s.client], ['PROJECT', s.project], ['QUANTITY', s.quantity],
       ['DRAWN', s.drawnBy], ['CHECKED', s.checkedBy], ['DATE', (s.revisions[s.revisions.length - 1] || {}).date || ''], ['SCALE', SCALE + ' at A3'],
-      ['SHEET', sheetNo + ' of ' + sheetCount], ['REVISION', (s.revisions[s.revisions.length - 1] || {}).rev || '']];
+      ['SHEET', sheetText || (sheetNo + ' of ' + sheetCount)], ['REVISION', (s.revisions[s.revisions.length - 1] || {}).rev || '']];
     rows.forEach(function (r) {
       if (r[0] === 'JOB NO' && !String(r[1] || '').trim()) { out += text(x, y + 3.2, r[0], 2, { fill: '#666' }) + text(x + 20, y + 3.2, 'Given when saved', 2.3, { fill: '#999' }) + line(x, y + 5, x + w, y + 5, 0.12); y += 5.6; return; }
       out += text(x, y + 3.2, r[0], 2, { fill: '#666' }) + text(x + 20, y + 3.2, r[1], 2.6, { weight: r[0] === 'JOB NO' || r[0] === 'PRODUCT' ? 'bold' : 'normal' });
@@ -513,7 +513,7 @@
     var jb = PAGE_H - M - 4 - 16, job = String(s.job || '').trim();        // job number, large, at the foot of the title block
     out += rect(x, jb, w, 16, 0.4, '#fff') + text(x + 2.5, jb + 4.2, 'JOB NO', 2.1, { fill: '#666' }) +
       text(x + w / 2, jb + 12.6, job || 'Given when saved', job ? 8 : 3.6, { anchor: 'middle', weight: job ? 'bold' : 'normal', fill: job ? '#111' : '#999', spacing: job ? '0.6' : null }) +
-      text(x + w - 2.5, jb + 4.2, 'SHEET ' + sheetNo + ' / ' + sheetCount, 2.1, { anchor: 'end', fill: '#666' });
+      text(x + w - 2.5, jb + 4.2, sheetText ? sheetText.toUpperCase() : 'SHEET ' + sheetNo + ' / ' + sheetCount, 2.1, { anchor: 'end', fill: '#666' });
     return { svg: out, y: y + 5, x: x, w: w };
   }
   function table(x, y, cols, rows, opts) {
@@ -2614,6 +2614,23 @@
   Object.keys(FAMILIES).forEach(function (k) {
     TEMPLATES[k] = { build: function (s) { return buildParts(expandFamily(s)); }, clientViews: function (s, m) { return TEMPLATES.parts.clientViews(s, m); }, workshopViews: function (s, m) { return TEMPLATES.parts.workshopViews(s, m); } };
   });
+  // the client's 3D page (Shane, 28 Nov 2026): rendered views from batten-render.js, the finishes shown
+  // and how the colours were taken. r = { views: [{ title, img }], missing: [colour names without a swatch] }
+  function renderSheet(spec, m, r) {
+    LOGO = LOGO || '';
+    SCALE = m.scale;
+    var f = frame(spec, 1, m.sheetCount || 2, '3D VIEWS · FOR CLIENT APPROVAL', '#2f5d6b', '1 (3D views)'), out = f.svg;
+    var v = r.views || [];
+    if (v[0]) out += '<image href="' + v[0].img + '" x="19" y="20" width="300" height="150" preserveAspectRatio="xMidYMid slice"/>' + rect(19, 20, 300, 150, 0.2) + viewTitle(19, 180, 1, v[0].title.toUpperCase(), 'not to scale');
+    if (v[1]) out += '<image href="' + v[1].img + '" x="19" y="192" width="150" height="75" preserveAspectRatio="xMidYMid slice"/>' + rect(19, 192, 150, 75, 0.2) + viewTitle(19, 277, 2, v[1].title.toUpperCase(), 'not to scale');
+    var x = 182, y = 197;
+    out += text(x, y, 'FINISHES SHOWN', 2.6, { weight: 'bold' });
+    out += table(x, y + 5, [{ title: 'REF', w: 9 }, { title: 'MATERIAL', w: 52 }, { title: 'COLOUR', w: 76 }], (m.materials || []).map(function (x2) { return [x2.code, x2.material, x2.colour || 'natural / to confirm']; }), { boldFirst: true, size: 2.1, rowH: 3.6 });
+    var ny = y + 9 + 3.6 * ((m.materials || []).length + 1) + 3;
+    out += wrap('Wood colours are taken from the makers\' own swatches on oak (Jax Oleum colour chart, Rubio Monocoat Oil Plus 2C on white oak). Real wood varies with the species, the boards and the batch: approve the colour on a sample. Sizes, shapes and hardware are as on the drawing.', x, ny, 138, 2);
+    if (r.missing && r.missing.length) out += wrap('No swatch yet for: ' + r.missing.join(', ') + ' (shown as plain oiled oak).', x, ny + 14, 138, 2);
+    return svgDoc(out);
+  }
   function sheets(spec, opts) {
     LOGO = (opts && opts.logo) || '';
     var tpl = TEMPLATES[spec.template];
@@ -2627,6 +2644,6 @@
     return { model: m, svgs: svgs };
   }
 
-  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, buildParts: buildParts, matThick: matThick, expandFamily: expandFamily, families: Object.keys(FAMILIES), sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
+  var api = { buildCarcass: buildCarcass, buildPedestal: buildPedestal, buildTable: buildTable, buildMirror: buildMirror, buildDesk: buildDesk, buildChair: buildChair, buildFreeform: buildFreeform, buildParts: buildParts, renderSheet: function (spec, m, r, opts) { LOGO = (opts && opts.logo) || ''; return renderSheet(spec, m, r); }, matThick: matThick, expandFamily: expandFamily, families: Object.keys(FAMILIES), sheets: sheets, split: split, templates: Object.keys(TEMPLATES) };
   if (typeof module !== 'undefined' && module.exports) module.exports = api; else root.BattenDrawings = api;
 })(this);
