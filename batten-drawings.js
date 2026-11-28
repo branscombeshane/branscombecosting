@@ -1838,12 +1838,16 @@
       var pts = [], lo = [x0, y0, z0], hi = [x1, y1, z1], rl = [rnd.x0, rnd.y0, rnd.z0], rh2 = [rnd.x1, rnd.y1, rnd.z1];
       for (var a = 0; a <= 8; a++) for (var b = 0; b < 16; b++) {
         var th = Math.PI * a / 8, ph = 2 * Math.PI * b / 16, d = [Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph)], q = [];
-        for (var i = 0; i < 3; i++) q.push(d[i] < 0 ? (rl[i] ? lo[i] + r + r * d[i] : lo[i]) : (rh2[i] ? hi[i] - r + r * d[i] : hi[i]));
+        var flat = [0, 1, 2].map(function (i) { return d[i] < 0 ? !rl[i] : !rh2[i]; }), e = d.map(function (v, i) { return flat[i] ? 0 : v; }), len = Math.hypot(e[0], e[1], e[2]) || 1;
+        for (var i = 0; i < 3; i++) q.push(flat[i] ? (d[i] < 0 ? lo[i] : hi[i]) : d[i] < 0 ? lo[i] + r + r * e[i] / len : hi[i] - r + r * e[i] / len);
         pts.push(P(q[0], q[1], q[2]));
       }
       var ti = rnd.x0 ? r : 0, tj = rnd.x1 ? r : 0, tk = rnd.z0 ? r : 0, tl = rnd.z1 ? r : 0;
       var top = [[x0 + ti, z0 + tk], [x1 - tj, z0 + tk], [x1 - tj, z1 - tl], [x0 + ti, z1 - tl]].map(function (p) { return P(p[0], y1, p[1]); });
-      return poly2(hull(pts), FABRIC_D, 0.3) + '<path d="M' + top.map(function (q) { return n2(q[0]) + ',' + n2(q[1]); }).join(' L') + ' Z" fill="' + FABRIC + '" stroke="none"/>';
+      var yf = rnd.y1 ? y1 - r : y1, fy0 = rnd.y0 ? y0 + r : y0;
+      var front = [[x0 + ti, fy0], [x1 - tj, fy0], [x1 - tj, yf], [x0 + ti, yf]].map(function (p) { return P(p[0], p[1], z1); });
+      function patch(q, fill) { return '<path d="M' + q.map(function (v) { return n2(v[0]) + ',' + n2(v[1]); }).join(' L') + ' Z" fill="' + fill + '" stroke="none"/>'; }
+      return poly2(hull(pts), FABRIC_D, 0.3) + patch(front, FABRIC) + patch(top, '#ced6b0');
     }
     // the band's right-hand corner (it wraps round in front of the back cushion's right side)
     var ri = m.R - t, rc = [];
@@ -1853,7 +1857,16 @@
     function bandPart(x0, x1, z0, z1) { return [[x0, z0], [x1, z0], [x1, z1], [x0, z1]]; }
     var backBand = outer.slice(1, outer.length - 1).concat(inner.slice(1, inner.length - 1));
     out += prism(backBand, a0, m.aTop, '#a5835a', '#c4a378');                                                       // band round the back
-    out += box(0, L, 0, lh, 0, L, '#a5835a') + box(m.W - L, m.W, 0, lh, 0, L, '#a5835a');                             // back legs
+    var rake = s.legs.rake || 0, foot = s.legs.foot || L, bTop = m.bTop || L;
+    function qb(p0, p1, p2, u) { return (1 - u) * (1 - u) * p0 + 2 * u * (1 - u) * p1 + u * u * p2; }
+    function sabre(x0, x1) {                                          // same curves as the side view
+      var fr = [], bk = [], o = '';
+      for (var i = 0; i <= 12; i++) { var u = i / 12, y = qb(lh, 0.4 * lh, 0, u); fr.push([qb(bTop, bTop, -rake + foot, u), y]); bk.push([qb(0, 0, -rake, u), y]); }
+      o += face(fr.map(function (p) { return P(x0, p[1], p[0]); }).concat(fr.slice().reverse().map(function (p) { return P(x1, p[1], p[0]); })), '#c4a378');
+      o += face(fr.concat(bk.slice().reverse()).map(function (p) { return P(x1, p[1], p[0]); }), '#a5835a');
+      return o;
+    }
+    out += sabre(0, L) + sabre(m.W - L, m.W);                                                                           // back legs (sabre)
     out += prism(bandPart(-t, 0, m.R - t, m.aF - m.ah), a0, m.aTop, '#a5835a', '#c4a378') + box(-t, 0, rail, m.aTop, m.aF - m.ah, m.aF, '#a5835a', '#c4a378');   // left arm + post (to the top)
     out += box(L, m.W - L, rail, lh, 0, m.rt, '#c4a378') + box(0, L, rail, lh, L, m.D - L, '#c4a378');                // back + left seat rails
     var rb = Math.min(m.bt / 2, ri);
