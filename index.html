@@ -1153,6 +1153,8 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<!-- svg2pdf.js 2.9.0 (MIT, github.com/yWorks/svg2pdf.js): turns the design sheets into vector PDF pages -->
+<script src="svg2pdf.umd.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -1237,7 +1239,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-28.30';
+  var BATTEN_VERSION = '2026-11-28.31';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -9004,15 +9006,29 @@
       msg.innerHTML='<div class="status-msg error">Can\'t draw this yet: '+esc((e&&e.message)||e)+'</div>';
     });
   }
+  // Client PDF / Workshop PDF: an A3 vector PDF made in the page and downloaded (Shane, 28 Nov:
+  // download, not print). Workshop = every sheet after the client one (a long cutting list adds a 3rd).
   function printDesign_(which){
+    var btn=document.getElementById(which[0]===0?'dsg-pdf-client':'dsg-pdf-workshop'), label=btn?btn.textContent:'';
+    if(!window.jspdf || !window.jspdf.jsPDF || !window.svg2pdf || !window.svg2pdf.svg2pdf){ alert('The PDF maker didn\'t load — refresh the page and try again.'); return; }
+    if(btn){ btn.disabled=true; btn.textContent='Making PDF…'; }
+    var host=null;
+    function done(){ if(btn){ btn.disabled=false; btn.textContent=label; } if(host && host.parentNode) host.parentNode.removeChild(host); }
     designSheets_().then(function(out){
-      var s=design_.spec, title=(s.job||'Design')+' - '+(s.product||'')+(which[0]===0?' - client':' - workshop');
-      var w=window.open('', '_blank');
-      if(!w){ alert('Allow pop-ups for this site to download the PDF.'); return; }
-      w.document.write('<!doctype html><html><head><title>'+esc(title)+'</title><style>@page{size:420mm 297mm;margin:0}html,body{margin:0}svg{display:block;width:420mm;height:297mm;page-break-after:always}</style></head><body>'+
-        (which[0]===1 ? out.svgs.slice(1) : which.map(function(i){ return out.svgs[i]; })).join('')+'<script>window.onload=function(){setTimeout(function(){window.print();},300);};<\/script></body></html>');
-      w.document.close();
-    }).catch(function(e){ alert('Can\'t draw this yet: '+((e&&e.message)||e)); });
+      var s=design_.spec, title=((s.job||'Design')+' - '+(s.product||'')+(which[0]===0?' - client':' - workshop')).replace(/[\\/:*?"<>|]+/g,'-');
+      var idx = which[0]===0 ? [0] : out.svgs.map(function(x,i){ return i; }).slice(1);
+      var doc=new window.jspdf.jsPDF({ unit:'mm', format:[420,297], orientation:'landscape' });
+      doc.setProperties({ title:title, creator:'Batten' });
+      host=document.createElement('div'); host.style.cssText='position:fixed;left:-10000px;top:0;width:420mm;height:297mm;overflow:hidden;';
+      document.body.appendChild(host);
+      var chain=Promise.resolve();
+      idx.forEach(function(i,n){ chain=chain.then(function(){
+        if(n) doc.addPage([420,297],'landscape');
+        host.innerHTML=out.svgs[i];
+        return window.svg2pdf.svg2pdf(host.querySelector('svg'), doc, { x:0, y:0, width:420, height:297 });
+      }); });
+      return chain.then(function(){ doc.save(title+'.pdf'); done(); });
+    }).catch(function(e){ done(); alert('Can\'t make the PDF: '+((e&&e.message)||e)); });
   }
   function newDesignRevision_(){
     var s=design_.spec, revs=s.revisions||[], last=(revs[revs.length-1]||{}).rev||'@';
