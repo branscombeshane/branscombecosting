@@ -1239,7 +1239,7 @@
   // (never from cache) every 5 minutes and whenever the tab comes back into view; if the
   // version there differs, a bar offers a one-tap reload, so nobody keeps working on an
   // old copy a phone or browser held on to.
-  var BATTEN_VERSION = '2026-11-28.32';
+  var BATTEN_VERSION = '2026-11-28.33';
   function checkForNewVersion_(){
     if(!/^https?:/.test(location.protocol)) return;
     fetch(location.pathname + '?v=' + Date.now(), { cache:'no-store' }).then(function(r){ return r.ok ? r.text() : ''; }).then(function(t){
@@ -8759,7 +8759,7 @@
       '<div class="dsg-split"><div class="dsg-form" id="dsg-form"></div><div class="dsg-preview"><div id="dsg-preview-msg"></div><div id="dsg-sheets"></div></div></div>';
     host.innerHTML = html;
     var form='';
-    form += '<div class="dsg-sec"><h3>Job</h3>'+DESIGN_JOB_FIELDS_.map(function(f){ var h=fieldHtml_(f[0], f[1], f[2], getPath_(s,f[0])); return f[0]==='job' ? h.replace('<input ', '<input placeholder="Given when you save" ') : h; }).join('')+'</div>';
+    form += '<div class="dsg-sec"><h3>Job</h3>'+DESIGN_JOB_FIELDS_.map(function(f){ var h=fieldHtml_(f[0], f[1], f[2], getPath_(s,f[0])); return f[0]==='job' ? h.replace('<input ', '<input readonly class="dsg-from-mat" title="Given by Batten when the design is first saved; it never changes" placeholder="Given when you save" ') : h; }).join('')+'</div>';
     t.sections.forEach(function(sec){
       if(sec.show && !sec.show(s)) return;
       form += '<div class="dsg-sec"><h3>'+esc(sec.title)+'</h3>';
@@ -9060,7 +9060,7 @@
     }).then(function(d){
       if(btn){ btn.disabled=false; btn.textContent='Save'; }
       if(d && !d.error){
-        if(d.spec && d.spec.job && !design_.spec.job) design_.spec.job=d.spec.job;     // the job number the server gave it
+        if(d.spec && d.spec.job) design_.spec.job=d.spec.job;     // the job number is the server's
         design_.isNew=false; design_.updatedAt=d.updatedAt; design_.updatedBy=d.updatedBy; designDirty_=false;
         if(after) after(); else { renderDesignEditor_(); designStatus_('Saved.'); }
         return true;
