@@ -1525,7 +1525,7 @@
     var M = CNC_MARGIN;
     part('Seat base (CNC blank)', 1, Math.max(st.frontWidth, st.backWidth) + M, st.depth + M, up.base.thickness, up.base, 'CNC to the seat outline (+' + M + ' to clamp)');
     part('Back base (CNC blank)', 1, bk.width + M, bk.height + M, up.base.thickness, up.base, 'CNC oval ' + bk.width + ' x ' + bk.height + ' (+' + M + ' to clamp)');
-    var foamT = up.foam.thickness;
+    foamSync_(up); var foamT = Number(up.foam.thickness);
     parts.push({ name: 'Seat foam', qty: 1, length: Math.max(st.frontWidth, st.backWidth), width: st.depth, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: 'cut to the seat outline' });
     parts.push({ name: 'Back foam', qty: 1, length: bk.width, width: bk.height, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: 'cut to the oval' });
     var fabSeat = (seatA + seatP * (st.thickness + 2 * wrap)) * waste, fabBack = (2 * backA + backP * (bk.thickness + 2 * wrap)) * waste;
@@ -1691,6 +1691,8 @@
   // a front post under each arm end runs down to the seat rail.
   // Plan coordinates: x across (0..W = outside of the legs), z from the back of the legs (0) to
   // the front (D); the band sits at x -t..0 / W..W+t and z -t..0.
+  // upholstery foam comes in 50-180 mm; a plain "<n>mm Foam" name follows the chosen thickness
+  function foamSync_(up) { var f = up.foam; f.thickness = Number(f.thickness) || 60; if (!f.material || /^\d+\s*mm Foam$/i.test(f.material)) f.material = f.thickness + 'mm Foam'; }
   function buildArmChair(s) {
     var W = s.width, D = s.depth, H = s.height, lg = s.legs, rl = s.rails, ar = s.arms, st = s.seat, bk = s.back, up = s.upholstery;
     var L = lg.size, lh = lg.height, rh = rl.height, rt = rl.thickness, at = ar.thickness, ah = ar.railHeight, aTop = ar.top, R = ar.cornerRadius == null ? 60 : ar.cornerRadius;
@@ -1706,12 +1708,14 @@
     part('Back leg (blank)', 2, lh + 20, blankW, L, lg, 'sabre: ' + bTop + ' at the seat curving back ' + (lg.rake || 0) + ' to ' + (lg.foot || L) + ' at the floor; band-saw from the blank');
     part('Seat rail, front/back', 2, W - 2 * L, rh, rt, rl, 'between the legs, top flush with the legs' + (rt === L ? ', faces flush' : '') + '; + tenons');
     part('Seat rail, side', 2, D - 2 * L, rh, rt, rl, 'between the front and back legs; + tenons');
-    var sideLen = D + at - R, backLen = W + 2 * at - 2 * R, bow = ar.backBow == null ? 10 : ar.backBow;
+    var setBack = Number(ar.setBack) || 0, aF = D - setBack;
+    if (setBack < 0 || aF - ah < R) throw new Error('The arm set back must be between 0 and ' + Math.max(0, D - R - ah) + ' (the post must stay in front of the back corner)');
+    var sideLen = aF + at - R, backLen = W + 2 * at - 2 * R, bow = ar.backBow == null ? 10 : ar.backBow;
     part('Arm band, side', 2, sideLen, ah, at, ar, 'front of the arm back to the corner; top at ' + aTop + ' from the floor');
     part('Arm band, back (blank)', 1, backLen, ah, Math.ceil((at + bow + 5) / 5) * 5, ar, 'curved in plan, bowing out ' + bow + ' between the corners; ' + at + ' finished, behind the upholstered back');
     part('Arm band corner (block)', 2, R + 20, R + 20, ah, ar, 'cut from solid blocks, glued up, then shaped: R' + R + ' outside, ' + at + ' wall');
-    part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, 'joined to the bottom frame (seat rail) and the arm band');
-    var M = CNC_MARGIN, bb = up.base, foamT = up.foam.thickness;
+    part('Arm front post', 2, aTop - ah - (lh - rh), ah, at, ar, (setBack ? 'front ' + setBack + ' back from the front of the front leg; ' : 'flush with the front of the front leg; ') + 'joined to the bottom frame (seat rail) and the arm band');
+    var M = CNC_MARGIN, bb = up.base; foamSync_(up); var foamT = Number(up.foam.thickness);
     part('Seat base (blank)', 1, W + M, D - bt + M, bb.thickness, bb, 'cut to ' + W + ' x ' + (D - bt));
     part('Back frame (CNC blank)', 1, W + M, H - lh + M, bb.thickness, bb, 'CNC to ' + W + ' x ' + (H - lh) + ', sits on the bottom frame, fixed to the back band');
     parts.push({ name: 'Seat foam', qty: 1, length: W, width: D - bt, thickness: foamT, code: up.foam.code, material: up.foam.material, edge: '', edgeLen: 0, note: '' });
@@ -1724,23 +1728,24 @@
     totals.sort(function (a, b) { return a.code < b.code ? -1 : 1; });
     var den = pickScale(function (k) { return H * k <= 130 && (2 * (W + 2 * at) + D + at) * k + 100 <= 294; });
     return { arm: true, scale: '1:' + den, k: 1 / den, materials: materialsOf([lg, rl, ar, bb, up.foam, up.fabric]), W: W, D: D, H: H, L: L, lh: lh, rh: rh, rt: rt, at: at, ah: ah, aTop: aTop, R: R,
-      bTop: bTop, bow: bow, seatTop: seatTop, bt: bt, fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals,
+      bTop: bTop, bow: bow, aF: aF, setBack: setBack, seatTop: seatTop, bt: bt, fabSeat: fabSeat, fabBack: fabBack, parts: parts, hardware: [], totals: totals,
       overall: { width: W + 2 * at, depth: D + at, height: H } };
   }
   // the arm band in plan: outer and inner outline (x across, z from the back of the legs)
   function armBand(m, steps) {
     var W = m.W, D = m.D, t = m.at, R = m.R, ri = R - t, N = steps || 10, outer = [], inner = [], bow = m.bow || 0, BN = 12;
     function bowAt(x) { var u = (x - (-t + R)) / ((W + t - R) - (-t + R)); return bow * 4 * u * (1 - u); }   // the back bows out between the corners
-    outer.push([-t, D]);
+    var F = m.aF == null ? D : m.aF;
+    outer.push([-t, F]);
     for (var i = 0; i <= N; i++) { var a = Math.PI - Math.PI / 2 * i / N; outer.push([-t + R + R * Math.cos(a), -t + R - R * Math.sin(a)]); }
     for (var bi = 1; bi < BN; bi++) { var xb = -t + R + (W + 2 * t - 2 * R) * bi / BN; outer.push([xb, -t - bowAt(xb)]); }
     for (var j = 0; j <= N; j++) { var b = Math.PI / 2 - Math.PI / 2 * j / N; outer.push([W + t - R + R * Math.cos(b), -t + R - R * Math.sin(b)]); }
-    outer.push([W + t, D]);
-    inner.push([W, D]);
+    outer.push([W + t, F]);
+    inner.push([W, F]);
     for (var q = 0; q <= N; q++) { var c = 0 + Math.PI / 2 * q / N; inner.push([W - ri + ri * Math.cos(c), R - t - ri * Math.sin(c)]); }
     for (var bj = BN - 1; bj >= 1; bj--) { var xi = -t + R + (W + 2 * t - 2 * R) * bj / BN; inner.push([xi, -bowAt(xi)]); }
     for (var r = 0; r <= N; r++) { var e = Math.PI / 2 + Math.PI / 2 * r / N; inner.push([ri + ri * Math.cos(e), R - t - ri * Math.sin(e)]); }
-    inner.push([0, D]);
+    inner.push([0, F]);
     return outer.concat(inner);
   }
   // front view (frame only when !uph); (ox, oy) = left edge of the frame at floor level
@@ -1769,11 +1774,14 @@
     out += rect(ox + L, oy - m.lh * k, D - 2 * L, m.rh * k, 0.3, FACE);                                                              // side rail
     if (uph) {
       var sb = oy - m.lh * k;
-      out += '<path d="M' + n2(ox) + ',' + n2(sb) + ' L' + n2(ox) + ',' + n2(oy - m.H * k + bt * 0.5) + ' Q' + n2(ox) + ',' + n2(oy - m.H * k) + ' ' + n2(ox + bt * 0.5) + ',' + n2(oy - m.H * k) +
-        ' Q' + n2(ox + bt * 1.15) + ',' + n2(oy - m.H * k) + ' ' + n2(ox + bt * 1.1) + ',' + n2(oy - m.H * k + bt * 0.6) + ' Q' + n2(ox + bt * 0.7) + ',' + n2(oy - (m.seatTop + (m.H - m.seatTop) * 0.4) * k) + ' ' + n2(ox + bt) + ',' + n2(sb) + ' Z" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
+      var rT = Math.min(bt * 0.5, 4), yH = oy - m.H * k;                                                                              // flat front, rounded at the top
+      out += '<path d="M' + n2(ox) + ',' + n2(sb) + ' L' + n2(ox) + ',' + n2(yH + rT) + ' Q' + n2(ox) + ',' + n2(yH) + ' ' + n2(ox + rT) + ',' + n2(yH) +
+        ' L' + n2(ox + bt - rT) + ',' + n2(yH) + ' Q' + n2(ox + bt) + ',' + n2(yH) + ' ' + n2(ox + bt) + ',' + n2(yH + rT) + ' L' + n2(ox + bt) + ',' + n2(sb) + ' Z" fill="' + FABRIC + '" stroke="#111" stroke-width="0.35"/>';
       out += seatShape(ox + bt, oy - m.seatTop * k, D - bt, s.seat.thickness * k, Math.min(s.seat.thickness * k / 2, 3));
     }
-    out += rect(ox - at, oy - m.aTop * k, D + at, m.ah * k, 0.3, OAK) + rect(ox + D - m.ah * k, oy - m.aTop * k, m.ah * k, (m.aTop - (m.lh - m.rh)) * k, 0.3, OAK);   // arm band (side), front post
+    var aF = m.aF * k;
+    out += rect(ox - at, oy - m.aTop * k, aF + at, m.ah * k, 0.3, OAK) + rect(ox + aF - m.ah * k, oy - m.aTop * k, m.ah * k, (m.aTop - (m.lh - m.rh)) * k, 0.3, OAK);   // arm band (side), front post
+    if (m.setBack) out += hChain([ox + aF, ox + D], [m.setBack], oy - m.aTop * k - 4, oy - m.aTop * k);
     out += hChain([ox - at, ox, ox + D], [m.at, m.D], oy - m.H * k - 5, oy - m.H * k);
     out += vChain([oy - m.aTop * k, oy - (m.aTop - m.ah) * k], [m.ah], ox + D + 6, ox + D);
     out += hChain([ox - rake, ox - rake + foot, ox + D - L, ox + D], [s.legs.foot || m.L, Math.round(m.D - m.L + (s.legs.rake || 0) - (s.legs.foot || m.L)), m.L], oy + 5, oy);
@@ -1830,13 +1838,13 @@
     var backBand = outer.slice(1, outer.length - 1).concat(inner.slice(1, inner.length - 1));
     out += prism(backBand, a0, m.aTop, '#a5835a', '#c4a378');                                                       // band round the back
     out += box(0, L, 0, lh, 0, L, '#a5835a') + box(m.W - L, m.W, 0, lh, 0, L, '#a5835a');                             // back legs
-    out += prism(bandPart(-t, 0, m.R - t, m.D), a0, m.aTop, '#a5835a', '#c4a378') + box(-t, 0, rail, a0, m.D - m.ah, m.D, '#a5835a', '#c4a378');   // left arm + post
+    out += prism(bandPart(-t, 0, m.R - t, m.aF), a0, m.aTop, '#a5835a', '#c4a378') + box(-t, 0, rail, a0, m.aF - m.ah, m.aF, '#a5835a', '#c4a378');   // left arm + post
     out += box(L, m.W - L, rail, lh, 0, m.rt, '#c4a378') + box(0, L, rail, lh, L, m.D - L, '#c4a378');                // back + left seat rails
     out += box(0, m.W, lh, m.H, 0, m.bt, FABRIC_D, FABRIC);                                                           // upholstered back
     out += box(m.W - L, m.W, rail, lh, L, m.D - L, '#c4a378');                                                        // right seat rail
     out += box(0, m.W, lh, m.seatTop, m.bt, m.D, FABRIC_D, FABRIC);                                                   // seat
     out += box(0, L, 0, lh, m.D - L, m.D, '#c4a378') + box(L, m.W - L, rail, lh, m.D - m.rt, m.D, '#c4a378') + box(m.W - L, m.W, 0, lh, m.D - L, m.D, '#c4a378');   // front legs + rail
-    out += prism(bandPart(m.W, m.W + t, m.R - t, m.D), a0, m.aTop, '#b8956a', '#d6b88f') + box(m.W, m.W + t, rail, a0, m.D - m.ah, m.D, '#b8956a', '#d6b88f');   // right arm + post
+    out += prism(bandPart(m.W, m.W + t, m.R - t, m.aF), a0, m.aTop, '#b8956a', '#d6b88f') + box(m.W, m.W + t, rail, a0, m.aF - m.ah, m.aF, '#b8956a', '#d6b88f');   // right arm + post
     var tS = P(m.W / 2, m.seatTop, (m.bt + m.D) / 2), tA = P(m.W + t / 2, m.aTop, m.D * 0.6), tL = P(m.W - L / 2, lh * 0.4, m.D);
     out += tag(tS[0], tS[1], s.upholstery.fabric.code) + tag(tA[0] + 5, tA[1] - 2, s.arms.code) + tag(tL[0] + 5, tL[1], s.legs.code);
     return out;
